@@ -1,1 +1,1 @@
-# golib-encodebinary
+# go-binarystruct

@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	ErrInvalidType = fmt.Errorf("invalid type")
+//ErrInvalidType = fmt.Errorf("invalid type")
 )
 
 func Write(w io.Writer, order ByteOrder, data interface{}) (err error) {
@@ -37,11 +37,11 @@ func write(w io.Writer, order ByteOrder, v reflect.Value) (err error) {
 	return ErrInvalidType
 }
 
-func writeSingle(w io.Writer, order ByteOrder, v reflect.Value, k Kind) (n int, err error) {
+func writeSingle(w io.Writer, order ByteOrder, v reflect.Value, k Type) (n int, err error) {
 	sz := k.ByteSize()
 	if sz <= 0 {
 		// String kind or invalid kind
-		err = ErrInvalidKind
+		err = ErrInvalidType
 		return
 	}
 
@@ -108,7 +108,7 @@ var (
 )
 
 //func parseType(field reflect.StructField) {
-func parseStructField(t reflect.Type, v reflect.Value, i int) (kind Kind, isArray bool, arraySize int, err error) {
+func parseStructField(t reflect.Type, v reflect.Value, i int) (kind Type, isArray bool, arraySize int, err error) {
 
 	field := t.Field(i)
 
@@ -142,7 +142,7 @@ func parseStructField(t reflect.Type, v reflect.Value, i int) (kind Kind, isArra
 	m := mTag.FindStringSubmatch(tags[0])
 	typeTag := m[3]
 	if typeTag != "" {
-		kind = GetKind(typeTag)
+		kind = GetType(typeTag)
 	}
 	isArray = m[1] != ""
 	arraySizeTag := m[2]

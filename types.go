@@ -31,20 +31,18 @@ const (
 	Uint64
 	Float32
 	Float64
-	Byte      // byte (uint8)
-	Word      // word (uint16)
-	Dword     // double word (uint32)
-	Qword     // quad word (uint16)
-	Bstring   // {size Uint8, string [size]byte}
-	Wstring   // {size Uint16, string [size]byte}
-	Dwstring  // {size Uint32, string [size]byte}
-	Zstring   // zero-terminated string
-	Bzstring  // Bstring but zero-terminated
-	Wzstring  // Wstring but zero-terminated
-	Dwzstring // Dwstring but zero-terminated
-	Zero      // zero bytes
-	Struct    // a struct
-	Any       // any type
+	Byte     // byte (uint8)
+	Word     // word (uint16)
+	Dword    // double word (uint32)
+	Qword    // quad word (uint16)
+	String   // [size]byte
+	Bstring  // {size Uint8, string [size]byte}
+	Wstring  // {size Uint16, string [size]byte}
+	Dwstring // {size Uint32, string [size]byte}
+	Zero     // zero bytes
+	Struct   // a struct
+	Any      // any type
+	Ignore   // do not write or read
 )
 
 var ErrInvalidType = fmt.Errorf("invalid type")
@@ -76,13 +74,21 @@ func (t Type) iKind() iKind {
 }
 
 type typeOption struct {
-	isArray  bool
-	arrayLen int
-	encoding string
+	indirectCount int    // if nonzero, original type is pointer and this value cotains the number of indirections
+	isArray       bool   // tagged type is "[arrayLen]TYPE"
+	arrayLen      int    // length of tagged arrayLen
+	bufLen        int    // tagged type is "STRINGTYPE(buflen)"
+	encoding      string // tag has "encoding=ENC"
 }
 
 func getNaturalType(v reflect.Value) (t Type, option typeOption) {
 	kind := v.Kind()
+
+	for kind == reflect.Ptr || kind == reflect.Interface {
+		v = v.Elem()
+		kind = v.Kind()
+		option.indirectCount++
+	}
 
 	switch kind {
 
@@ -133,7 +139,7 @@ func getNaturalType(v reflect.Value) (t Type, option typeOption) {
 
 	// non-scalar types
 	case reflect.String:
-		t = Wstring
+		t = String
 		return
 	case reflect.Struct:
 		t = Struct
@@ -151,11 +157,6 @@ func getNaturalType(v reflect.Value) (t Type, option typeOption) {
 		option.arrayLen = v.Len()
 		t, _ = getNaturalType(reflect.New(elem).Elem())
 		return
-
-	// indirect
-	case reflect.Interface, reflect.Ptr:
-		e := v.Elem()
-		return getNaturalType(e)
 
 		//default:
 		//case reflect.Complex64, reflect.Complex128:
@@ -445,9 +446,10 @@ const (
 
 var (
 	// internal reflect types
-	i64type = reflect.TypeOf(int64(0))
-	f32type = reflect.TypeOf(float32(0.0))
-	f64type = reflect.TypeOf(float64(0.0))
+	i64type       = reflect.TypeOf(int64(0))
+	f32type       = reflect.TypeOf(float32(0.0))
+	f64type       = reflect.TypeOf(float64(0.0))
+	byteSliceType = reflect.TypeOf(make([]byte, 0))
 
 	// constants converted to to 64-bit images
 	minInt8  = int64(math.MinInt8)
@@ -473,25 +475,24 @@ var (
 		Uint32: {uintKind, 4, 0, math.MaxUint32},
 		Uint64: {uintKind, 8, 0, math.MaxUint64},
 
-		Float32: {floatKind, 2, 0, 0},
-		Float64: {floatKind, 4, 0, 0},
+		Float32: {floatKind, 4, 0, 0},
+		Float64: {floatKind, 8, 0, 0},
 
 		Byte:  {uintKind, 1, 0, math.MaxUint8},
 		Word:  {uintKind, 2, 0, math.MaxUint16},
 		Dword: {uintKind, 4, 0, math.MaxUint32},
 		Qword: {uintKind, 8, 0, math.MaxUint64},
 
-		Zstring:  {stringKind, 0, 0, 0},
+		String:   {stringKind, 0, 0, 0},
 		Bstring:  {stringKind, 0, 0, 0},
 		Wstring:  {stringKind, 0, 0, 0},
 		Dwstring: {stringKind, 0, 0, 0},
 
-		Bzstring:  {stringKind, 0, 0, 0},
-		Wzstring:  {stringKind, 0, 0, 0},
-		Dwzstring: {stringKind, 0, 0, 0},
-
-		Any:    {anyKind, 0, 0, 0},
+		Zero:   {uintKind, 0, 0, 0},
 		Struct: {structKind, 0, 0, 0},
+		Any:    {anyKind, 0, 0, 0},
+
+		Ignore: {anyKind, 0, 0, 0},
 	}
 
 	typeMap     = make(map[string]Type)
@@ -513,16 +514,14 @@ var (
 		{"Word", Word},
 		{"Dword", Dword},
 		{"Qword", Qword},
-		{"Zstring", Zstring},
+		{"String", String},
 		{"Bstring", Bstring},
 		{"Wstring", Wstring},
 		{"DWString", Dwstring},
-		{"BZString", Bstring},
-		{"WZString", Wstring},
-		{"DWZString", Dwstring},
 		{"Zero", Zero},
 		{"Struct", Struct},
 		{"Any", Any},
+		{"Ignore", Ignore},
 	}
 )
 

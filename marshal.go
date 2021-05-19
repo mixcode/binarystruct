@@ -5,11 +5,7 @@ import (
 	"io"
 	"math"
 	"reflect"
-	"regexp"
-)
-
-var (
-	mTag = regexp.MustCompile(`^\s*(\[([^\]]+)\])?([^\s]*)`)
+	"strings"
 )
 
 // write a value to writer w. returns
@@ -17,7 +13,7 @@ func Write(w io.Writer, order ByteOrder, data interface{}) (n int, err error) {
 	return writeValue(w, order, reflect.ValueOf(data))
 }
 
-// write a value
+// write a reflect.Value
 func writeValue(w io.Writer, order ByteOrder, v reflect.Value) (n int, err error) {
 	t := v.Type()
 	k := t.Kind()
@@ -34,6 +30,13 @@ func writeValue(w io.Writer, order ByteOrder, v reflect.Value) (n int, err error
 // write a value as given type
 func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, option typeOption) (n int, err error) {
 
+	// type was a pointer or an interface
+	if option.indirectCount > 0 {
+		for i := 0; i < option.indirectCount; i++ {
+			v = v.Elem()
+		}
+	}
+
 	if option.isArray {
 		// write the array
 		if option.arrayLen == 0 {
@@ -42,16 +45,30 @@ func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, o
 		return writeArray(w, order, v, encodeType, option)
 	}
 
-	if encodeType == Struct {
+	// based on individual type
+	switch encodeType {
+
+	case Struct:
 		return writeStruct(w, order, v)
+
+	case Zero: // zero bytes: `binary:"zero(10)"`
+		l := option.bufLen
+		if l == 0 {
+			l = 1
+		}
+		zeroFill(w, l)
+		return l, nil
+
+	case Ignore: // ignoring value: `binary:"ignore"`
+		return 0, nil
+
+	case Invalid:
+		err = ErrInvalidType
+		return
 	}
 
-	if encodeType == Zstring {
-		return writeZeroTerminatedString(w, v, option.arrayLen, option.encoding)
-	}
-
-	encodeKind := encodeType.iKind()
-	switch encodeKind {
+	// based on kind group
+	switch encodeType.iKind() {
 
 	case intKind, uintKind, floatKind:
 		return writeScalar(w, order, v, encodeType)
@@ -60,9 +77,10 @@ func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, o
 		return writeStruct(w, order, v)
 
 	case stringKind:
-		return writeString(w, order, v, encodeType, option.encoding)
+		return writeString(w, order, v, encodeType, option.bufLen, option.encoding)
 	}
-	err = fmt.Errorf("NOT IMPLEMENTED YET")
+
+	err = fmt.Errorf("unknown type %s", encodeType)
 	return
 }
 
@@ -82,10 +100,45 @@ func writeScalar(w io.Writer, order ByteOrder, v reflect.Value, k Type) (n int, 
 
 // write an array
 func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType Type, option typeOption) (n int, err error) {
-	l := array.Len()
+
+	arrayKind := array.Kind()
+	//
+	// Go arrays and slices are primary target of array notation.
+	//	a []int	`binary:"[10]byte"`
+	// And there is a special case for string.
+	//	s string `binary:"[10]uint16"`	// each string byte is converted to uint16
+	// An exceptional case is that the target type is string array and given value is a string.
+	//	s string `binary:"[3]zstring(0x10)"`	// s is writen as first string, and the others will be blank string
+	//
+	if arrayKind == reflect.String && elementType.iKind() != stringKind {
+		// convert string to byte slice
+		array = array.Convert(byteSliceType)
+		arrayKind = array.Kind()
+	}
+
+	arrayLen := 1
+	if arrayKind == reflect.Array || arrayKind == reflect.Slice {
+		arrayLen = array.Len()
+	}
+
+	desiredLen := option.arrayLen
+	if desiredLen <= 0 {
+		desiredLen = arrayLen
+	}
+	if desiredLen < arrayLen {
+		err = fmt.Errorf("array too large to fit: len %d, size %d", desiredLen, arrayLen)
+		return
+		// arrayLen = desiredLen
+	}
+
 	var m int
-	for i := 0; i < l; i++ {
-		e := array.Index(i)
+	for i := 0; i < arrayLen; i++ {
+		var e reflect.Value
+		if arrayKind == reflect.Array || arrayKind == reflect.Slice {
+			e = array.Index(i)
+		} else {
+			e = array
+		}
 		if elementType == Any {
 			m, err = writeValue(w, order, e)
 			if err != nil {
@@ -93,6 +146,7 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType T
 			}
 		} else {
 			var o typeOption
+			o.bufLen = option.bufLen     // option may contain inheritable values
 			o.encoding = option.encoding // option may contain inheritable values
 			m, err = writeMain(w, order, e, elementType, o)
 			if err != nil {
@@ -100,6 +154,33 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType T
 			}
 		}
 		n += m
+	}
+	if arrayLen < desiredLen {
+		// fill the leftover
+		sz := option.bufLen // element length supplied
+		if sz == 0 {
+			sz = m // m holds the byte count of last written element
+		}
+		if sz == 0 {
+			// guess byte size of the element type
+			eType := array.Elem().Type()
+			eKind := eType.Kind()
+			for eKind == reflect.Ptr {
+				eType = eType.Elem()
+				eKind = eType.Kind()
+			}
+			sz = int(eType.Size())
+		}
+
+		// total size = element size * element count
+		sz = sz * (desiredLen - arrayLen)
+
+		// write blank bytes
+		err = zeroFill(w, sz)
+		if err != nil {
+			return
+		}
+		n += sz
 	}
 	return
 }
@@ -116,6 +197,15 @@ func writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err e
 			return
 		}
 
+		if encodeType == Ignore { // `binary:"ignore"`
+			continue
+		}
+		name := typ.Field(i).Name
+		if len(name) == 0 || strings.ToUpper(name)[0] != name[0] {
+			// unexported type
+			continue
+		}
+
 		var m int
 		m, err = writeMain(w, order, strc.Field(i), encodeType, option)
 		if err != nil {
@@ -126,44 +216,48 @@ func writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err e
 	return
 }
 
-// write string types except Zstring
-func writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, encoding string) (n int, err error) {
+// write string types
+func writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, bufLen int, encoding string) (n int, err error) {
 	s := v.String()
-
-	terminateZero := false
-	if encodeType == Zstring || encodeType == Bzstring || encodeType == Wzstring || encodeType == Dwzstring {
-		terminateZero = true
-	}
 
 	var m int
 
 	//
-	// TODO: process encoding
+	// TODO: process string encoding
 	//
 
+	strlen := len(s)
+	if bufLen <= 0 {
+		bufLen = strlen
+	}
+	if bufLen < strlen {
+		err = fmt.Errorf("string too long: len %d, buffer size %d", strlen, bufLen)
+		return
+	}
+
 	// write string length
-	l := uint64(len(s))
-	maxlen, bytesz := uint64(0), 0
+	maxlen, headersz := uint64(math.MaxInt64), 0
 	switch encodeType {
-	case Bstring, Bzstring:
-		maxlen, bytesz = math.MaxUint8, 1
-	case Wstring, Wzstring:
-		maxlen, bytesz = math.MaxUint16, 2
-	case Dwstring, Dwzstring:
-		maxlen, bytesz = math.MaxUint32, 4
+	case Bstring:
+		maxlen, headersz = math.MaxUint8, 1
+	case Wstring:
+		maxlen, headersz = math.MaxUint16, 2
+	case Dwstring:
+		maxlen, headersz = math.MaxUint32, 4
 	}
-	if terminateZero {
-		l++
-	}
-	if l > maxlen {
-		err = fmt.Errorf("string too long: len %d, max %d", l, maxlen)
+	if uint64(bufLen) > maxlen {
+		err = fmt.Errorf("string too long: len %d, max %d", strlen, maxlen)
 		return
 	}
-	m, err = writeU64(w, order, l, bytesz)
-	if err != nil {
-		return
+
+	if headersz > 0 {
+		// write string size header
+		m, err = writeU64(w, order, uint64(strlen), headersz)
+		if err != nil {
+			return
+		}
+		n += m
 	}
-	n += m
 
 	// write string bytes
 	m, err = w.Write([]byte(s))
@@ -172,46 +266,15 @@ func writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type,
 	}
 	n += m
 
-	if terminateZero {
-		m, err = w.Write([]byte{0})
+	if m < bufLen {
+		// fill the leftovers
+		sz := bufLen - m
+		err = zeroFill(w, sz)
 		if err != nil {
 			return
 		}
-		n += m
+		n += sz
 	}
-	return
-}
-
-// write a zero-terminated string as [buflen]byte
-func writeZeroTerminatedString(w io.Writer, v reflect.Value, buflen int, encoding string) (n int, err error) {
-	s := v.String()
-	l := len(s)
-	if l > buflen {
-		err = fmt.Errorf("string too long: len %d, max %d", l, buflen)
-		return
-	}
-
-	//
-	// TODO: process encoding
-	//
-
-	// write string bytes
-	m, err := w.Write([]byte(s))
-	if err != nil {
-		return
-	}
-	n += m
-	// fill buffer leftover
-	j := buflen - m
-	if j == 0 {
-		return
-	}
-	blank := make([]byte, j)
-	m, err = w.Write(blank)
-	if err != nil {
-		return
-	}
-	n += m
 	return
 }
 
@@ -232,4 +295,27 @@ func writeU64(w io.Writer, order ByteOrder, u64 uint64, bytesize int) (n int, er
 		panic("invalid byte size")
 	}
 	return w.Write(b)
+}
+
+// write blank bytes
+func zeroFill(w io.Writer, sz int) (err error) {
+	maxBufSize := 16384
+	bsz := sz
+	if bsz > maxBufSize {
+		bsz = maxBufSize
+	}
+	buf := make([]byte, bsz)
+	var m int
+	for sz > 0 {
+		if sz > maxBufSize {
+			m, err = w.Write(buf)
+		} else {
+			m, err = w.Write(buf[:sz])
+		}
+		if err != nil {
+			return
+		}
+		sz -= m
+	}
+	return
 }

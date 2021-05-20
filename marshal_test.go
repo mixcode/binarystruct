@@ -3,6 +3,7 @@ package binarystruct_test
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"testing"
 
 	bst "github.com/mixcode/binarystruct"
@@ -23,38 +24,58 @@ func printHex(b []byte) {
 	}
 }
 
-func TestStruct(t *testing.T) {
+func TestStruct(test *testing.T) {
 
 	var res []byte
-	compare := func(s interface{}, desired []byte, endian bst.ByteOrder) { // compare with LittleEndian results
-		res = nil
-		var buf bytes.Buffer
-		sz, err := bst.Write(&buf, endian, s)
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		if sz != len(buf.Bytes()) {
-			t.Errorf("invalid write size")
-			return
-		}
-		res = buf.Bytes()
-		if !bytes.Equal(res, desired) {
-			t.Errorf("written data not matching")
-		}
-	}
 
-	compareLE := func(s interface{}, desired []byte) { // compare with LittleEndian results
-		compare(s, desired, bst.LittleEndian)
+	// functions to compare encoded data
+	encodeCompare := func(data interface{}, desired []byte, endian bst.ByteOrder) {
+		res = nil
+		var e error
+		res, e = bst.Marshal(data, endian)
+		if e != nil {
+			test.Error(e)
+			return
+		}
+		if !bytes.Equal(res, desired) {
+			test.Errorf("written data not matching")
+		}
 	}
-	compareBE := func(s interface{}, desired []byte) { // compare with LittleEndian results
-		compare(s, desired, bst.BigEndian)
+	encodeCompareLE := func(s interface{}, desired []byte) { // compare with LittleEndian results
+		encodeCompare(s, desired, bst.LittleEndian)
 	}
-	_, _ = compareLE, compareBE
+	encodeCompareBE := func(s interface{}, desired []byte) { // compare with BigEndian results
+		encodeCompare(s, desired, bst.BigEndian)
+	}
+	_, _ = encodeCompareLE, encodeCompareBE
+
+	// dfunctions to compare decoded data
+	decodeCompare := func(data []byte, out interface{}, endian bst.ByteOrder, compare interface{}) {
+		n, err := bst.Unmarshal(data, endian, out)
+		if err != nil {
+			test.Error(err)
+			return
+		}
+		if n != len(data) {
+			test.Errorf("invalid read size")
+			return
+		}
+
+		if !reflect.DeepEqual(compare, out) {
+			test.Errorf("decoded data is not equal")
+		}
+	}
+	decodeCompareLE := func(data []byte, out interface{}, compare interface{}) { // compare with LittleEndian results
+		decodeCompare(data, out, bst.LittleEndian, compare)
+	}
+	decodeCompareBE := func(data []byte, out interface{}, compare interface{}) { // compare with BigEndian results
+		decodeCompare(data, out, bst.BigEndian, compare)
+	}
+	_, _ = decodeCompareLE, decodeCompareBE
 
 	// scalar values
 	func() {
-		type t struct {
+		type st struct {
 			U8  uint8
 			U16 uint16
 			U32 uint32
@@ -66,8 +87,8 @@ func TestStruct(t *testing.T) {
 			F32 float32
 			F64 float64
 		}
-		in := t{1, 2, 3, 4, -1, -2, -3, -4, 0.9, 1.1}
-		out := []byte{
+		in := st{1, 2, 3, 4, -1, -2, -3, -4, 0.9, 1.1}
+		exp := []byte{
 			0x01, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04,
 			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
 			0xfe, 0xff, 0xfd, 0xff, 0xff, 0xff, 0xfc, 0xff,
@@ -75,146 +96,169 @@ func TestStruct(t *testing.T) {
 			0x66, 0x3f, 0x9a, 0x99, 0x99, 0x99, 0x99, 0x99,
 			0xf1, 0x3f,
 		}
-		compareLE(in, out)
-	}()
-
-	// scalars with type conversion
-	func() {
-		type t struct {
-			U8  int `binary:"uint8"`
-			U16 int `binary:"uint16"`
-			U32 int `binary:"uint32"`
-			U64 int `binary:"uint64"`
-			I8  int `binary:"int8"`
-			I16 int `binary:"int16"`
-			I32 int `binary:"int32"`
-			I64 int `binary:"int64"`
-			F32 int `binary:"float32"`
-			F64 int `binary:"float64"`
-		}
-		in := t{1, 2, 3, 4, -1, -2, -3, -4, 100, 200}
-		out := []byte{
-			0x01, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04,
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
-			0xfe, 0xff, 0xfd, 0xff, 0xff, 0xff, 0xfc, 0xff,
-			0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
-			0xc8, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x69, 0x40,
-		}
-		compareLE(in, out)
+		encodeCompareLE(in, exp)
+		//printHex(exp)
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// bitmap image types
 	func() {
-		type t struct {
-			U8  uint    `binary:"byte"`
-			U16 uint    `binary:"word"`
-			U32 uint    `binary:"dword"`
-			U64 uint    `binary:"qword"`
-			I8  int     `binary:"byte"`
-			I16 int     `binary:"word"`
-			I32 int     `binary:"dword"`
-			I64 int     `binary:"qword"`
-			F32 float32 `binary:"dword"`
-			F64 float64 `binary:"qword"`
+		type st struct {
+			U8   uint8   `binary:"byte"`
+			U16  uint16  `binary:"word"`
+			U32  uint32  `binary:"dword"`
+			U64  uint64  `binary:"qword"`
+			I8   int8    `binary:"byte"`
+			I16  int16   `binary:"word"`
+			I32  int32   `binary:"dword"`
+			I64  int64   `binary:"qword"`
+			IB8  int     `binary:"byte"`
+			IB16 int     `binary:"word"`
+			IB32 int     `binary:"dword"`
+			IB64 int     `binary:"qword"`
+			F32  float32 `binary:"dword"`
+			F64  float64 `binary:"qword"`
 		}
-		in := t{1, 2, 3, 4, -1, -2, -3, -4, 100., 200.}
-		out := []byte{
+		in := st{1, 2, 3, 4, -1, -2, -3, -4, -5, -6, -7, -8, 100., 200.}
+		exp := []byte{
 			0x01, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04,
 			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
 			0xfe, 0xff, 0xfd, 0xff, 0xff, 0xff, 0xfc, 0xff,
-			0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
-			0xc8, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x69, 0x40,
+			0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfb, 0xfa,
+			0xff, 0xf9, 0xff, 0xff, 0xff, 0xf8, 0xff, 0xff,
+			0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xc8,
+			0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x69,
+			0x40,
 		}
-		compareLE(in, out)
+		encodeCompareLE(in, exp)
+		correct := st{1, 2, 3, 4, -1, -2, -3, -4,
+			// Note that sign-agnostic types could be ambiguous and may not be recovered to original when mapped to a larger type
+			251, 65530, 4294967289, -8,
+			100., 200.}
+		out := st{}
+		decodeCompareLE(exp, &out, &correct)
 	}()
 
-	// slice
 	func() {
-		type t struct {
+		type st struct {
 			A []int16
 		}
-		in := t{[]int16{1, 2, 3, 4}}
-		out := []byte{0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00}
-		compareLE(in, out)
+		in := st{[]int16{1, 2, 3, 4}}
+		exp := []byte{0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00}
+		encodeCompareLE(in, exp)
+		out := struct {
+			A []int16 `binary:"[4]"` // exact size must be given for decoding
+		}{}
+		_, err := bst.Unmarshal(exp, bst.LittleEndian, &out)
+		if err != nil {
+			test.Error(err)
+			return
+		}
+		// note: in and out is not a same type and cannot be compared
+		decodeCompareLE(exp, &out.A, &in.A)
 	}()
 
-	// slice with type conversion
+	// slice with type conversion and just-fit size
 	func() {
-		type t struct {
-			A []int `binary:"[]int8"`
+		type st struct {
+			A []int `binary:"[4]int8"`
 		}
-		in := t{[]int{1, 2, 3, 4}}
-		out := []byte{0x01, 0x02, 0x03, 0x04}
-		compareLE(in, out)
+		in := st{[]int{1, 2, 3, 4}}
+		exp := []byte{0x01, 0x02, 0x03, 0x04}
+		encodeCompareLE(in, exp)
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// slice with type conversion and fixed size
 	func() {
-		type t struct {
+		type st struct {
 			A []int `binary:"[8]int8"`
 		}
-		in := t{[]int{1, 2, 3, 4}}
-		out := []byte{0x01, 0x02, 0x03, 0x04, 0, 0, 0, 0}
-		compareLE(in, out)
+		in := st{[]int{1, 2, 3, 4}}
+		exp := []byte{0x01, 0x02, 0x03, 0x04, 0, 0, 0, 0}
+		encodeCompareLE(in, exp)
+		in.A = append(in.A, []int{0, 0, 0, 0}...) // decoded slice will be 8 elements long
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// slice with explicit 'any' type
 	func() {
-		type t struct {
+		type st struct {
 			A []int8 `binary:"[8]any"`
 		}
-		in := t{[]int8{1, 2, 3, 4}}
-		out := []byte{0x01, 0x02, 0x03, 0x04, 0, 0, 0, 0}
-		compareLE(in, out)
+		in := st{[]int8{1, 2, 3, 4}}
+		exp := []byte{0x01, 0x02, 0x03, 0x04, 0, 0, 0, 0}
+		encodeCompareLE(in, exp)
+		in.A = append(in.A, []int8{0, 0, 0, 0}...) // decoded slice will be 8 elements long
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// slice with implicit 'any' type
 	func() {
-		type t struct {
+		type st struct {
 			A []int8 `binary:"[8]"`
 		}
-		in := t{[]int8{1, 2, 3, 4}}
-		out := []byte{0x01, 0x02, 0x03, 0x04, 0, 0, 0, 0}
-		compareLE(in, out)
+		in := st{[]int8{1, 2, 3, 4}}
+		exp := []byte{0x01, 0x02, 0x03, 0x04, 0, 0, 0, 0}
+		encodeCompareLE(in, exp)
+		in.A = append(in.A, []int8{0, 0, 0, 0}...) // decoded slice will be 8 elements long
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// array with type conversion
 	func() {
-		type t struct {
+		type st struct {
 			A [4]int `binary:"[]int8"`
 		}
-		in := t{[4]int{1, 2, 3, 4}}
-		out := []byte{0x01, 0x02, 0x03, 0x04}
-		compareLE(in, out)
+		in := st{[4]int{1, 2, 3, 4}}
+		exp := []byte{0x01, 0x02, 0x03, 0x04}
+		encodeCompareLE(in, exp)
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// array with type conversion and fixed size
 	func() {
-		type t struct {
+		type st struct {
 			A [4]int `binary:"[8]int8"`
 		}
-		in := t{[4]int{1, 2, 3, 4}}
-		out := []byte{0x01, 0x02, 0x03, 0x04, 0, 0, 0, 0}
-		compareLE(in, out)
+		in := st{[4]int{1, 2, 3, 4}}
+		exp := []byte{0x01, 0x02, 0x03, 0x04, 0, 0, 0, 0}
+		encodeCompareLE(in, exp)
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// zero bytes
 	func() {
-		type t struct {
+		type st struct {
 			X interface{} `binary:"zero"`
 			Y interface{} `binary:"zero(8)"`
 			Z interface{} `binary:"[4]zero"`
 		}
-		in := t{}
-		out := []byte{
+		in := st{}
+		exp := []byte{
 			0,
 			0, 0, 0, 0, 0, 0, 0, 0,
 			0, 0, 0, 0,
 		}
-		compareLE(in, out)
+		encodeCompareLE(in, exp)
+		out := st{}
+		// zero type will read no data; just skip bytes
+		sz, e := bst.Unmarshal(exp, bst.LittleEndian, &out)
+		if e != nil {
+			test.Error(e)
+		}
+		if sz != len(exp) {
+			test.Errorf("read size not match")
+		}
 	}()
+	return
 
 	// string
 	func() {
@@ -222,8 +266,8 @@ func TestStruct(t *testing.T) {
 			S string
 		}
 		in := t{"hello"}
-		out := []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f}
-		compareLE(in, out)
+		exp := []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f}
+		encodeCompareLE(in, exp)
 	}()
 
 	// string with size reference
@@ -234,8 +278,8 @@ func TestStruct(t *testing.T) {
 		}
 		s := "hello"
 		in := t{int16(len(s)), s}
-		out := []byte{0x05, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00}
-		compareLE(in, out)
+		exp := []byte{0x05, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00}
+		encodeCompareLE(in, exp)
 	}()
 
 	// string with multiple size reference including an unexported field
@@ -248,8 +292,8 @@ func TestStruct(t *testing.T) {
 		}
 		s := "hello"
 		in := t{1, int16(len(s)), s}
-		out := []byte{0x01, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00}
-		compareLE(in, out)
+		exp := []byte{0x01, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00}
+		encodeCompareLE(in, exp)
 	}()
 
 	// bstring
@@ -258,16 +302,16 @@ func TestStruct(t *testing.T) {
 			S string `binary:"bstring"`
 		}
 		in := t{"hello"}
-		out := []byte{0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f}
-		compareLE(in, out)
+		exp := []byte{0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f}
+		encodeCompareLE(in, exp)
 
 		// fixed buffer size bstring
 		type t2 struct {
 			S string `binary:"bstring(10)"`
 		}
 		in2 := t2{"hello"}
-		out2 := []byte{0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0, 0, 0, 0, 0}
-		compareLE(in2, out2)
+		exp2 := []byte{0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0, 0, 0, 0, 0}
+		encodeCompareLE(in2, exp2)
 	}()
 
 	// wstring
@@ -276,16 +320,16 @@ func TestStruct(t *testing.T) {
 			S string `binary:"wstring"`
 		}
 		in := t{"hello"}
-		out := []byte{0x05, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f}
-		compareLE(in, out)
+		exp := []byte{0x05, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f}
+		encodeCompareLE(in, exp)
 
 		// fixed buffer size wstring
 		type t2 struct {
 			S string `binary:"wstring(10)"`
 		}
 		in2 := t2{"hello"}
-		out2 := []byte{0x05, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0, 0, 0, 0, 0}
-		compareLE(in2, out2)
+		exp2 := []byte{0x05, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0, 0, 0, 0, 0}
+		encodeCompareLE(in2, exp2)
 	}()
 
 	// dwstring
@@ -294,16 +338,16 @@ func TestStruct(t *testing.T) {
 			S string `binary:"dwstring"`
 		}
 		in := t{"hello"}
-		out := []byte{0x05, 0x00, 0x00, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f}
-		compareLE(in, out)
+		exp := []byte{0x05, 0x00, 0x00, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f}
+		encodeCompareLE(in, exp)
 
 		// fixed buffer size dwstring
 		type t2 struct {
 			S string `binary:"dwstring(10)"`
 		}
 		in2 := t2{"hello"}
-		out2 := []byte{0x05, 0x00, 0x00, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0, 0, 0, 0, 0}
-		compareLE(in2, out2)
+		exp2 := []byte{0x05, 0x00, 0x00, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0, 0, 0, 0, 0}
+		encodeCompareLE(in2, exp2)
 	}()
 
 	// string to []string
@@ -312,7 +356,7 @@ func TestStruct(t *testing.T) {
 			S string `binary:"[3]string(0x10)"` // S matches to string[0]
 		}
 		in := t{"hello"}
-		out := []byte{
+		exp := []byte{
 			0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -320,18 +364,18 @@ func TestStruct(t *testing.T) {
 			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		}
-		compareLE(in, out)
+		encodeCompareLE(in, exp)
 
 		type t2 struct {
 			S string `binary:"[3]string(5)"`
 		}
 		in2 := t2{"hello"}
-		out2 := []byte{
+		exp2 := []byte{
 			0x68, 0x65, 0x6c, 0x6c, 0x6f,
 			0x00, 0x00, 0x00, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00, 0x00,
 		}
-		compareLE(in2, out2)
+		encodeCompareLE(in2, exp2)
 	}()
 
 	// string to []byte
@@ -340,8 +384,8 @@ func TestStruct(t *testing.T) {
 			S string `binary:"[8]byte"`
 		}
 		in := t{"hello"}
-		out := []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00}
-		compareLE(in, out)
+		exp := []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00}
+		encodeCompareLE(in, exp)
 	}()
 	//printHex(res)
 
@@ -351,8 +395,8 @@ func TestStruct(t *testing.T) {
 			S string `binary:"[8]int16"`
 		}
 		in := t{"hello"}
-		out := []byte{0x68, 0, 0x65, 0, 0x6c, 0, 0x6c, 0, 0x6f, 0, 0x00, 0, 0x00, 0, 0x00, 0}
-		compareLE(in, out)
+		exp := []byte{0x68, 0, 0x65, 0, 0x6c, 0, 0x6c, 0, 0x6f, 0, 0x00, 0, 0x00, 0, 0x00, 0}
+		encodeCompareLE(in, exp)
 	}()
 
 	// pointer deference
@@ -365,7 +409,7 @@ func TestStruct(t *testing.T) {
 		}
 		sp := tp{p6, &p6}
 		op := []byte{0x06, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00}
-		compareLE(sp, op)
+		encodeCompareLE(sp, op)
 	}()
 
 	// interface
@@ -377,7 +421,7 @@ func TestStruct(t *testing.T) {
 		}
 		si := ti{i6, &i6}
 		oi := []byte{0x06, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00}
-		compareLE(si, oi)
+		encodeCompareLE(si, oi)
 	}()
 
 	// some complex structure
@@ -417,7 +461,7 @@ func TestStruct(t *testing.T) {
 			}{12.34, 0x01020304},
 			999,
 		}
-		out := []byte{
+		exp := []byte{
 			0x01, 0x02, 0x00, 0x01, 0x05, 0x00, 0x68, 0x65,
 			0x6c, 0x6c, 0x6f, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
 			0x32, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03,
@@ -425,7 +469,7 @@ func TestStruct(t *testing.T) {
 			0x00, 0xa4, 0x70, 0x45, 0x41, 0x04, 0x03, 0x02,
 			0x01,
 		}
-		compareLE(in, out)
+		encodeCompareLE(in, exp)
 	}()
 
 }

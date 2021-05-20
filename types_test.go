@@ -124,6 +124,8 @@ func TestScalarValueEncoding(t *testing.T) {
 		{Float64, float64(12.3456), 0x4028b0f27bb2fec5, false, true},
 		{Float32, float64(123.5), 0x42f70000, false, true},
 		{Float64, float32(12.3456), 0x4028b0f280000000, false, false}, // decoded data will be 12.345600128173828
+		{Dword, float32(12.3456), 0x41458794, false, true},
+		{Qword, float64(12.3456), 0x4028b0f27bb2fec5, false, true},
 	}
 
 	for _, e := range testdata {
@@ -175,9 +177,13 @@ func TestScalarValueEncoding(t *testing.T) {
 		// decode binary to value
 		//
 		r := reflect.New(v.Type()).Elem() // prepare a receiver for the decoded value
-		dec := decodeFunc(e.typ, v.Type())
+		decsz, dec := decodeFunc(e.typ, v.Type())
 		if dec == nil {
 			t.Errorf("decoder for %s not found", v.Kind())
+			continue
+		}
+		if decsz != sz {
+			t.Errorf("decoding byte size(%d) and encoding size(%d) does not match", decsz, sz)
 			continue
 		}
 
@@ -187,7 +193,7 @@ func TestScalarValueEncoding(t *testing.T) {
 			continue
 		}
 		if e.value != r.Interface() {
-			t.Errorf("decoded value does not match: image %x, original %v, decoded %v", u, e.value, r.Interface())
+			t.Errorf("decoded value does not match: image 0x%x, original %v, decoded %v", u, e.value, r.Interface())
 			continue
 		}
 

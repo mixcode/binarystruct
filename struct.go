@@ -1,6 +1,7 @@
 package binarystruct
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -13,6 +14,8 @@ const (
 )
 
 var (
+	errNegativeSize = errors.New("the size must not be negative")
+
 	// regexp to match a tag
 	mTag = regexp.MustCompile(`^\s*(\[([^\]]*)\])?([^\s\(\)]*)(\(([^\)]+)\))?`)
 
@@ -136,12 +139,20 @@ func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encod
 		if err != nil {
 			return
 		}
+		if option.arrayLen < 0 {
+			err = errNegativeSize
+			return
+		}
 	}
 
 	if m[5] != "" {
 		option.bufLen, err = evaluateTagValue(strc, m[5])
 		if option.bufLen == 0 {
 			err = fmt.Errorf("element size must not be zero")
+			return
+		}
+		if option.bufLen < 0 {
+			err = errNegativeSize
 			return
 		}
 	}

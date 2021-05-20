@@ -1,6 +1,7 @@
 package binarystruct
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"math"
@@ -8,7 +9,14 @@ import (
 	"strings"
 )
 
-// write a value to writer w. returns
+// Marshal encodes data into a binary image and return it as []byte.
+func Marshal(data interface{}, order ByteOrder) ([]byte, error) {
+	var b bytes.Buffer
+	_, err := writeValue(&b, order, reflect.ValueOf(data))
+	return b.Bytes(), err
+}
+
+// Write encodes data into binary stream and writes to r.
 func Write(w io.Writer, order ByteOrder, data interface{}) (n int, err error) {
 	return writeValue(w, order, reflect.ValueOf(data))
 }
@@ -131,6 +139,9 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType i
 		// arrayLen = desiredLen
 	}
 
+	wErr := func(i int, e error) error {
+		return fmt.Errorf("array index [%d]: %w", i, e)
+	}
 	var m int
 	for i := 0; i < arrayLen; i++ {
 		var e reflect.Value
@@ -142,6 +153,7 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType i
 		if elementType == iAny {
 			m, err = writeValue(w, order, e)
 			if err != nil {
+				err = wErr(i, err)
 				return
 			}
 		} else {
@@ -150,6 +162,7 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType i
 			o.encoding = option.encoding // option may contain inheritable values
 			m, err = writeMain(w, order, e, elementType, o)
 			if err != nil {
+				err = wErr(i, err)
 				return
 			}
 		}
@@ -165,7 +178,7 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType i
 			// guess byte size of the element type
 			eType := array.Elem().Type()
 			eKind := eType.Kind()
-			for eKind == reflect.Ptr {
+			for eKind == reflect.Ptr || eKind == reflect.Interface {
 				eType = eType.Elem()
 				eKind = eType.Kind()
 			}
@@ -189,11 +202,15 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType i
 func writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err error) {
 	typ := strc.Type()
 	nField := typ.NumField()
+	wErr := func(i int, e error) error {
+		f := typ.Field(i)
+		return fmt.Errorf("field <%s>: %w", f.Name, e)
+	}
 	for i := 0; i < nField; i++ {
 		// Read tag info if available
 		encodeType, option, e := parseStructField(typ, strc, i)
 		if e != nil {
-			err = e
+			err = wErr(i, e)
 			return
 		}
 
@@ -209,6 +226,7 @@ func writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err e
 		var m int
 		m, err = writeMain(w, order, strc.Field(i), encodeType, option)
 		if err != nil {
+			err = wErr(i, err)
 			return
 		}
 		n += m

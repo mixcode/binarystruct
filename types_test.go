@@ -11,7 +11,7 @@ func TestScalarValueEncoding(t *testing.T) {
 	//var err error
 
 	testdata := []struct {
-		typ       Type        // Encoding target type
+		typ       iType       // Encoding target type
 		value     interface{} // Value to be encoded
 		u64       uint64      // Encoded value. u64 ← typ(value)
 		encodeErr bool        // encoding will generate an error
@@ -44,11 +44,20 @@ func TestScalarValueEncoding(t *testing.T) {
 		{Int16, int16(-1), 0xffffffff_ffffffff, false, true},
 		{Int32, int32(-1), 0xffffffff_ffffffff, false, true},
 		{Int64, int64(-1), 0xffffffff_ffffffff, false, true},
-		{Byte, byte(0xff), 0xff, false, true},
 		{Uint8, uint8(0xff), 0xff, false, true},
 		{Uint16, uint16(0xffff), 0xffff, false, true},
 		{Uint32, uint32(0xffffffff), 0xffffffff, false, true},
 		{Uint64, uint64(0xffffffff_ffffffff), 0xffffffff_ffffffff, false, true},
+
+		// unspecified type
+		{Byte, int8(-1), 0xffffffff_ffffffff, false, true},
+		{Word, int16(-1), 0xffffffff_ffffffff, false, true},
+		{Dword, int32(-1), 0xffffffff_ffffffff, false, true},
+		{Qword, int64(-1), 0xffffffff_ffffffff, false, true},
+		{Byte, uint8(0xff), 0xff, false, true},
+		{Word, uint16(0xffff), 0xffff, false, true},
+		{Dword, uint32(0xffffffff), 0xffffffff, false, true},
+		{Qword, uint64(0xffffffff_ffffffff), 0xffffffff_ffffffff, false, true},
 
 		// int range
 		{Int8, uint64(math.MaxInt8), 0x7f, false, true},

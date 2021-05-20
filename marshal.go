@@ -28,7 +28,7 @@ func writeValue(w io.Writer, order ByteOrder, v reflect.Value) (n int, err error
 }
 
 // write a value as given type
-func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, option typeOption) (n int, err error) {
+func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, option typeOption) (n int, err error) {
 
 	// type was a pointer or an interface
 	if option.indirectCount > 0 {
@@ -48,7 +48,7 @@ func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, o
 	// based on individual type
 	switch encodeType {
 
-	case Struct:
+	case iStruct:
 		return writeStruct(w, order, v)
 
 	case Zero: // zero bytes: `binary:"zero(10)"`
@@ -62,7 +62,7 @@ func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, o
 	case Ignore: // ignoring value: `binary:"ignore"`
 		return 0, nil
 
-	case Invalid:
+	case iInvalid:
 		err = ErrInvalidType
 		return
 	}
@@ -70,7 +70,7 @@ func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, o
 	// based on kind group
 	switch encodeType.iKind() {
 
-	case intKind, uintKind, floatKind:
+	case intKind, uintKind, bitmapKind, floatKind:
 		return writeScalar(w, order, v, encodeType)
 
 	case structKind:
@@ -85,7 +85,7 @@ func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, o
 }
 
 // write a scalar value
-func writeScalar(w io.Writer, order ByteOrder, v reflect.Value, k Type) (n int, err error) {
+func writeScalar(w io.Writer, order ByteOrder, v reflect.Value, k iType) (n int, err error) {
 	enc := encodeFunc(v.Type(), k)
 	if enc == nil {
 		err = ErrInvalidType
@@ -99,7 +99,7 @@ func writeScalar(w io.Writer, order ByteOrder, v reflect.Value, k Type) (n int, 
 }
 
 // write an array
-func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType Type, option typeOption) (n int, err error) {
+func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType iType, option typeOption) (n int, err error) {
 
 	arrayKind := array.Kind()
 	//
@@ -139,7 +139,7 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType T
 		} else {
 			e = array
 		}
-		if elementType == Any {
+		if elementType == iAny {
 			m, err = writeValue(w, order, e)
 			if err != nil {
 				return
@@ -217,7 +217,7 @@ func writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err e
 }
 
 // write string types
-func writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType Type, bufLen int, encoding string) (n int, err error) {
+func writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, bufLen int, encoding string) (n int, err error) {
 	s := v.String()
 
 	var m int

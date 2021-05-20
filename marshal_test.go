@@ -1,9 +1,11 @@
-package binarystruct
+package binarystruct_test
 
 import (
 	"bytes"
 	"fmt"
 	"testing"
+
+	bst "github.com/mixcode/binarystruct"
 )
 
 func printHex(b []byte) {
@@ -24,10 +26,10 @@ func printHex(b []byte) {
 func TestStruct(t *testing.T) {
 
 	var res []byte
-	compare := func(s interface{}, desired []byte, endian ByteOrder) { // compare with LittleEndian results
+	compare := func(s interface{}, desired []byte, endian bst.ByteOrder) { // compare with LittleEndian results
 		res = nil
 		var buf bytes.Buffer
-		sz, err := Write(&buf, endian, s)
+		sz, err := bst.Write(&buf, endian, s)
 		if err != nil {
 			t.Error(err)
 			return
@@ -43,10 +45,10 @@ func TestStruct(t *testing.T) {
 	}
 
 	compareLE := func(s interface{}, desired []byte) { // compare with LittleEndian results
-		compare(s, desired, LittleEndian)
+		compare(s, desired, bst.LittleEndian)
 	}
 	compareBE := func(s interface{}, desired []byte) { // compare with LittleEndian results
-		compare(s, desired, BigEndian)
+		compare(s, desired, bst.BigEndian)
 	}
 	_, _ = compareLE, compareBE
 
@@ -91,6 +93,32 @@ func TestStruct(t *testing.T) {
 			F64 int `binary:"float64"`
 		}
 		in := t{1, 2, 3, 4, -1, -2, -3, -4, 100, 200}
+		out := []byte{
+			0x01, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
+			0xfe, 0xff, 0xfd, 0xff, 0xff, 0xff, 0xfc, 0xff,
+			0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
+			0xc8, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			0x69, 0x40,
+		}
+		compareLE(in, out)
+	}()
+
+	// bitmap image types
+	func() {
+		type t struct {
+			U8  uint    `binary:"byte"`
+			U16 uint    `binary:"word"`
+			U32 uint    `binary:"dword"`
+			U64 uint    `binary:"qword"`
+			I8  int     `binary:"byte"`
+			I16 int     `binary:"word"`
+			I32 int     `binary:"dword"`
+			I64 int     `binary:"qword"`
+			F32 float32 `binary:"dword"`
+			F64 float64 `binary:"qword"`
+		}
+		in := t{1, 2, 3, 4, -1, -2, -3, -4, 100., 200.}
 		out := []byte{
 			0x01, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04,
 			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
@@ -210,18 +238,19 @@ func TestStruct(t *testing.T) {
 		compareLE(in, out)
 	}()
 
-	// string with size reference in unexported field
+	// string with multiple size reference including an unexported field
+	// note: this may nt
 	func() {
 		type t struct {
-			stringLen int16
-			Str       string `binary:"string(stringLen+1)"`
+			N         uint8
+			stringLen int16  // this is an unexported field
+			Str       string `binary:"string(stringLen +2 -N)"`
 		}
 		s := "hello"
-		in := t{int16(len(s)), s}
-		out := []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00}
+		in := t{1, int16(len(s)), s}
+		out := []byte{0x01, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00}
 		compareLE(in, out)
 	}()
-	//printHex(res)
 
 	// bstring
 	func() {

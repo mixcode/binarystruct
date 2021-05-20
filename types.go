@@ -8,55 +8,73 @@ import (
 	"strings"
 )
 
-// type ByteOrder is alias of binary.ByteOrder
+// type ByteOrder is an alias of encoding/binary.ByteOrder
 type ByteOrder = binary.ByteOrder
 
 var (
+	// byte order
 	BigEndian    binary.ByteOrder = binary.BigEndian
 	LittleEndian binary.ByteOrder = binary.LittleEndian
 )
 
-// Type is name of types could be set to struct tag
-type Type uint
+// Name of encoding binary types recoginized in the struct field tags.
+type iType uint
 
 const (
-	Invalid Type = iota
-	Int8
-	Int16
-	Int32
-	Int64
-	Uint8
-	Uint16
-	Uint32
-	Uint64
-	Float32
-	Float64
-	Byte     // byte (uint8)
-	Word     // word (uint16)
-	Dword    // double word (uint32)
-	Qword    // quad word (uint16)
-	String   // [size]byte
-	Bstring  // {size Uint8, string [size]byte}
-	Wstring  // {size Uint16, string [size]byte}
-	Dwstring // {size Uint32, string [size]byte}
-	Zero     // zero bytes
-	Struct   // a struct
-	Any      // any type
-	Ignore   // do not write or read
+	iInvalid iType = iota
+
+	// Name in tags are case insensitive. e.g.) `binary:"Int8"` is same with `binary:int8"`.
+	// signed values. Must respect its valid range. For example, Int8 must be in [-128, 127].
+	Int8  // `binary:"int8"`
+	Int16 // `binary:"int16"`
+	Int32 // `binary:"int32"`
+	Int64 // `binary:"int64"`
+
+	// unsigned values. Must repect its valid range. For example, Uint8 must be in [0, 255].
+	Uint8  // `binary:"uint8"`
+	Uint16 // `binary:"uint16"`
+	Uint32 // `binary:"uint32"`
+	Uint64 // `binary:"uint64"`
+
+	// sign-agnostic bitmaps. For example, Byte could be mapped to either int8 or uint8.
+	Byte  // 8-bit byte. `binary: "byte"`
+	Word  // 16-bit word. `binary: "word"`
+	Dword // 32-bit double word. `binary: "dword"`
+	Qword // 64-bit quad word. `binary: "qword"`
+
+	// floating point values.
+	Float32 // `binary:"float32"`
+	Float64 // `binary:"float64"`
+
+	// string types. If string types are postfixed by '(size)', then the encoded size will be exactly size bytes long.
+	String   // []byte. `binary:"string"` `binary:"string(0x10),encoding=utf16"`
+	Bstring  // {size Uint8, string [size]byte}	`binary:"bstring"`
+	Wstring  // {size Uint16, string [size]byte} `binary:"wstring"`
+	Dwstring // {size Uint32, string [size]byte} `binary:"dwstring"`
+
+	// a struct type
+	iStruct
+
+	// misc types
+	Zero   // zero bytes. Original value is ignored. Can be postfixed by '(size)' to set number of bytes. `binary:"zero(0x8)"`
+	Ignore // values with this tag are ignored. `binary:"ignore"`
+	iAny   // any type. If no tag is set to a value, then the type will be Any, and the value's default encoding will be used.
 )
 
-var ErrInvalidType = fmt.Errorf("invalid type")
+var ErrInvalidType = fmt.Errorf("invalid binary type")
 
 // get type value from its string name
-func TypeByName(name string) Type {
+func typeByName(name string) iType {
 	return typeMap[strings.ToLower(name)]
 }
 
-func (t Type) String() string {
+// string representation of the type
+func (t iType) String() string {
 	return typeNameMap[t]
 }
 
-func (t Type) ByteSize() int {
+// Byte size of the type. If the type is not a scalar type (like slice), this function returns zero
+func (t iType) ByteSize() int {
 	p, ok := properties[t]
 	if ok {
 		return p.bytesize
@@ -65,12 +83,12 @@ func (t Type) ByteSize() int {
 }
 
 // get internal kind type
-func (t Type) iKind() iKind {
+func (t iType) iKind() iKind {
 	p, ok := properties[t]
 	if ok {
 		return p.kind
 	}
-	return iKind(Invalid)
+	return iKind(iInvalid)
 }
 
 type typeOption struct {
@@ -81,7 +99,7 @@ type typeOption struct {
 	encoding      string // tag has "encoding=ENC"
 }
 
-func getNaturalType(v reflect.Value) (t Type, option typeOption) {
+func getNaturalType(v reflect.Value) (t iType, option typeOption) {
 	kind := v.Kind()
 
 	for kind == reflect.Ptr || kind == reflect.Interface {
@@ -142,7 +160,7 @@ func getNaturalType(v reflect.Value) (t Type, option typeOption) {
 		t = String
 		return
 	case reflect.Struct:
-		t = Struct
+		t = iStruct
 		return
 
 	// array and slice
@@ -151,7 +169,7 @@ func getNaturalType(v reflect.Value) (t Type, option typeOption) {
 		k := elem.Kind()
 		option.isArray = true
 		if k == reflect.Array || k == reflect.Slice {
-			t = Any
+			t = iAny
 			return
 		}
 		option.arrayLen = v.Len()
@@ -164,11 +182,12 @@ func getNaturalType(v reflect.Value) (t Type, option typeOption) {
 		//case reflect.Uintptr:
 	}
 
-	t = Invalid
+	t = iInvalid
 	return
 }
 
-func decodeFunc(srcType Type, destRType reflect.Type) func(reflect.Value, uint64) error {
+// decodeFunc() generates a binary type to go-type conversion function
+func decodeFunc(srcType iType, destRType reflect.Type) func(reflect.Value, uint64) error {
 
 	printerr := func(v interface{}, t reflect.Value) error {
 		return fmt.Errorf("valud %v not fit in type %v", v, t.Type())
@@ -189,7 +208,7 @@ func decodeFunc(srcType Type, destRType reflect.Type) func(reflect.Value, uint64
 		}
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if srcKind == intKind || srcKind == uintKind {
+		if srcKind == intKind || srcKind == uintKind || srcKind == bitmapKind {
 			return func(v reflect.Value, u uint64) error {
 				n := int64(u)
 				if v.OverflowInt(n) {
@@ -221,7 +240,7 @@ func decodeFunc(srcType Type, destRType reflect.Type) func(reflect.Value, uint64
 		}
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if srcKind == intKind || srcKind == uintKind {
+		if srcKind == intKind || srcKind == uintKind || srcKind == bitmapKind {
 			return func(v reflect.Value, u uint64) error {
 				if v.OverflowUint(u) {
 					return printerr(u, v)
@@ -294,10 +313,10 @@ func decodeFunc(srcType Type, destRType reflect.Type) func(reflect.Value, uint64
 	return nil
 }
 
-// Single value encoder
-func encodeFunc(srcRType reflect.Type, destType Type) func(reflect.Value) (uint64, int, error) {
+// encodeFunc() generates a go-type to binary type conversion function
+func encodeFunc(srcRType reflect.Type, destType iType) func(reflect.Value) (uint64, int, error) {
 
-	printErrNotFit := func(v interface{}, t Type) error {
+	printErrNotFit := func(v interface{}, t iType) error {
 		return fmt.Errorf("value %v not fit in %s", v, t)
 	}
 
@@ -343,7 +362,16 @@ func encodeFunc(srcRType reflect.Type, destType Type) func(reflect.Value) (uint6
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		srcSize := int(srcRType.Size())
-		if destKind == intKind && srcSize <= destSize {
+		if destKind == bitmapKind { // byte/word/dword/qword
+			return func(v reflect.Value) (value uint64, bytesize int, err error) {
+				if int64(v.Type().Size()) < int64(destSize) {
+					// only byte size matters
+					err = printErrNotFit(value, destType)
+					return
+				}
+				return uint64(v.Int()), destSize, nil
+			}
+		} else if destKind == intKind && srcSize <= destSize {
 			// source value always fits in the destination
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
 				return uint64(v.Int()), destSize, nil
@@ -376,7 +404,16 @@ func encodeFunc(srcRType reflect.Type, destType Type) func(reflect.Value) (uint6
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		srcSize := int(srcRType.Size())
-		if destKind == uintKind && srcSize <= destSize {
+		if destKind == bitmapKind { // byte/word/dword/qword
+			return func(v reflect.Value) (value uint64, bytesize int, err error) {
+				if int64(v.Type().Size()) < int64(destSize) {
+					// only byte size matters
+					err = printErrNotFit(value, destType)
+					return
+				}
+				return v.Uint(), destSize, nil
+			}
+		} else if destKind == uintKind && srcSize <= destSize {
 			// source value always fits in the destination
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
 				return v.Uint(), destSize, nil
@@ -406,11 +443,11 @@ func encodeFunc(srcRType reflect.Type, destType Type) func(reflect.Value) (uint6
 
 	case reflect.Float32, reflect.Float64:
 		switch destType {
-		case Float32:
+		case Float32, Dword:
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
 				return uint64(math.Float32bits(float32(v.Float()))), destSize, nil
 			}
-		case Float64:
+		case Float64, Qword:
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
 				return math.Float64bits(v.Float()), destSize, nil
 			}
@@ -426,11 +463,6 @@ func encodeFunc(srcRType reflect.Type, destType Type) func(reflect.Value) (uint6
 	return nil
 }
 
-type typenames struct {
-	name string
-	t    Type
-}
-
 // iKind of types
 type iKind uint
 
@@ -438,6 +470,7 @@ const (
 	invalidKind iKind = iota
 	intKind
 	uintKind
+	bitmapKind
 	floatKind
 	stringKind
 	structKind
@@ -458,12 +491,12 @@ var (
 	minInt64 = int64(math.MinInt64)
 
 	// properties of Kinds
-	properties = map[Type]struct {
+	properties = map[iType]struct {
 		kind     iKind
 		bytesize int
 		min, max uint64
 	}{
-		Invalid: {invalidKind, 0, 0, 0},
+		iInvalid: {invalidKind, 0, 0, 0},
 
 		Int8:  {intKind, 1, uint64(minInt8), uint64(math.MaxInt8)},
 		Int16: {intKind, 2, uint64(minInt16), uint64(math.MaxInt16)},
@@ -475,31 +508,38 @@ var (
 		Uint32: {uintKind, 4, 0, math.MaxUint32},
 		Uint64: {uintKind, 8, 0, math.MaxUint64},
 
+		Byte:  {bitmapKind, 1, uint64(minInt8), math.MaxUint8},
+		Word:  {bitmapKind, 2, uint64(minInt16), math.MaxUint16},
+		Dword: {bitmapKind, 4, uint64(minInt32), math.MaxUint32},
+		Qword: {bitmapKind, 8, uint64(minInt64), math.MaxUint64},
+
 		Float32: {floatKind, 4, 0, 0},
 		Float64: {floatKind, 8, 0, 0},
-
-		Byte:  {uintKind, 1, 0, math.MaxUint8},
-		Word:  {uintKind, 2, 0, math.MaxUint16},
-		Dword: {uintKind, 4, 0, math.MaxUint32},
-		Qword: {uintKind, 8, 0, math.MaxUint64},
 
 		String:   {stringKind, 0, 0, 0},
 		Bstring:  {stringKind, 0, 0, 0},
 		Wstring:  {stringKind, 0, 0, 0},
 		Dwstring: {stringKind, 0, 0, 0},
 
-		Zero:   {uintKind, 0, 0, 0},
-		Struct: {structKind, 0, 0, 0},
-		Any:    {anyKind, 0, 0, 0},
+		Zero:    {uintKind, 0, 0, 0},
+		iStruct: {structKind, 0, 0, 0},
+		iAny:    {anyKind, 0, 0, 0},
 
 		Ignore: {anyKind, 0, 0, 0},
 	}
+)
 
-	typeMap     = make(map[string]Type)
-	typeNameMap = make(map[Type]string)
+type typenames struct {
+	name string
+	t    iType
+}
+
+var (
+	typeMap     = make(map[string]iType)
+	typeNameMap = make(map[iType]string)
 
 	kinds = []typenames{
-		{"Invalid", Invalid},
+		{"Invalid", iInvalid},
 		{"Int8", Int8},
 		{"Int16", Int16},
 		{"Int32", Int32},
@@ -519,8 +559,8 @@ var (
 		{"Wstring", Wstring},
 		{"DWString", Dwstring},
 		{"Zero", Zero},
-		{"Struct", Struct},
-		{"Any", Any},
+		{"Struct", iStruct},
+		{"Any", iAny},
 		{"Ignore", Ignore},
 	}
 )

@@ -86,7 +86,7 @@ func evaluateTagValue(strc reflect.Value, stmt string) (value int, err error) {
 }
 
 // read tag from
-func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encodeType Type, option typeOption, err error) {
+func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encodeType iType, option typeOption, err error) {
 
 	field := structType.Field(i)
 	fType := field.Type
@@ -118,11 +118,11 @@ func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encod
 
 	m := mTag.FindStringSubmatch(tags[0])
 	typeTag := m[3]
-	parsedType := Any
+	parsedType := iAny
 	if typeTag != "" {
-		parsedType = TypeByName(typeTag)
+		parsedType = typeByName(typeTag)
 	}
-	if encodeType == Invalid && (parsedType != Zero && parsedType != Ignore) {
+	if encodeType == iInvalid && (parsedType != Zero && parsedType != Ignore) {
 		// value type is unknown and target type is not an ignoring type
 		err = fmt.Errorf("the field %s is not encodable", field.Name)
 		return

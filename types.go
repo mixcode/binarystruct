@@ -22,7 +22,7 @@ var (
 type iType uint
 
 const (
-	iInvalid iType = iota
+	iInvalid iType = iota // internal invalid type
 
 	// Name in tags are case insensitive. e.g.) `binary:"Int8"` is same with `binary:int8"`.
 	// signed values. Must respect its valid range. For example, Int8 must be in [-128, 127].
@@ -54,12 +54,12 @@ const (
 	Dwstring // {size Uint32, string [size]byte} `binary:"dwstring"`
 
 	// a struct type
-	iStruct
+	iStruct // internal struct type
 
 	// misc types
-	Zero   // zero bytes. Original value is ignored. Can be postfixed by '(size)' to set number of bytes. `binary:"zero(0x8)"`
+	Pad    // padding zero bytes. Original value is ignored. Can be postfixed by '(size)' to set number of bytes. `binary:"pad(0x8)"`
 	Ignore // values with this tag are ignored. `binary:"ignore"`
-	iAny   // any type. If no tag is set to a value, then the type will be Any, and the value's default encoding will be used.
+	Any    // any type. If no tag is set to a value, then the type will be Any, and the value's default encoding will be used.
 )
 
 var ErrInvalidType = errors.New("invalid binary type")
@@ -170,7 +170,7 @@ func getNaturalType(v reflect.Value) (t iType, option typeOption) {
 		k := elem.Kind()
 		option.isArray = true
 		if k == reflect.Array || k == reflect.Slice {
-			t = iAny
+			t = Any
 			return
 		}
 		option.arrayLen = v.Len()
@@ -578,9 +578,9 @@ var (
 		Wstring:  {stringKind, 0, 0, 0},
 		Dwstring: {stringKind, 0, 0, 0},
 
-		Zero:    {uintKind, 0, 0, 0},
+		Pad:     {uintKind, 0, 0, 0},
 		iStruct: {structKind, 0, 0, 0},
-		iAny:    {anyKind, 0, 0, 0},
+		Any:     {anyKind, 0, 0, 0},
 
 		Ignore: {anyKind, 0, 0, 0},
 	}
@@ -615,9 +615,9 @@ var (
 		{"Bstring", Bstring},
 		{"Wstring", Wstring},
 		{"DWString", Dwstring},
-		{"Zero", Zero},
+		{"Pad", Pad},
 		{"Struct", iStruct},
-		{"Any", iAny},
+		{"Any", Any},
 		{"Ignore", Ignore},
 	}
 )

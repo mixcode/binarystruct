@@ -64,7 +64,7 @@ func readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, o
 	case iStruct:
 		return readStruct(r, order, v)
 
-	case Zero: // zero bytes: `binary:"zero(10)"`
+	case Pad: // padding zero bytes: `binary:"pad(10)"`
 		l := option.bufLen
 		if l == 0 {
 			l = 1
@@ -152,7 +152,7 @@ func readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType iT
 	loadSlice := func(uslice reflect.Value, l int) {
 		var m int
 		for i := 0; i < l; i++ {
-			if elementType == iAny {
+			if elementType == Any {
 				m, err = readValue(r, order, uslice.Index(i))
 				if err != nil {
 					return
@@ -196,7 +196,7 @@ func readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iT
 	}
 	arrayLen := option.arrayLen
 
-	if elementType == Zero { // zero bytes
+	if elementType == Pad { // zero bytes
 		// skip zero-byte types
 		sz := option.bufLen
 		if sz == 0 {
@@ -229,7 +229,7 @@ func readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iT
 
 	var m int
 	for i := 0; i < readLen; i++ {
-		if elementType == iAny {
+		if elementType == Any {
 			m, err = readValue(r, order, array.Index(i))
 			if err != nil {
 				return

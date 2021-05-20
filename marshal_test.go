@@ -133,7 +133,7 @@ func TestStruct(test *testing.T) {
 		}
 		encodeCompareLE(in, exp)
 		correct := st{1, 2, 3, 4, -1, -2, -3, -4,
-			// Note that sign-agnostic types could be ambiguous and may not be recovered to original when mapped to a larger type
+			// Note: sign-agnostic types could be ambiguous and may not be recovered to original when mapped to a larger type
 			251, 65530, 4294967289, -8,
 			100., 200.}
 		out := st{}
@@ -234,12 +234,12 @@ func TestStruct(test *testing.T) {
 		decodeCompareLE(exp, &out, &in)
 	}()
 
-	// zero bytes
+	// zero padding bytes
 	func() {
 		type st struct {
-			X interface{} `binary:"zero"`
-			Y interface{} `binary:"zero(8)"`
-			Z interface{} `binary:"[4]zero"`
+			PADDING1 interface{} `binary:"pad"`    // single byte
+			PADDING2 interface{} `binary:"pad(8)"` // 8 bytes
+			PADDING3 interface{} `binary:"[4]pad"` // 4 bytes
 		}
 		in := st{}
 		exp := []byte{
@@ -249,14 +249,8 @@ func TestStruct(test *testing.T) {
 		}
 		encodeCompareLE(in, exp)
 		out := st{}
-		// zero type will read no data; just skip bytes
-		sz, e := bst.Unmarshal(exp, bst.LittleEndian, &out)
-		if e != nil {
-			test.Error(e)
-		}
-		if sz != len(exp) {
-			test.Errorf("read size not match")
-		}
+		// Note: zero type will read no data; just skips bytes.
+		decodeCompareLE(exp, &out, &in)
 	}()
 	return
 
@@ -283,7 +277,7 @@ func TestStruct(test *testing.T) {
 	}()
 
 	// string with multiple size reference including an unexported field
-	// note: this may nt
+	// TODO: do more tests on unexported fields??
 	func() {
 		type t struct {
 			N         uint8

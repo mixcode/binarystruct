@@ -121,11 +121,11 @@ func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encod
 
 	m := mTag.FindStringSubmatch(tags[0])
 	typeTag := m[3]
-	parsedType := iAny
+	parsedType := Any
 	if typeTag != "" {
 		parsedType = typeByName(typeTag)
 	}
-	if encodeType == iInvalid && (parsedType != Zero && parsedType != Ignore) {
+	if encodeType == iInvalid && (parsedType != Pad && parsedType != Ignore) {
 		// value type is unknown and target type is not an ignoring type
 		err = fmt.Errorf("the field %s is not encodable", field.Name)
 		return

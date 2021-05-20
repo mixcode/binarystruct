@@ -59,7 +59,7 @@ func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, 
 	case iStruct:
 		return writeStruct(w, order, v)
 
-	case Zero: // zero bytes: `binary:"zero(10)"`
+	case Pad: // padding zero bytes: `binary:"pad(10)"`
 		l := option.bufLen
 		if l == 0 {
 			l = 1
@@ -150,7 +150,7 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType i
 		} else {
 			e = array
 		}
-		if elementType == iAny {
+		if elementType == Any {
 			m, err = writeValue(w, order, e)
 			if err != nil {
 				err = wErr(i, err)

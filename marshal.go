@@ -64,8 +64,7 @@ func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, 
 		if l == 0 {
 			l = 1
 		}
-		zeroFill(w, l)
-		return l, nil
+		return zeroFill(w, l)
 
 	case Ignore: // ignoring value: `binary:"ignore"`
 		return 0, nil
@@ -189,11 +188,11 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType i
 		sz = sz * (desiredLen - arrayLen)
 
 		// write blank bytes
-		err = zeroFill(w, sz)
+		m, err = zeroFill(w, sz)
+		n += m
 		if err != nil {
 			return
 		}
-		n += sz
 	}
 	return
 }
@@ -271,27 +270,22 @@ func writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType
 	if headersz > 0 {
 		// write string size header
 		m, err = writeU64(w, order, uint64(strlen), headersz)
+		n += m
 		if err != nil {
 			return
 		}
-		n += m
 	}
 
 	// write string bytes
 	m, err = w.Write([]byte(s))
+	n += m
 	if err != nil {
 		return
 	}
-	n += m
 
 	if m < bufLen {
 		// fill the leftovers
-		sz := bufLen - m
-		err = zeroFill(w, sz)
-		if err != nil {
-			return
-		}
-		n += sz
+		return zeroFill(w, bufLen-m)
 	}
 	return
 }
@@ -315,8 +309,8 @@ func writeU64(w io.Writer, order ByteOrder, u64 uint64, bytesize int) (n int, er
 	return w.Write(b)
 }
 
-// write blank bytes
-func zeroFill(w io.Writer, sz int) (err error) {
+// write blank padding bytes
+func zeroFill(w io.Writer, sz int) (n int, err error) {
 	maxBufSize := 16384
 	bsz := sz
 	if bsz > maxBufSize {
@@ -330,10 +324,11 @@ func zeroFill(w io.Writer, sz int) (err error) {
 		} else {
 			m, err = w.Write(buf[:sz])
 		}
+		n += m
+		sz -= m
 		if err != nil {
 			return
 		}
-		sz -= m
 	}
 	return
 }

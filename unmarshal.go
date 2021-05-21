@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	ErrCannotSet  = errors.New("the value cannot be set")
-	ErrNotAnArray = errors.New("must be an array or slice type")
+	ErrCannotSet     = errors.New("the value cannot be set")
+	ErrNotAnArray    = errors.New("must be an array or slice type")
+	ErrUnknownLength = errors.New("unknown array, slice or string size")
 )
 
 // Unmarshal decodes binary images into data. Data should be a writable type such as a slice, a pointer or an interface.
@@ -31,12 +32,9 @@ func Read(r io.Reader, order binary.ByteOrder, data interface{}) (n int, err err
 
 // read a reflect.Value
 func readValue(r io.Reader, order ByteOrder, v reflect.Value) (n int, err error) {
-	t := v.Type()
-	k := t.Kind()
-	for k == reflect.Ptr || k == reflect.Interface {
-		v = reflect.Indirect(v)
-		t = v.Type()
-		k = t.Kind()
+	k := v.Type().Kind()
+	if k == reflect.Ptr || k == reflect.Interface {
+		v, _ = dereferencePointer(v)
 	}
 	encodeType, option := getNaturalType(v)
 	return readMain(r, order, v, encodeType, option)
@@ -56,8 +54,6 @@ func readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, o
 		return readArray(r, order, v, encodeType, option)
 	}
 
-	//fmt.Printf("encodeType :%v\n", encodeType) //!!
-
 	// based on individual type
 	switch encodeType {
 
@@ -69,8 +65,7 @@ func readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, o
 		if l == 0 {
 			l = 1
 		}
-		skipBytes(r, l)
-		return l, nil
+		return skipBytes(r, l)
 
 	case Ignore: // ignoring value: `binary:"ignore"`
 		return 0, nil
@@ -104,34 +99,38 @@ func readScalar(r io.Reader, order ByteOrder, v reflect.Value, k iType) (n int, 
 		return
 	}
 	sz, dec := decodeFunc(k, v.Type())
-	u64, err := readU64(r, order, sz)
+	u64, n, err := readU64(r, order, sz)
 	if err != nil {
 		return
 	}
-	return sz, dec(v, u64)
+	err = dec(v, u64)
+	return
 }
 
 // follow pointers to the end
-func dereferencePointer(p reflect.Value) reflect.Value {
+func dereferencePointer(p reflect.Value) (value reflect.Value, indirectCount int) {
 	if !p.IsValid() {
-		return p // not a valid reference
+		return // not a valid reference
 	}
 	eType := p.Type()
 	eKind := eType.Kind()
 	for eKind == reflect.Ptr || eKind == reflect.Interface {
+		indirectCount++
 		if eKind == reflect.Ptr && p.IsNil() {
 			// add a new value to the pointer
-			newP := reflect.New(p.Elem().Type()) // allocate a new value and get its pointer
-			p.Set(newP)                          // set the pointer
+			newP := reflect.New(eType.Elem()) // allocate a new value and get its pointer
+			p.Set(newP)                       // set the pointer
 		}
 		p = p.Elem()
 		if !p.IsValid() {
-			return p // not a valid reference
+			value = p
+			return // not a valid reference
 		}
 		eType = p.Type()
 		eKind = eType.Kind()
 	}
-	return p
+	value = p
+	return
 }
 
 func readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType iType, option typeOption) (n int, err error) {
@@ -139,9 +138,15 @@ func readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType iT
 	arrayLen := option.arrayLen
 
 	if slice.IsNil() {
+		if arrayLen == 0 {
+			err = ErrUnknownLength
+		}
 		// make a new slice
 		s := reflect.MakeSlice(slice.Type(), arrayLen, arrayLen)
 		slice.Set(s)
+	} else if arrayLen == 0 {
+		// use existing slice
+		arrayLen = slice.Len()
 	}
 	sliceLen := slice.Len()
 	readLen := arrayLen
@@ -150,23 +155,24 @@ func readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType iT
 	}
 
 	loadSlice := func(uslice reflect.Value, l int) {
+		wErr := func(i int, e error) error {
+			return fmt.Errorf("array index [%d]: %w", i, e)
+		}
 		var m int
 		for i := 0; i < l; i++ {
 			if elementType == Any {
 				m, err = readValue(r, order, uslice.Index(i))
-				if err != nil {
-					return
-				}
 			} else {
 				var o typeOption
 				o.bufLen = option.bufLen     // option may contain inheritable values
 				o.encoding = option.encoding // option may contain inheritable values
 				m, err = readMain(r, order, uslice.Index(i), elementType, o)
-				if err != nil {
-					return
-				}
 			}
 			n += m
+			if err != nil {
+				err = wErr(i, err)
+				return
+			}
 		}
 	}
 	loadSlice(slice, readLen)
@@ -190,11 +196,32 @@ func readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType iT
 
 // read an array or slice
 func readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iType, option typeOption) (n int, err error) {
-	if option.arrayLen <= 0 {
-		err = fmt.Errorf("array size unknown")
+
+	// deference a pointer or an interface
+	array, _ = dereferencePointer(array)
+	eKind := array.Kind()
+
+	if eKind == reflect.Slice {
+		return readSlice(r, order, array, elementType, option)
+	}
+
+	// special case 1:
+	// if the value is not an array but tagged as an array, treat it as the first element of an virtual array
+	//	n int	`binary:[3]int8`	// n will be the first element of the array. other elements are ignored.
+	destIsArray := (eKind == reflect.Array)
+
+	arrayLen := option.arrayLen
+	if arrayLen == 0 {
+		if destIsArray {
+			arrayLen = array.Len()
+		} else {
+			arrayLen = 1
+		}
+	}
+	if arrayLen == 0 {
+		// empty array: return immediately
 		return
 	}
-	arrayLen := option.arrayLen
 
 	if elementType == Pad { // zero bytes
 		// skip zero-byte types
@@ -203,147 +230,90 @@ func readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iT
 			sz = 1
 		}
 		sz *= arrayLen
-		err = skipBytes(r, sz)
+		return skipBytes(r, sz)
+	}
+
+	var m int
+
+	ik := elementType.iKind()
+	if eKind == reflect.String && (ik == intKind || ik == uintKind || ik == bitmapKind || ik == floatKind) {
+		// special case 2:
+		// if the value is a string and the encoded type is array of numbers, then
+		//	s string	`binary:[5]int8`	// 5-byte wide string
+		buf := make([]byte, arrayLen)
+		n, err = readSlice(r, order, reflect.ValueOf(buf), elementType, option)
 		if err != nil {
 			return
 		}
-		return sz, nil
-	}
 
-	// deference a pointer or an interface
-	array = dereferencePointer(array)
-	eKind := array.Kind()
+		//
+		// TODO: string encoding (before removing terminating zeros)
+		//
 
-	if eKind == reflect.Slice {
-		return readSlice(r, order, array, elementType, option)
-	}
-	if eKind != reflect.Array {
-		err = ErrNotAnArray
+		l := len(buf)
+		for ; l > 0 && buf[l-1] == 0; l-- {
+			// skip terminating zeros
+		}
+		array.SetString(string(buf[:l]))
 		return
 	}
 
 	readLen := arrayLen
-	if array.Len() < arrayLen {
+	if !destIsArray {
+		readLen = 1
+	} else if array.Len() < arrayLen {
 		readLen = array.Len()
 	}
 
-	var m int
+	wErr := func(i int, e error) error {
+		return fmt.Errorf("array index [%d]: %w", i, e)
+	}
+
+	var v reflect.Value
 	for i := 0; i < readLen; i++ {
+		if !destIsArray {
+			v = array
+		} else {
+			// normal array
+			v = array.Index(i)
+		}
+
 		if elementType == Any {
-			m, err = readValue(r, order, array.Index(i))
-			if err != nil {
-				return
-			}
+			m, err = readValue(r, order, v)
 		} else {
 			var o typeOption
 			o.bufLen = option.bufLen     // option may contain inheritable values
 			o.encoding = option.encoding // option may contain inheritable values
-			m, err = readMain(r, order, array.Index(i), elementType, o)
-			if err != nil {
-				return
-			}
+			m, err = readMain(r, order, v, elementType, o)
 		}
 		n += m
+		if err != nil {
+			err = wErr(i, err)
+			return
+		}
 	}
 	if readLen < arrayLen {
-		// skip leftover bytes
+		// skip leftover members
 		bytesz := elementType.ByteSize()
-		if bytesz == 0 {
-			err = fmt.Errorf("cannot determine element size")
-			return
-		}
-		skipsz := (arrayLen - readLen) * bytesz
-		err = skipBytes(r, skipsz)
-		if err != nil {
-			return
-		}
-		n += skipsz
-	}
-
-	/*
-		arrayKind := array.Kind()
-
-		//
-		// Go arrays and slices are primary target of array notation.
-		//	a []int	`binary:"[10]byte"`
-		// And there is a special case for string.
-		//	s string `binary:"[10]uint16"`	// each string byte is converted to uint16
-		// An exceptional case is that the target type is string array and given value is a string.
-		//	s string `binary:"[3]zstring(0x10)"`	// s is writen as first string, and the others will be blank string
-		//
-		if arrayKind == reflect.String && elementType.iKind() != stringKind {
-			// convert string to byte slice
-			array = array.Convert(byteSliceType)
-			arrayKind = array.Kind()
-		}
-
-		arrayLen := 1
-		if arrayKind == reflect.Array || arrayKind == reflect.Slice {
-			arrayLen = array.Len()
-		}
-
-		desiredLen := option.arrayLen
-		if desiredLen <= 0 {
-			desiredLen = arrayLen
-		}
-		if desiredLen < arrayLen {
-			err = fmt.Errorf("array too large to fit: len %d, size %d", desiredLen, arrayLen)
-			return
-			// arrayLen = desiredLen
-		}
-
-		var m int
-		for i := 0; i < arrayLen; i++ {
-			var e reflect.Value
-			if arrayKind == reflect.Array || arrayKind == reflect.Slice {
-				e = array.Index(i)
-			} else {
-				e = array
-			}
-			if elementType == iAny {
-				m, err = writeValue(w, order, e)
-				if err != nil {
-					return
-				}
-			} else {
-				var o typeOption
-				o.bufLen = option.bufLen     // option may contain inheritable values
-				o.encoding = option.encoding // option may contain inheritable values
-				m, err = writeMain(w, order, e, elementType, o)
-				if err != nil {
-					return
-				}
-			}
+		if bytesz != 0 { // fixed size value
+			skipsz := (arrayLen - readLen) * bytesz
+			m, err = skipBytes(r, skipsz)
 			n += m
+			return
 		}
-		if arrayLen < desiredLen {
-			// fill the leftover
-			sz := option.bufLen // element length supplied
-			if sz == 0 {
-				sz = m // m holds the byte count of last written element
-			}
-			if sz == 0 {
-				// guess byte size of the element type
-				eType := array.Elem().Type()
-				eKind := eType.Kind()
-				for eKind == reflect.Ptr {
-					eType = eType.Elem()
-					eKind = eType.Kind()
-				}
-				sz = int(eType.Size())
-			}
-
-			// total size = element size * element count
-			sz = sz * (desiredLen - arrayLen)
-
-			// write blank bytes
-			err = skipBytes(r, sz)
+		// variable size value
+		newv := reflect.New(v.Type()).Elem()
+		o := typeOption{bufLen: option.bufLen, encoding: option.encoding}
+		for i := readLen; i < arrayLen; i++ {
+			m, err = readMain(r, order, newv, elementType, o)
+			n += m
 			if err != nil {
+				err = wErr(i, err)
 				return
 			}
-			n += sz
 		}
-	*/
+	}
+
 	return
 }
 
@@ -366,14 +336,24 @@ func readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err er
 		if encodeType == Ignore { // `binary:"ignore"`
 			continue
 		}
-		name := typ.Field(i).Name
+
+		f := typ.Field(i)
+		name := f.Name
 		if len(name) == 0 || strings.ToUpper(name)[0] != name[0] {
 			// unexported type
 			continue
 		}
 
+		fKind := f.Type.Kind()
+		v := strc.Field(i)
+		if fKind == reflect.Ptr || fKind == reflect.Interface {
+			// allocate pointers
+			v, _ = dereferencePointer(v)
+			option.indirectCount = 0
+		}
+
 		var m int
-		m, err = readMain(r, order, strc.Field(i), encodeType, option)
+		m, err = readMain(r, order, v, encodeType, option)
 		if err != nil {
 			err = wErr(i, err)
 			return
@@ -385,73 +365,61 @@ func readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err er
 
 // read string types
 func readString(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, bufLen int, encoding string) (n int, err error) {
-	/*
-		s := v.String()
 
-		var m int
+	// read string length
+	headersz := 0
+	switch encodeType {
+	case Bstring:
+		headersz = 1
+	case Wstring:
+		headersz = 2
+	case Dwstring:
+		headersz = 4
+	}
 
-		//
-		// TODO: process string encoding
-		//
-
-		strlen := len(s)
-		if bufLen <= 0 {
-			bufLen = strlen
-		}
-		if bufLen < strlen {
-			err = fmt.Errorf("string too long: len %d, buffer size %d", strlen, bufLen)
-			return
-		}
-
-		// read string length
-		maxlen, headersz := uint64(math.MaxInt64), 0
-		switch encodeType {
-		case Bstring:
-			maxlen, headersz = math.MaxUint8, 1
-		case Wstring:
-			maxlen, headersz = math.MaxUint16, 2
-		case Dwstring:
-			maxlen, headersz = math.MaxUint32, 4
-		}
-		if uint64(bufLen) > maxlen {
-			err = fmt.Errorf("string too long: len %d, max %d", strlen, maxlen)
-			return
-		}
-
-		if headersz > 0 {
-			// read string size header
-			m, err = writeU64(w, order, uint64(strlen), headersz)
-			if err != nil {
-				return
-			}
-			n += m
-		}
-
-		// write string bytes
-		m, err = r.Read([]byte(s))
+	strlen := 0
+	if headersz > 0 {
+		var u64 uint64
+		u64, n, err = readU64(r, order, headersz)
 		if err != nil {
 			return
 		}
-		n += m
+		strlen = int(int64(u64))
+	} else {
+		strlen = bufLen
+	}
 
-		if m < bufLen {
-			// fill the leftovers
-			sz := bufLen - m
-			err = skipBytes(r, sz)
-			if err != nil {
-				return
-			}
-			n += sz
-		}
-	*/
+	readsz := strlen
+	if readsz < bufLen {
+		// both data length and buffer size exists
+		readsz = bufLen
+	}
+
+	buf := make([]byte, readsz)
+	m, err := io.ReadAtLeast(r, buf, readsz)
+	n += m
+	if err != nil {
+		return
+	}
+
+	//
+	// TODO: process string encoding (before removing terminating zeros)
+	//
+
+	// remove terminaing zeros if buffer is larger than actual string
+	for ; strlen > 0 && buf[strlen-1] == 0; strlen-- {
+		// empty
+	}
+
+	v.SetString(string(buf[:strlen]))
 	return
 }
 
 // read bytes according to the byte order
-func readU64(r io.Reader, order ByteOrder, bytesize int) (u64 uint64, err error) {
+func readU64(r io.Reader, order ByteOrder, bytesize int) (u64 uint64, n int, err error) {
 	var buf [8]byte
 	b := buf[:bytesize]
-	_, err = io.ReadAtLeast(r, b, bytesize)
+	n, err = io.ReadAtLeast(r, b, bytesize)
 	if err != nil {
 		return
 	}
@@ -470,8 +438,8 @@ func readU64(r io.Reader, order ByteOrder, bytesize int) (u64 uint64, err error)
 	return
 }
 
-// skip blank bytes
-func skipBytes(r io.Reader, sz int) (err error) {
+// skip padding bytes
+func skipBytes(r io.Reader, sz int) (n int, err error) {
 	maxBufSize := 16384
 	bsz := sz
 	if bsz > maxBufSize {
@@ -485,10 +453,11 @@ func skipBytes(r io.Reader, sz int) (err error) {
 		} else {
 			m, err = r.Read(buf[:sz])
 		}
+		n += m
+		sz -= m
 		if err != nil {
 			return
 		}
-		sz -= m
 	}
 	return
 }

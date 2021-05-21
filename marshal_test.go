@@ -50,7 +50,7 @@ func TestStruct(test *testing.T) {
 	_, _ = encodeCompareLE, encodeCompareBE
 
 	// dfunctions to compare decoded data
-	decodeCompare := func(data []byte, out interface{}, endian bst.ByteOrder, compare interface{}) {
+	decodeCompare := func(data []byte, out interface{}, endian bst.ByteOrder, original interface{}) {
 		n, err := bst.Unmarshal(data, endian, out)
 		if err != nil {
 			test.Error(err)
@@ -61,8 +61,8 @@ func TestStruct(test *testing.T) {
 			return
 		}
 
-		if !reflect.DeepEqual(compare, out) {
-			test.Errorf("decoded data is not equal")
+		if !reflect.DeepEqual(original, out) {
+			test.Errorf("decoded data is not equal to original")
 		}
 	}
 	decodeCompareLE := func(data []byte, out interface{}, compare interface{}) { // compare with LittleEndian results
@@ -147,16 +147,8 @@ func TestStruct(test *testing.T) {
 		in := st{[]int16{1, 2, 3, 4}}
 		exp := []byte{0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00}
 		encodeCompareLE(in, exp)
-		out := struct {
-			A []int16 `binary:"[4]"` // exact size must be given for decoding
-		}{}
-		_, err := bst.Unmarshal(exp, bst.LittleEndian, &out)
-		if err != nil {
-			test.Error(err)
-			return
-		}
-		// note: in and out is not a same type and cannot be compared
-		decodeCompareLE(exp, &out.A, &in.A)
+		out := st{A: make([]int16, 4)} // the slice size will be the array size to be read
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// slice with type conversion and just-fit size
@@ -167,7 +159,7 @@ func TestStruct(test *testing.T) {
 		in := st{[]int{1, 2, 3, 4}}
 		exp := []byte{0x01, 0x02, 0x03, 0x04}
 		encodeCompareLE(in, exp)
-		out := st{}
+		out := st{} // the slice is automatically allocated if the slice is nil and the length is explicitly given
 		decodeCompareLE(exp, &out, &in)
 	}()
 
@@ -252,104 +244,130 @@ func TestStruct(test *testing.T) {
 		// Note: zero type will read no data; just skips bytes.
 		decodeCompareLE(exp, &out, &in)
 	}()
-	return
 
 	// string
 	func() {
-		type t struct {
+		type st struct {
 			S string
 		}
-		in := t{"hello"}
+		in := st{"hello"}
 		exp := []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f}
 		encodeCompareLE(in, exp)
+		out := struct {
+			S string `binary:"string(5)"`
+		}{}
+		_, e := bst.Unmarshal(exp, bst.LittleEndian, &out)
+		if e != nil {
+			test.Error(e)
+			return
+		}
+		if in.S != out.S {
+			test.Errorf("decode failed: string mismatch")
+		}
 	}()
 
 	// string with size reference
 	func() {
-		type t struct {
+		type st struct {
 			StringLen int16
 			Str       string `binary:"string(StringLen+1)"`
 		}
 		s := "hello"
-		in := t{int16(len(s)), s}
+		in := st{int16(len(s)), s}
 		exp := []byte{0x05, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00}
 		encodeCompareLE(in, exp)
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// string with multiple size reference including an unexported field
 	// TODO: do more tests on unexported fields??
 	func() {
-		type t struct {
+		type st struct {
 			N         uint8
 			stringLen int16  // this is an unexported field
 			Str       string `binary:"string(stringLen +2 -N)"`
 		}
 		s := "hello"
-		in := t{1, int16(len(s)), s}
+		in := st{1, int16(len(s)), s}
 		exp := []byte{0x01, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00}
 		encodeCompareLE(in, exp)
+		out := st{stringLen: int16(len(s))} // value of unexported fields must be given
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// bstring
 	func() {
-		type t struct {
+		type st1 struct {
 			S string `binary:"bstring"`
 		}
-		in := t{"hello"}
+		in := st1{"hello"}
 		exp := []byte{0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f}
 		encodeCompareLE(in, exp)
+		out := st1{}
+		decodeCompareLE(exp, &out, &in)
 
 		// fixed buffer size bstring
-		type t2 struct {
+		type st2 struct {
 			S string `binary:"bstring(10)"`
 		}
-		in2 := t2{"hello"}
+		in2 := st2{"hello"}
 		exp2 := []byte{0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0, 0, 0, 0, 0}
 		encodeCompareLE(in2, exp2)
+		out2 := st2{}
+		decodeCompareLE(exp2, &out2, &in2)
 	}()
 
 	// wstring
 	func() {
-		type t struct {
+		type st1 struct {
 			S string `binary:"wstring"`
 		}
-		in := t{"hello"}
+		in := st1{"hello"}
 		exp := []byte{0x05, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f}
 		encodeCompareLE(in, exp)
+		out := st1{}
+		decodeCompareLE(exp, &out, &in)
 
 		// fixed buffer size wstring
-		type t2 struct {
+		type st2 struct {
 			S string `binary:"wstring(10)"`
 		}
-		in2 := t2{"hello"}
+		in2 := st2{"hello"}
 		exp2 := []byte{0x05, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0, 0, 0, 0, 0}
 		encodeCompareLE(in2, exp2)
+		out2 := st2{}
+		decodeCompareLE(exp2, &out2, &in2)
 	}()
 
 	// dwstring
 	func() {
-		type t struct {
+		type st1 struct {
 			S string `binary:"dwstring"`
 		}
-		in := t{"hello"}
+		in := st1{"hello"}
 		exp := []byte{0x05, 0x00, 0x00, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f}
 		encodeCompareLE(in, exp)
+		out := st1{}
+		decodeCompareLE(exp, &out, &in)
 
 		// fixed buffer size dwstring
-		type t2 struct {
+		type st2 struct {
 			S string `binary:"dwstring(10)"`
 		}
-		in2 := t2{"hello"}
+		in2 := st2{"hello"}
 		exp2 := []byte{0x05, 0x00, 0x00, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0, 0, 0, 0, 0}
 		encodeCompareLE(in2, exp2)
+		out2 := st2{}
+		decodeCompareLE(exp2, &out2, &in2)
 	}()
 
 	// string to []string
 	func() {
-		type t struct {
+		type st1 struct {
 			S string `binary:"[3]string(0x10)"` // S matches to string[0]
 		}
-		in := t{"hello"}
+		in := st1{"hello"}
 		exp := []byte{
 			0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -359,63 +377,88 @@ func TestStruct(test *testing.T) {
 			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		}
 		encodeCompareLE(in, exp)
+		out := st1{}
+		decodeCompareLE(exp, &out, &in)
 
-		type t2 struct {
+		type st2 struct {
 			S string `binary:"[3]string(5)"`
 		}
-		in2 := t2{"hello"}
+		in2 := st2{"hello"}
 		exp2 := []byte{
 			0x68, 0x65, 0x6c, 0x6c, 0x6f,
 			0x00, 0x00, 0x00, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00, 0x00,
 		}
 		encodeCompareLE(in2, exp2)
+		out2 := st2{}
+		decodeCompareLE(exp2, &out2, &in2)
 	}()
 
 	// string to []byte
 	func() {
-		type t struct {
+		type st struct {
 			S string `binary:"[8]byte"`
 		}
-		in := t{"hello"}
+		in := st{"hello"}
 		exp := []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00}
 		encodeCompareLE(in, exp)
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
 	}()
 	//printHex(res)
 
 	// string to []int16
 	func() {
-		type t struct {
+		type st struct {
 			S string `binary:"[8]int16"`
 		}
-		in := t{"hello"}
+		in := st{"hello"}
 		exp := []byte{0x68, 0, 0x65, 0, 0x6c, 0, 0x6c, 0, 0x6f, 0, 0x00, 0, 0x00, 0, 0x00, 0}
 		encodeCompareLE(in, exp)
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// pointer deference
 	func() {
 		i6 := int32(6)
 		p6 := &i6
-		type tp struct {
+		type st struct {
 			P1 *int32
 			P2 **int32
 		}
-		sp := tp{p6, &p6}
-		op := []byte{0x06, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00}
-		encodeCompareLE(sp, op)
+		in := st{p6, &p6}
+		exp := []byte{0x06, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00}
+		encodeCompareLE(in, exp)
+		out := st{} // nil pointers are automatically allocated
+		decodeCompareLE(exp, &out, &in)
+		var c1, c2 int32
+		p2 := &c2
+		out2 := st{&c1, &p2} // nil pointers are automatically allocated
+
+		b1, b2 := out2.P1, out2.P2
+		decodeCompareLE(exp, &out2, &in) // non-nil pointers are used as-is
+		if b1 != out2.P1 || b2 != out2.P2 {
+			test.Errorf("pointer value changed")
+		}
 	}()
 
 	// interface
 	func() {
 		i6 := int32(6)
-		type ti struct {
+		p6 := &i6
+		type st struct {
 			I1 interface{}
 			I2 interface{}
 		}
-		si := ti{i6, &i6}
-		oi := []byte{0x06, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00}
-		encodeCompareLE(si, oi)
+		in := st{&i6, &p6}
+		exp := []byte{0x06, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00}
+		encodeCompareLE(in, exp)
+
+		n1, n2 := int32(0), int32(0)
+		p2 := &n2
+		out := st{&n1, &p2} // Interface must be set
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 	// some complex structure
@@ -464,6 +507,12 @@ func TestStruct(test *testing.T) {
 			0x01,
 		}
 		encodeCompareLE(in, exp)
+
+		// set implicitly written values
+		in.A6 = append(in.A6, []int{0, 0, 0}...)
+		// set ignoring fields
+		out := t{IGNORE: 9999, unexported: 999}
+		decodeCompareLE(exp, &out, &in)
 	}()
 
 }

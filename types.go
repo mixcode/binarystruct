@@ -60,8 +60,12 @@ const (
 	Pad    // padding zero bytes. Original value is ignored. Can be postfixed by '(size)' to set number of bytes. `binary:"pad(0x8)"`
 	Ignore // values with this tag are ignored. `binary:"ignore"`
 	Any    // any type. If no tag is set to a value, then the type will be Any, and the value's default encoding will be used.
+
+	// internal-only types
+	iArray // used in getNaturalType()
 )
 
+// invalid encoding type appears in a tag
 var ErrInvalidType = errors.New("invalid binary type")
 
 // get type value from its string name
@@ -93,101 +97,108 @@ func (t iType) iKind() iKind {
 }
 
 type typeOption struct {
-	indirectCount int    // if nonzero, original type is pointer and this value cotains the number of indirections
-	isArray       bool   // tagged type is "[arrayLen]TYPE"
-	arrayLen      int    // length of tagged arrayLen
-	bufLen        int    // tagged type is "STRINGTYPE(buflen)"
-	encoding      string // tag has "encoding=ENC"
+	indirectCount int    // if nonzero, original type is a pointer/interface and this value cotains the number of indirections to the actual value
+	isArray       bool   // if true, tagged field is an array: `binary:"[arrayLen]TYPE"`
+	arrayLen      int    // length of the tagged array
+	bufLen        int    // tagged field is a string or a padding of length bufLen: `binary:"STRINGTYPE(buflen)"`
+	encoding      string // string encoding of the field: `binary:"string,encoding=ENC"`
 }
 
-func getNaturalType(v reflect.Value) (t iType, option typeOption) {
-	kind := v.Kind()
-
-	for kind == reflect.Ptr || kind == reflect.Interface {
-		v = v.Elem()
-		kind = v.Kind()
-		option.indirectCount++
-	}
-
-	switch kind {
+func getITypeFromRType(rt reflect.Type) (it iType) {
+	switch rt.Kind() {
 
 	// exact sized values
 	case reflect.Int8:
-		t = Int8
-		return
+		return Int8
 	case reflect.Int16:
-		t = Int16
-		return
+		return Int16
 	case reflect.Int32:
-		t = Int32
-		return
+		return Int32
 	case reflect.Int64:
-		t = Int64
-		return
+		return Int64
 
 	case reflect.Uint8:
-		t = Uint8
-		return
+		return Uint8
 	case reflect.Uint16:
-		t = Uint16
-		return
+		return Uint16
 	case reflect.Uint32:
-		t = Uint32
-		return
+		return Uint32
 	case reflect.Uint64:
-		t = Uint64
-		return
+		return Uint64
 
 	case reflect.Float32:
-		t = Float32
-		return
+		return Float32
 	case reflect.Float64:
-		t = Float64
-		return
+		return Float64
 
 	// architecture-dependent sized values
 	case reflect.Bool:
-		t = Uint8
-		return
+		return Uint8
 	case reflect.Int:
-		t = Int64
-		return
+		return Int64
 	case reflect.Uint:
-		t = Uint64
-		return
+		return Uint64
 
 	// non-scalar types
 	case reflect.String:
-		t = String
-		return
+		return String
 	case reflect.Struct:
-		t = iStruct
-		return
+		return iStruct
 
 	// array and slice
 	case reflect.Array, reflect.Slice:
-		elem := v.Type().Elem()
-		k := elem.Kind()
+		return iArray
+
+	case reflect.Ptr, reflect.Interface:
+		return Any
+	}
+	return iInvalid
+}
+
+func getNaturalType(v reflect.Value) (t iType, option typeOption) {
+
+	typ := v.Type()
+	kind := typ.Kind()
+
+	isNil := false
+	for kind == reflect.Ptr || kind == reflect.Interface {
+		option.indirectCount++
+		if v.IsNil() {
+			if kind == reflect.Interface {
+				// can't determine the type of nil interface
+				t = Any
+				return
+			}
+			typ = typ.Elem()
+			kind = typ.Kind()
+			isNil = true
+		} else {
+			v = v.Elem()
+			typ = v.Type()
+			kind = typ.Kind()
+		}
+	}
+
+	t = getITypeFromRType(typ)
+
+	if t == iArray {
+		elementType := typ.Elem()
+		k := elementType.Kind()
 		option.isArray = true
 		if k == reflect.Array || k == reflect.Slice {
 			t = Any
 			return
 		}
-		option.arrayLen = v.Len()
-		t, _ = getNaturalType(reflect.New(elem).Elem())
-		return
-
-		//default:
-		//case reflect.Complex64, reflect.Complex128:
-		//case reflect.Chan, reflect.Func, reflect.Map, reflect.UnsafePointer, reflect.Invalid
-		//case reflect.Uintptr:
+		if !isNil {
+			option.arrayLen = v.Len()
+		}
+		t = getITypeFromRType(elementType)
 	}
 
-	t = iInvalid
 	return
 }
 
-// decodeFunc() generates a binary type to go-type conversion function
+// decodeFunc() generates a binary-type to go-type conversion function
 func decodeFunc(srcType iType, destRType reflect.Type) (bytesz int, decoder func(reflect.Value, uint64) error) {
 
 	printerr := func(v interface{}, t reflect.Value) error {
@@ -223,6 +234,8 @@ func decodeFunc(srcType iType, destRType reflect.Type) (bytesz int, decoder func
 					n = int64(int32(u))
 				case 8:
 					n = int64(u)
+				default:
+					panic("invalid byte size")
 				}
 				if v.OverflowInt(n) {
 					return printerr(n, v)
@@ -278,6 +291,8 @@ func decodeFunc(srcType iType, destRType reflect.Type) (bytesz int, decoder func
 					n = int64(int32(u))
 				case 8:
 					n = int64(u)
+				default:
+					panic("invalid byte size")
 				}
 				if n < 0 {
 					return printerr(n, v)
@@ -370,7 +385,7 @@ func decodeFunc(srcType iType, destRType reflect.Type) (bytesz int, decoder func
 	return 0, nil
 }
 
-// encodeFunc() generates a go-type to binary type conversion function
+// encodeFunc() generates a go-type to binary-type conversion function
 func encodeFunc(srcRType reflect.Type, destType iType) func(reflect.Value) (uint64, int, error) {
 
 	printErrNotFit := func(v interface{}, t iType) error {
@@ -520,18 +535,18 @@ func encodeFunc(srcRType reflect.Type, destType iType) func(reflect.Value) (uint
 	return nil
 }
 
-// iKind of types
+// internal kind of types
 type iKind uint
 
 const (
 	invalidKind iKind = iota
-	intKind
-	uintKind
-	bitmapKind
-	floatKind
-	stringKind
-	structKind
-	anyKind
+	intKind           // signed number
+	uintKind          // unsigned number
+	bitmapKind        // type-agnosic bits
+	floatKind         // floating point value
+	stringKind        // string
+	structKind        // struct
+	anyKind           // other types
 )
 
 var (
@@ -583,6 +598,8 @@ var (
 		Any:     {anyKind, 0, 0, 0},
 
 		Ignore: {anyKind, 0, 0, 0},
+
+		iArray: {anyKind, 0, 0, 0}, // internal only
 	}
 )
 

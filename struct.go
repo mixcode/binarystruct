@@ -23,7 +23,7 @@ var (
 	mExpression = regexp.MustCompile(`\s*([\+\-])?\s*([^\s\+\-]+)`)
 )
 
-// simple add-sub calculator, with struct field reference
+// simple add-sub calculator, with struct field referencing
 func evaluateTagValue(strc reflect.Value, stmt string) (value int, err error) {
 
 	type entry struct {
@@ -34,12 +34,12 @@ func evaluateTagValue(strc reflect.Value, stmt string) (value int, err error) {
 
 	m := mExpression.FindAllStringSubmatchIndex(stmt, -1)
 	for _, n := range m {
-		v := entry{}
+		e := entry{}
 		if n[2] >= 0 {
-			v.operation = stmt[n[2]:n[3]]
+			e.operation = stmt[n[2]:n[3]]
 		}
-		v.value = stmt[n[4]:n[5]]
-		poly = append(poly, v)
+		e.value = stmt[n[4]:n[5]]
+		poly = append(poly, e)
 	}
 
 	printerr := func(s string) error {
@@ -88,7 +88,7 @@ func evaluateTagValue(strc reflect.Value, stmt string) (value int, err error) {
 	return
 }
 
-// read tag from
+// read struct tag
 func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encodeType iType, option typeOption, err error) {
 
 	field := structType.Field(i)
@@ -172,9 +172,7 @@ func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encod
 		}
 	}
 
-	//fmt.Printf("OPTION: %v\n", option) //!!DEBUG
-
-	// binary: ""		// ignore
+	// binary: "ignore"		// ignore
 
 	// binary: "type"
 	// binary: "[size]type"

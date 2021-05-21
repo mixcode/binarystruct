@@ -167,8 +167,6 @@ func TestStruct(test *testing.T) {
 		decodeCompareBE(expBE, &out2, &correct)
 	}()
 
-	return
-
 	func() {
 		type st struct {
 			A []int16
@@ -461,14 +459,14 @@ func TestStruct(test *testing.T) {
 		encodeCompareLE(in, exp)
 		out := st{} // nil pointers are automatically allocated
 		decodeCompareLE(exp, &out, &in)
+
 		var c1, c2 int32
 		p2 := &c2
-		out2 := st{&c1, &p2} // nil pointers are automatically allocated
-
+		out2 := st{&c1, &p2} // non-nil pointers are used as-is
 		b1, b2 := out2.P1, out2.P2
-		decodeCompareLE(exp, &out2, &in) // non-nil pointers are used as-is
+		decodeCompareLE(exp, &out2, &in)
 		if b1 != out2.P1 || b2 != out2.P2 {
-			test.Errorf("pointer value changed")
+			test.Errorf("pointer changed")
 		}
 	}()
 
@@ -486,7 +484,7 @@ func TestStruct(test *testing.T) {
 
 		n1, n2 := int32(0), int32(0)
 		p2 := &n2
-		out := st{&n1, &p2} // Interface must be set
+		out := st{&n1, &p2} // Interface must be pre-set to be unmarshalled
 		decodeCompareLE(exp, &out, &in)
 	}()
 
@@ -525,7 +523,7 @@ func TestStruct(test *testing.T) {
 				F1 float32
 				I2 int32
 			}{12.34, 0x01020304},
-			999,
+			999, // unexported value
 		}
 		exp := []byte{
 			0x01, 0x02, 0x00, 0x01, 0x05, 0x00, 0x68, 0x65,
@@ -539,8 +537,9 @@ func TestStruct(test *testing.T) {
 
 		// set implicitly written values
 		in.A6 = append(in.A6, []int{0, 0, 0}...)
-		// set ignoring fields
-		out := t{IGNORE: 9999, unexported: 999}
+		// clear ignored values
+		in.IGNORE, in.unexported = 0, 0
+		out := t{}
 		decodeCompareLE(exp, &out, &in)
 	}()
 

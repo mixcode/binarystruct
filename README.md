@@ -40,4 +40,4 @@ fmt.Println(strc)
 
 
 ## See alse
-See [go document]() for details.
+See [go document](https://pkg.go.dev/github.com/mixcode/binarystruct) for details.

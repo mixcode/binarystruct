@@ -7,22 +7,53 @@ import (
 	"math"
 	"reflect"
 	"strings"
+
+	"golang.org/x/text/encoding"
 )
 
-// Marshal encodes data into a binary image and return it as []byte.
-func Marshal(data interface{}, order ByteOrder) ([]byte, error) {
+// Marshal encodes a go value into a binary image and return it as []byte.
+func Marshal(govalue interface{}, order ByteOrder) (encoded []byte, err error) {
+	var ms Marshaller
+	return (&ms).Marshal(govalue, order)
+}
+
+// Write encodes the go value into binary stream and writes to r.
+func Write(w io.Writer, order ByteOrder, govalue interface{}) (n int, err error) {
+	var ms Marshaller
+	return (&ms).Write(w, order, govalue)
+}
+
+// Marshaller is go-type to binary-type encoder with environmental values
+type Marshaller struct {
+	TextEncoder map[string]encoding.Encoding
+
+	encoderCache map[string]*encoding.Encoder // cache of encoding.NewEncoder()
+	decoderCache map[string]*encoding.Decoder // cache of encoding.NewDecoder()
+}
+
+// AddTextEncoder set a new text encoder to Marshaller.
+// Provided encodingName could be used in string tag's encoding property. ex) `binary:"string,encoding=encodingName"`
+func (ms *Marshaller) AddTextEncoder(encodingName string, enc encoding.Encoding) {
+	if ms.TextEncoder == nil {
+		ms.TextEncoder = make(map[string]encoding.Encoding)
+	}
+	ms.TextEncoder[encodingName] = enc
+}
+
+// Marshaller.Marshal() is the main binary image encoder
+func (ms *Marshaller) Marshal(data interface{}, order ByteOrder) ([]byte, error) {
 	var b bytes.Buffer
-	_, err := writeValue(&b, order, reflect.ValueOf(data))
+	_, err := ms.Write(&b, order, data)
 	return b.Bytes(), err
 }
 
-// Write encodes data into binary stream and writes to r.
-func Write(w io.Writer, order ByteOrder, data interface{}) (n int, err error) {
-	return writeValue(w, order, reflect.ValueOf(data))
+// Marshaller.Write() is the main binary stream encoder
+func (ms *Marshaller) Write(w io.Writer, order ByteOrder, data interface{}) (n int, err error) {
+	return ms.writeValue(w, order, reflect.ValueOf(data))
 }
 
 // write a reflect.Value
-func writeValue(w io.Writer, order ByteOrder, v reflect.Value) (n int, err error) {
+func (ms *Marshaller) writeValue(w io.Writer, order ByteOrder, v reflect.Value) (n int, err error) {
 	t := v.Type()
 	k := t.Kind()
 	for k == reflect.Ptr || k == reflect.Interface {
@@ -32,11 +63,11 @@ func writeValue(w io.Writer, order ByteOrder, v reflect.Value) (n int, err error
 	}
 	encodeType, option := getNaturalType(v)
 
-	return writeMain(w, order, v, encodeType, option)
+	return ms.writeMain(w, order, v, encodeType, option)
 }
 
 // write a value as given type
-func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, option typeOption) (n int, err error) {
+func (ms *Marshaller) writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, option typeOption) (n int, err error) {
 
 	// type was a pointer or an interface
 	if option.indirectCount > 0 {
@@ -50,14 +81,14 @@ func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, 
 		if option.arrayLen == 0 {
 			return
 		}
-		return writeArray(w, order, v, encodeType, option)
+		return ms.writeArray(w, order, v, encodeType, option)
 	}
 
 	// based on individual type
 	switch encodeType {
 
 	case iStruct:
-		return writeStruct(w, order, v)
+		return ms.writeStruct(w, order, v)
 
 	case Pad: // padding zero bytes: `binary:"pad(10)"`
 		l := option.bufLen
@@ -78,35 +109,21 @@ func writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, 
 	switch encodeType.iKind() {
 
 	case intKind, uintKind, bitmapKind, floatKind:
-		return writeScalar(w, order, v, encodeType)
+		return ms.writeScalar(w, order, v, encodeType)
 
 	case structKind:
-		return writeStruct(w, order, v)
+		return ms.writeStruct(w, order, v)
 
 	case stringKind:
-		return writeString(w, order, v, encodeType, option.bufLen, option.encoding)
+		return ms.writeString(w, order, v, encodeType, option.bufLen, option.encoding)
 	}
 
 	err = fmt.Errorf("unknown type %s", encodeType)
 	return
 }
 
-// write a scalar value
-func writeScalar(w io.Writer, order ByteOrder, v reflect.Value, k iType) (n int, err error) {
-	enc := encodeFunc(v.Type(), k)
-	if enc == nil {
-		err = ErrInvalidType
-		return
-	}
-	u64, sz, err := enc(v)
-	if err != nil {
-		return
-	}
-	return writeU64(w, order, u64, sz)
-}
-
 // write an array
-func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType iType, option typeOption) (n int, err error) {
+func (ms *Marshaller) writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType iType, option typeOption) (n int, err error) {
 
 	arrayKind := array.Kind()
 	//
@@ -150,7 +167,7 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType i
 			e = array
 		}
 		if elementType == Any {
-			m, err = writeValue(w, order, e)
+			m, err = ms.writeValue(w, order, e)
 			if err != nil {
 				err = wErr(i, err)
 				return
@@ -159,7 +176,7 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType i
 			var o typeOption
 			o.bufLen = option.bufLen     // option may contain inheritable values
 			o.encoding = option.encoding // option may contain inheritable values
-			m, err = writeMain(w, order, e, elementType, o)
+			m, err = ms.writeMain(w, order, e, elementType, o)
 			if err != nil {
 				err = wErr(i, err)
 				return
@@ -198,7 +215,7 @@ func writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType i
 }
 
 // write a struct
-func writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err error) {
+func (ms *Marshaller) writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err error) {
 	typ := strc.Type()
 	nField := typ.NumField()
 	wErr := func(i int, e error) error {
@@ -223,7 +240,7 @@ func writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err e
 		}
 
 		var m int
-		m, err = writeMain(w, order, strc.Field(i), encodeType, option)
+		m, err = ms.writeMain(w, order, strc.Field(i), encodeType, option)
 		if err != nil {
 			err = wErr(i, err)
 			return
@@ -233,17 +250,74 @@ func writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err e
 	return
 }
 
+// encode string with installed encoding
+func (ms *Marshaller) encodeText(utf8 []byte, textEncoding string) (encoded []byte, err error) {
+	if textEncoding == "" {
+		encoded = utf8
+		return
+	}
+	var ec *encoding.Encoder
+	if ms.encoderCache != nil {
+		ec = ms.encoderCache[textEncoding]
+	}
+	if ec == nil {
+		if ms.TextEncoder != nil {
+			ec = ms.TextEncoder[textEncoding].NewEncoder()
+		}
+		if ec == nil {
+			err = fmt.Errorf("unknown text encoding %s", textEncoding)
+			return
+		}
+		if ms.encoderCache == nil {
+			ms.encoderCache = make(map[string]*encoding.Encoder)
+		}
+		ms.encoderCache[textEncoding] = ec
+	}
+	return ec.Bytes(utf8)
+}
+
+// decode string with instlled encoding
+func (ms *Marshaller) decodeText(encoded []byte, textEncoding string) (utf8 []byte, err error) {
+	if textEncoding == "" {
+		utf8 = encoded
+		return
+	}
+	var dc *encoding.Decoder
+	if ms.decoderCache != nil {
+		dc = ms.decoderCache[textEncoding]
+	}
+	if dc == nil {
+		if ms.TextEncoder != nil {
+			dc = ms.TextEncoder[textEncoding].NewDecoder()
+		}
+		if dc == nil {
+			err = fmt.Errorf("unknown text encoding %s", textEncoding)
+			return
+		}
+		if ms.decoderCache == nil {
+			ms.decoderCache = make(map[string]*encoding.Decoder)
+		}
+		ms.decoderCache[textEncoding] = dc
+	}
+	return dc.Bytes(encoded)
+}
+
 // write string types
-func writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, bufLen int, encoding string) (n int, err error) {
+func (ms *Marshaller) writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, bufLen int, textEncoding string) (n int, err error) {
 	s := v.String()
+	stringBytes := []byte(s)
 
 	var m int
 
-	//
-	// TODO: process string encoding
-	//
+	// process text encoding
+	if textEncoding != "" {
+		stringBytes, err = ms.encodeText(stringBytes, textEncoding)
+		if err != nil {
+			return
+		}
+	}
 
-	strlen := len(s)
+	strlen := len(stringBytes)
 	if bufLen <= 0 {
 		bufLen = strlen
 	}
@@ -277,7 +351,7 @@ func writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType
 	}
 
 	// write string bytes
-	m, err = w.Write([]byte(s))
+	m, err = w.Write(stringBytes)
 	n += m
 	if err != nil {
 		return
@@ -288,6 +362,20 @@ func writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType
 		return zeroFill(w, bufLen-m)
 	}
 	return
+}
+
+// write a scalar value
+func (ms *Marshaller) writeScalar(w io.Writer, order ByteOrder, v reflect.Value, k iType) (n int, err error) {
+	enc := encodeFunc(v.Type(), k)
+	if enc == nil {
+		err = ErrInvalidType
+		return
+	}
+	u64, sz, err := enc(v)
+	if err != nil {
+		return
+	}
+	return writeU64(w, order, u64, sz)
 }
 
 // write bytes according to the byte order

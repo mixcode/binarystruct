@@ -14,34 +14,46 @@ import (
 )
 
 var (
-	ErrCannotSet     = errors.New("the value cannot be set")
-	ErrNotAnArray    = errors.New("must be an array or slice type")
-	ErrUnknownLength = errors.New("unknown array, slice or string size")
+	ErrCannotSet     = errors.New("the value cannot be set")             // supplied value is not a pointer type
+	ErrNotAnArray    = errors.New("must be an array or slice type")      // the field is tagged as array but underlying value is not
+	ErrUnknownLength = errors.New("unknown array, slice or string size") // cannot determine the length of an array
 )
 
-// Unmarshal decodes binary images into data. Data should be a writable type such as a slice, a pointer or an interface.
-func Unmarshal(input []byte, order binary.ByteOrder, data interface{}) (n int, err error) {
-	buf := bytes.NewBuffer(input)
-	return readValue(buf, order, reflect.ValueOf(data))
+// Unmarshal decodes binary images into govalue. Govalue must be a writable type such as a slice, a pointer or an interface.
+func Unmarshal(input []byte, order binary.ByteOrder, govalue interface{}) (n int, err error) {
+	var ms Marshaller
+	return (&ms).Unmarshal(input, order, govalue)
 }
 
-// Read reads binary structured data from r into data. Data should be a writable type such as a slice, a pointer or an interface.
+// Read reads binary data from r and decode it into govalue. Govalue must be a writable type such as a slice, a pointer or an interface.
 func Read(r io.Reader, order binary.ByteOrder, data interface{}) (n int, err error) {
-	return readValue(r, order, reflect.ValueOf(data))
+	var ms Marshaller
+	return (&ms).readValue(r, order, reflect.ValueOf(data))
+}
+
+// Unmarshaller.Unmarshal() is the main binary image decoder
+func (ms *Marshaller) Unmarshal(input []byte, order binary.ByteOrder, govalue interface{}) (n int, err error) {
+	buf := bytes.NewBuffer(input)
+	return ms.Read(buf, order, govalue)
+}
+
+// Unmarshaller.Read() is the main binary stream decoder
+func (ms *Marshaller) Read(r io.Reader, order binary.ByteOrder, data interface{}) (n int, err error) {
+	return ms.readValue(r, order, reflect.ValueOf(data))
 }
 
 // read a reflect.Value
-func readValue(r io.Reader, order ByteOrder, v reflect.Value) (n int, err error) {
+func (ms *Marshaller) readValue(r io.Reader, order ByteOrder, v reflect.Value) (n int, err error) {
 	k := v.Type().Kind()
 	if k == reflect.Ptr || k == reflect.Interface {
 		v, _ = dereferencePointer(v)
 	}
 	encodeType, option := getNaturalType(v)
-	return readMain(r, order, v, encodeType, option)
+	return ms.readMain(r, order, v, encodeType, option)
 }
 
 // read a value as given type
-func readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, option typeOption) (n int, err error) {
+func (ms *Marshaller) readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, option typeOption) (n int, err error) {
 	// type was a pointer or an interface
 	if option.indirectCount > 0 {
 		for i := 0; i < option.indirectCount; i++ {
@@ -51,14 +63,14 @@ func readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, o
 
 	if option.isArray {
 		// read an array
-		return readArray(r, order, v, encodeType, option)
+		return ms.readArray(r, order, v, encodeType, option)
 	}
 
 	// based on individual type
 	switch encodeType {
 
 	case iStruct:
-		return readStruct(r, order, v)
+		return ms.readStruct(r, order, v)
 
 	case Pad: // padding zero bytes: `binary:"pad(10)"`
 		l := option.bufLen
@@ -79,61 +91,20 @@ func readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, o
 	switch encodeType.iKind() {
 
 	case intKind, uintKind, bitmapKind, floatKind:
-		return readScalar(r, order, v, encodeType)
+		return ms.readScalar(r, order, v, encodeType)
 
 	case structKind:
-		return readStruct(r, order, v)
+		return ms.readStruct(r, order, v)
 
 	case stringKind:
-		return readString(r, order, v, encodeType, option.bufLen, option.encoding)
+		return ms.readString(r, order, v, encodeType, option.bufLen, option.encoding)
 	}
 
 	err = fmt.Errorf("unknown type %s", encodeType)
 	return
 }
 
-// read a scalar value
-func readScalar(r io.Reader, order ByteOrder, v reflect.Value, k iType) (n int, err error) {
-	if !v.CanSet() {
-		err = ErrCannotSet
-		return
-	}
-	sz, dec := decodeFunc(k, v.Type())
-	u64, n, err := readU64(r, order, sz)
-	if err != nil {
-		return
-	}
-	err = dec(v, u64)
-	return
-}
-
-// follow pointers to the end
-func dereferencePointer(p reflect.Value) (value reflect.Value, indirectCount int) {
-	if !p.IsValid() {
-		return // not a valid reference
-	}
-	eType := p.Type()
-	eKind := eType.Kind()
-	for eKind == reflect.Ptr || eKind == reflect.Interface {
-		indirectCount++
-		if eKind == reflect.Ptr && p.IsNil() {
-			// add a new value to the pointer
-			newP := reflect.New(eType.Elem()) // allocate a new value and get its pointer
-			p.Set(newP)                       // set the pointer
-		}
-		p = p.Elem()
-		if !p.IsValid() {
-			value = p
-			return // not a valid reference
-		}
-		eType = p.Type()
-		eKind = eType.Kind()
-	}
-	value = p
-	return
-}
-
-func readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType iType, option typeOption) (n int, err error) {
+func (ms *Marshaller) readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType iType, option typeOption) (n int, err error) {
 
 	arrayLen := option.arrayLen
 
@@ -161,12 +132,12 @@ func readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType iT
 		var m int
 		for i := 0; i < l; i++ {
 			if elementType == Any {
-				m, err = readValue(r, order, uslice.Index(i))
+				m, err = ms.readValue(r, order, uslice.Index(i))
 			} else {
 				var o typeOption
 				o.bufLen = option.bufLen     // option may contain inheritable values
 				o.encoding = option.encoding // option may contain inheritable values
-				m, err = readMain(r, order, uslice.Index(i), elementType, o)
+				m, err = ms.readMain(r, order, uslice.Index(i), elementType, o)
 			}
 			n += m
 			if err != nil {
@@ -195,14 +166,14 @@ func readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType iT
 }
 
 // read an array or slice
-func readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iType, option typeOption) (n int, err error) {
+func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iType, option typeOption) (n int, err error) {
 
 	// deference a pointer or an interface
 	array, _ = dereferencePointer(array)
 	eKind := array.Kind()
 
 	if eKind == reflect.Slice {
-		return readSlice(r, order, array, elementType, option)
+		return ms.readSlice(r, order, array, elementType, option)
 	}
 
 	// special case 1:
@@ -241,7 +212,7 @@ func readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iT
 		// if the value is a string and the encoded type is array of numbers, then
 		//	s string	`binary:[5]int8`	// 5-byte wide string
 		buf := make([]byte, arrayLen)
-		n, err = readSlice(r, order, reflect.ValueOf(buf), elementType, option)
+		n, err = ms.readSlice(r, order, reflect.ValueOf(buf), elementType, option)
 		if err != nil {
 			return
 		}
@@ -279,12 +250,12 @@ func readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iT
 		}
 
 		if elementType == Any {
-			m, err = readValue(r, order, v)
+			m, err = ms.readValue(r, order, v)
 		} else {
 			var o typeOption
 			o.bufLen = option.bufLen     // option may contain inheritable values
 			o.encoding = option.encoding // option may contain inheritable values
-			m, err = readMain(r, order, v, elementType, o)
+			m, err = ms.readMain(r, order, v, elementType, o)
 		}
 		n += m
 		if err != nil {
@@ -305,7 +276,7 @@ func readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iT
 		newv := reflect.New(v.Type()).Elem()
 		o := typeOption{bufLen: option.bufLen, encoding: option.encoding}
 		for i := readLen; i < arrayLen; i++ {
-			m, err = readMain(r, order, newv, elementType, o)
+			m, err = ms.readMain(r, order, newv, elementType, o)
 			n += m
 			if err != nil {
 				err = wErr(i, err)
@@ -318,7 +289,7 @@ func readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iT
 }
 
 // read a struct
-func readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err error) {
+func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err error) {
 	typ := strc.Type()
 	nField := typ.NumField()
 	wErr := func(i int, e error) error {
@@ -353,7 +324,7 @@ func readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err er
 		}
 
 		var m int
-		m, err = readMain(r, order, v, encodeType, option)
+		m, err = ms.readMain(r, order, v, encodeType, option)
 		if err != nil {
 			err = wErr(i, err)
 			return
@@ -364,7 +335,7 @@ func readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err er
 }
 
 // read string types
-func readString(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, bufLen int, encoding string) (n int, err error) {
+func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, bufLen int, textEncoding string) (n int, err error) {
 
 	// read string length
 	headersz := 0
@@ -402,9 +373,14 @@ func readString(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType,
 		return
 	}
 
-	//
-	// TODO: process string encoding (before removing terminating zeros)
-	//
+	// process text encoding (before removing terminating zeros)
+	if textEncoding != "" && m > 0 {
+		buf, err = ms.decodeText(buf, textEncoding)
+		if err != nil {
+			return
+		}
+		strlen = len(buf)
+	}
 
 	// remove terminaing zeros if buffer is larger than actual string
 	for ; strlen > 0 && buf[strlen-1] == 0; strlen-- {
@@ -435,6 +411,47 @@ func readU64(r io.Reader, order ByteOrder, bytesize int) (u64 uint64, n int, err
 	default:
 		panic("invalid byte size")
 	}
+	return
+}
+
+// read a scalar value
+func (ms *Marshaller) readScalar(r io.Reader, order ByteOrder, v reflect.Value, k iType) (n int, err error) {
+	if !v.CanSet() {
+		err = ErrCannotSet
+		return
+	}
+	sz, dec := decodeFunc(k, v.Type())
+	u64, n, err := readU64(r, order, sz)
+	if err != nil {
+		return
+	}
+	err = dec(v, u64)
+	return
+}
+
+// follow pointers to the end
+func dereferencePointer(p reflect.Value) (value reflect.Value, indirectCount int) {
+	if !p.IsValid() {
+		return // not a valid reference
+	}
+	eType := p.Type()
+	eKind := eType.Kind()
+	for eKind == reflect.Ptr || eKind == reflect.Interface {
+		indirectCount++
+		if eKind == reflect.Ptr && p.IsNil() {
+			// add a new value to the pointer
+			newP := reflect.New(eType.Elem()) // allocate a new value and get its pointer
+			p.Set(newP)                       // set the pointer
+		}
+		p = p.Elem()
+		if !p.IsValid() {
+			value = p
+			return // not a valid reference
+		}
+		eType = p.Type()
+		eKind = eType.Kind()
+	}
+	value = p
 	return
 }
 

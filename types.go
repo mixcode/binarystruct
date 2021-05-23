@@ -13,7 +13,7 @@ import (
 type ByteOrder = binary.ByteOrder
 
 var (
-	// byte order
+	// byte orders
 	BigEndian    binary.ByteOrder = binary.BigEndian
 	LittleEndian binary.ByteOrder = binary.LittleEndian
 )
@@ -65,8 +65,7 @@ const (
 	iArray // used in getNaturalType()
 )
 
-// invalid encoding type appears in a tag
-var ErrInvalidType = errors.New("invalid binary type")
+var ErrInvalidType = errors.New("invalid binary type") // possibly invalid encoding type appears in a tag
 
 // get type value from its string name
 func typeByName(name string) iType {

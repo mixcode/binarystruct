@@ -23,11 +23,11 @@ blob := []byte { 0x61, 0x62, 0x63, 0x64,
 
 // Go struct, with field types specified in tags
 strc := struct {
-	Header       string `binary:"[4]byte"` // marshaled to 4 bytes
-	ValueInt8    int    `binary:"int8"`    // marshaled to single byte
-	ValueUint16  int    `binary:"uint16"`  // marshaled to two bytes
-	ValueDword32 int    `binary:"dword"`   // marshaled to four bytes
-}
+	Header       string `binary:"[4]byte"` // mapped to 4 bytes
+	ValueInt8    int    `binary:"int8"`    // mapped to single signed byte
+	ValueUint16  int    `binary:"uint16"`  // mapped to two bytes
+	ValueDword32 int    `binary:"dword"`   // mapped to four bytes
+}{}
 
 // Unmarshal binary data into the struct
 readsz, err := binarystruct.Unmarshal(blob, binarystruct.BigEndian, &strc)

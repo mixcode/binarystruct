@@ -1,3 +1,5 @@
+// Copyright 2021 mixcode@github
+
 package binarystruct
 
 import (
@@ -19,66 +21,89 @@ var (
 )
 
 // Name of encoding binary types recoginized in the struct field tags.
-type iType uint
+type eType uint
 
 const (
-	iInvalid iType = iota // internal invalid type
+	iInvalid eType = iota // internal invalid type
 
-	// Name in tags are case insensitive. e.g.) `binary:"Int8"` is same with `binary:int8"`.
-	// signed values. Must respect its valid range. For example, Int8 must be in [-128, 127].
+	//
+	// Encoding types for struct field tags.
+	// Note that type names in tags are case insensitive.
+	//
+	//
+	// Signed values. Vaules must respect its valid range.
+	// e.g.) Int8 must be in [-128, 127].
 	Int8  // `binary:"int8"`
 	Int16 // `binary:"int16"`
 	Int32 // `binary:"int32"`
 	Int64 // `binary:"int64"`
-
-	// unsigned values. Must repect its valid range. For example, Uint8 must be in [0, 255].
+	//
+	// Unsigned values. Must respect its valid range.
+	// e.g.) Uint8 must be in [0, 255].
 	Uint8  // `binary:"uint8"`
 	Uint16 // `binary:"uint16"`
 	Uint32 // `binary:"uint32"`
 	Uint64 // `binary:"uint64"`
-
-	// sign-agnostic bitmaps. For example, Byte could be mapped to either int8 or uint8.
+	//
+	// Sign-agnostic bitmaps.
+	// Be careful that these types are ambiguous in type conversion.
+	// i.e) int `binary:"byte"` could map both 255 and -1 to 0xff.
 	Byte  // 8-bit byte. `binary: "byte"`
 	Word  // 16-bit word. `binary: "word"`
 	Dword // 32-bit double word. `binary: "dword"`
 	Qword // 64-bit quad word. `binary: "qword"`
-
-	// floating point values.
+	//
+	// Floating point values.
 	Float32 // `binary:"float32"`
 	Float64 // `binary:"float64"`
-
-	// string types. If string types are postfixed by '(size)', then the encoded size will be exactly size bytes long.
-	String   // []byte. `binary:"string"` `binary:"string(0x10),encoding=utf16"`
-	Bstring  // {size Uint8, string [size]byte}	`binary:"bstring"`
+	//
+	// String types.
+	// When string types are postfixed by '(size)'
+	// then the encoded size will be exactly size bytes long.
+	String   // []byte. `binary:"string"` `binary:"string(size)"`
+	Bstring  // {size Uint8, string [size]byte}  `binary:"bstring"`
 	Wstring  // {size Uint16, string [size]byte} `binary:"wstring"`
 	Dwstring // {size Uint32, string [size]byte} `binary:"dwstring"`
 
-	// a struct type
+	// struct type
 	iStruct // internal struct type
 
 	// misc types
-	Pad    // padding zero bytes. Original value is ignored. Can be postfixed by '(size)' to set number of bytes. `binary:"pad(0x8)"`
-	Ignore // values with this tag are ignored. `binary:"ignore"`
-	Any    // any type. If no tag is set to a value, then the type will be Any, and the value's default encoding will be used.
+	//
+
+	// Pad is padding zero bytes. Original value is ignored.
+	// May be postfixed by '(size)' to set number of bytes.
+	// e.g.) `binary:"pad(0x8)"`
+	Pad
+
+	// Values with Ignore tag are ignored. `binary:"ignore"`
+	Ignore
+
+	// If a field is tagged with Any, or no tag is set,
+	// then the the value's default encoding will be used.
+	Any
 
 	// internal-only types
 	iArray // used in getNaturalType()
 )
 
-var ErrInvalidType = errors.New("invalid binary type") // possibly invalid encoding type appears in a tag
+var (
+	// possibly an invalid encoding type appears in a tag
+	ErrInvalidType = errors.New("invalid binary type")
+)
 
 // get type value from its string name
-func typeByName(name string) iType {
+func typeByName(name string) eType {
 	return typeMap[strings.ToLower(name)]
 }
 
 // string representation of the type
-func (t iType) String() string {
+func (t eType) String() string {
 	return typeNameMap[t]
 }
 
 // Byte size of the type. If the type is not a scalar type (like slice), this function returns zero
-func (t iType) ByteSize() int {
+func (t eType) ByteSize() int {
 	p, ok := properties[t]
 	if ok {
 		return p.bytesize
@@ -87,7 +112,7 @@ func (t iType) ByteSize() int {
 }
 
 // get internal kind type
-func (t iType) iKind() iKind {
+func (t eType) iKind() iKind {
 	p, ok := properties[t]
 	if ok {
 		return p.kind
@@ -103,7 +128,7 @@ type typeOption struct {
 	encoding      string // string encoding of the field: `binary:"string,encoding=ENC"`
 }
 
-func getITypeFromRType(rt reflect.Type) (it iType) {
+func getITypeFromRType(rt reflect.Type) (it eType) {
 	switch rt.Kind() {
 
 	// exact sized values
@@ -154,7 +179,7 @@ func getITypeFromRType(rt reflect.Type) (it iType) {
 	return iInvalid
 }
 
-func getNaturalType(v reflect.Value) (t iType, option typeOption) {
+func getNaturalType(v reflect.Value) (t eType, option typeOption) {
 
 	typ := v.Type()
 	kind := typ.Kind()
@@ -198,7 +223,7 @@ func getNaturalType(v reflect.Value) (t iType, option typeOption) {
 }
 
 // decodeFunc() generates a binary-type to go-type conversion function
-func decodeFunc(srcType iType, destRType reflect.Type) (bytesz int, decoder func(reflect.Value, uint64) error) {
+func decodeFunc(srcType eType, destRType reflect.Type) (bytesz int, decoder func(reflect.Value, uint64) error) {
 
 	printerr := func(v interface{}, t reflect.Value) error {
 		return fmt.Errorf("value %v not fit in type %v", v, t.Type())
@@ -385,9 +410,9 @@ func decodeFunc(srcType iType, destRType reflect.Type) (bytesz int, decoder func
 }
 
 // encodeFunc() generates a go-type to binary-type conversion function
-func encodeFunc(srcRType reflect.Type, destType iType) func(reflect.Value) (uint64, int, error) {
+func encodeFunc(srcRType reflect.Type, destType eType) func(reflect.Value) (uint64, int, error) {
 
-	printErrNotFit := func(v interface{}, t iType) error {
+	printErrNotFit := func(v interface{}, t eType) error {
 		return fmt.Errorf("value %v not fit in %s", v, t)
 	}
 
@@ -562,7 +587,7 @@ var (
 	minInt64 = int64(math.MinInt64)
 
 	// properties of Kinds
-	properties = map[iType]struct {
+	properties = map[eType]struct {
 		kind     iKind
 		bytesize int
 		min, max uint64
@@ -604,12 +629,12 @@ var (
 
 type typenames struct {
 	name string
-	t    iType
+	t    eType
 }
 
 var (
-	typeMap     = make(map[string]iType)
-	typeNameMap = make(map[iType]string)
+	typeMap     = make(map[string]eType)
+	typeNameMap = make(map[eType]string)
 
 	kinds = []typenames{
 		{"Invalid", iInvalid},

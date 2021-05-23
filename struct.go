@@ -1,3 +1,5 @@
+// Copyright 2021 mixcode@github
+
 package binarystruct
 
 import (
@@ -89,7 +91,7 @@ func evaluateTagValue(strc reflect.Value, stmt string) (value int, err error) {
 }
 
 // read struct tag
-func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encodeType iType, option typeOption, err error) {
+func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encodeType eType, option typeOption, err error) {
 
 	field := structType.Field(i)
 	fType := field.Type

@@ -1,3 +1,5 @@
+// Copyright 2021 mixcode@github
+
 package binarystruct
 
 import (
@@ -7,37 +9,40 @@ import (
 	"fmt"
 	"strings"
 
-	//"fmt"
-	//"os"
 	"io"
 	"reflect"
 )
 
 var (
-	ErrCannotSet     = errors.New("the value cannot be set")             // supplied value is not a pointer type
-	ErrNotAnArray    = errors.New("must be an array or slice type")      // the field is tagged as array but underlying value is not
-	ErrUnknownLength = errors.New("unknown array, slice or string size") // cannot determine the length of an array
+	// supplied value must be a pointer or an interface
+	ErrCannotSet = errors.New("the value cannot be set")
+
+	// the field is tagged as array but underlying value is not
+	ErrNotAnArray = errors.New("must be an array or slice type")
+
+	// cannot determine the length of an array or slice
+	ErrUnknownLength = errors.New("unknown array, slice or string size")
 )
 
-// Unmarshal decodes binary images into govalue. Govalue must be a writable type such as a slice, a pointer or an interface.
-func Unmarshal(input []byte, order binary.ByteOrder, govalue interface{}) (n int, err error) {
+// Unmarshal decodes binary images into a Go value. The Go value must be a writable type such as a slice, a pointer or an interface.
+func Unmarshal(input []byte, order ByteOrder, govalue interface{}) (n int, err error) {
 	var ms Marshaller
 	return (&ms).Unmarshal(input, order, govalue)
 }
 
-// Read reads binary data from r and decode it into govalue. Govalue must be a writable type such as a slice, a pointer or an interface.
-func Read(r io.Reader, order binary.ByteOrder, data interface{}) (n int, err error) {
+// Read reads binary data from r and decode it into a Go value. The Go value must be a writable type such as a slice, a pointer or an interface.
+func Read(r io.Reader, order ByteOrder, data interface{}) (n int, err error) {
 	var ms Marshaller
 	return (&ms).readValue(r, order, reflect.ValueOf(data))
 }
 
-// Unmarshaller.Unmarshal() is the main binary image decoder
+// Unmarshaller.Unmarshal() is binary image decoder with environment in a Marshaller.
 func (ms *Marshaller) Unmarshal(input []byte, order binary.ByteOrder, govalue interface{}) (n int, err error) {
 	buf := bytes.NewBuffer(input)
 	return ms.Read(buf, order, govalue)
 }
 
-// Unmarshaller.Read() is the main binary stream decoder
+// Unmarshaller.Read() is binary stream decoder with environment in a Marshaller.
 func (ms *Marshaller) Read(r io.Reader, order binary.ByteOrder, data interface{}) (n int, err error) {
 	return ms.readValue(r, order, reflect.ValueOf(data))
 }
@@ -53,7 +58,7 @@ func (ms *Marshaller) readValue(r io.Reader, order ByteOrder, v reflect.Value) (
 }
 
 // read a value as given type
-func (ms *Marshaller) readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, option typeOption) (n int, err error) {
+func (ms *Marshaller) readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType eType, option typeOption) (n int, err error) {
 	// type was a pointer or an interface
 	if option.indirectCount > 0 {
 		for i := 0; i < option.indirectCount; i++ {
@@ -104,7 +109,7 @@ func (ms *Marshaller) readMain(r io.Reader, order ByteOrder, v reflect.Value, en
 	return
 }
 
-func (ms *Marshaller) readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType iType, option typeOption) (n int, err error) {
+func (ms *Marshaller) readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType eType, option typeOption) (n int, err error) {
 
 	arrayLen := option.arrayLen
 
@@ -166,7 +171,7 @@ func (ms *Marshaller) readSlice(r io.Reader, order ByteOrder, slice reflect.Valu
 }
 
 // read an array or slice
-func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType iType, option typeOption) (n int, err error) {
+func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Value, elementType eType, option typeOption) (n int, err error) {
 
 	// deference a pointer or an interface
 	array, _ = dereferencePointer(array)
@@ -335,7 +340,7 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 }
 
 // read string types
-func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, encodeType iType, bufLen int, textEncoding string) (n int, err error) {
+func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, encodeType eType, bufLen int, textEncoding string) (n int, err error) {
 
 	// read string length
 	headersz := 0
@@ -415,7 +420,7 @@ func readU64(r io.Reader, order ByteOrder, bytesize int) (u64 uint64, n int, err
 }
 
 // read a scalar value
-func (ms *Marshaller) readScalar(r io.Reader, order ByteOrder, v reflect.Value, k iType) (n int, err error) {
+func (ms *Marshaller) readScalar(r io.Reader, order ByteOrder, v reflect.Value, k eType) (n int, err error) {
 	if !v.CanSet() {
 		err = ErrCannotSet
 		return

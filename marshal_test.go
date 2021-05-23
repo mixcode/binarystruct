@@ -1,3 +1,5 @@
+// Copyright 2021 mixcode@github
+
 package binarystruct_test
 
 import (
@@ -6,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/mixcode/binarystruct"
 	bst "github.com/mixcode/binarystruct"
 )
 
@@ -484,7 +487,7 @@ func TestStruct(test *testing.T) {
 
 		n1, n2 := int32(0), int32(0)
 		p2 := &n2
-		out := st{&n1, &p2} // Interface must be pre-set to be unmarshalled
+		out := st{&n1, &p2} // Interface must be pre-set to be unmarshaled
 		decodeCompareLE(exp, &out, &in)
 	}()
 
@@ -543,4 +546,50 @@ func TestStruct(test *testing.T) {
 		decodeCompareLE(exp, &out, &in)
 	}()
 
+}
+
+func ExampleMarshal() {
+	strc := struct {
+		Header       string `binary:"[4]byte"` // marshaled to 4 bytes
+		ValueInt8    int    `binary:"int8"`    // marshaled to single byte
+		ValueUint16  int    `binary:"uint16"`  // marshaled to two bytes
+		ValueDword32 int    `binary:"dword"`   // marshaled to four bytes
+	}{"abcd", 1, 2, 3}
+	blob, err := binarystruct.Marshal(strc, binarystruct.BigEndian)
+
+	if err != nil {
+		panic(err)
+	}
+	for _, b := range blob {
+		fmt.Printf(" %02x", b)
+	}
+	fmt.Println()
+
+	// Output:
+	// 61 62 63 64 01 00 02 00 00 00 03
+}
+
+func ExampleUnmarshal() {
+	blob := []byte{0x61, 0x62, 0x63, 0x64,
+		0x01,
+		0x00, 0x02,
+		0x00, 0x00, 0x00, 0x03}
+	// [ "ABCD", 0x01, 0x0002, 0x00000003 ]
+
+	// A quick example
+	strc := struct {
+		Header       string `binary:"[4]byte"` // marshaled to 4 bytes
+		ValueInt8    int    `binary:"int8"`    // marshaled to single byte
+		ValueUint16  int    `binary:"uint16"`  // marshaled to two bytes
+		ValueDword32 int    `binary:"dword"`   // marshaled to four bytes
+	}{}
+	readsz, err := binarystruct.Unmarshal(blob, binarystruct.BigEndian, &strc)
+
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(readsz, strc)
+
+	// Output:
+	// 11 {abcd 1 2 3}
 }

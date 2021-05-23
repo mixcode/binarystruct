@@ -1,3 +1,5 @@
+// Copyright 2021 mixcode@github
+
 package binarystruct
 
 import (
@@ -11,7 +13,7 @@ func TestScalarValueEncoding(t *testing.T) {
 	//var err error
 
 	testdata := []struct {
-		typ       iType       // Encoding target type
+		typ       eType       // Encoding target type
 		value     interface{} // Value to be encoded
 		u64       uint64      // Encoded value. u64 ← typ(value)
 		encodeErr bool        // encoding will generate an error

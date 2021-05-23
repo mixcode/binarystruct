@@ -1,3 +1,5 @@
+// Copyright 2021 mixcode@github
+
 package binarystruct
 
 import (
@@ -11,13 +13,13 @@ import (
 	"golang.org/x/text/encoding"
 )
 
-// Marshal encodes a go value into a binary image and return it as []byte.
+// Marshal encodes a go value into binary data and return it as []byte.
 func Marshal(govalue interface{}, order ByteOrder) (encoded []byte, err error) {
 	var ms Marshaller
 	return (&ms).Marshal(govalue, order)
 }
 
-// Write encodes the go value into binary stream and writes to r.
+// Write encodes a go value into binary stream and writes to r.
 func Write(w io.Writer, order ByteOrder, govalue interface{}) (n int, err error) {
 	var ms Marshaller
 	return (&ms).Write(w, order, govalue)
@@ -32,7 +34,7 @@ type Marshaller struct {
 }
 
 // AddTextEncoder set a new text encoder to Marshaller.
-// Provided encodingName could be used in string tag's encoding property. ex) `binary:"string,encoding=encodingName"`
+// Provided encodingName could be used in string tag's 'encoding' property, like `binary:"string,encoding=encodingName"`
 func (ms *Marshaller) AddTextEncoder(encodingName string, enc encoding.Encoding) {
 	if ms.TextEncoder == nil {
 		ms.TextEncoder = make(map[string]encoding.Encoding)
@@ -40,14 +42,14 @@ func (ms *Marshaller) AddTextEncoder(encodingName string, enc encoding.Encoding)
 	ms.TextEncoder[encodingName] = enc
 }
 
-// Marshaller.Marshal() is the main binary image encoder
-func (ms *Marshaller) Marshal(data interface{}, order ByteOrder) ([]byte, error) {
+// Marshaller.Marshal() is binary image encoder with environment in a Marshaller.
+func (ms *Marshaller) Marshal(govalue interface{}, order ByteOrder) (encoded []byte, err error) {
 	var b bytes.Buffer
-	_, err := ms.Write(&b, order, data)
+	_, err = ms.Write(&b, order, govalue)
 	return b.Bytes(), err
 }
 
-// Marshaller.Write() is the main binary stream encoder
+// Marshaller.Write() is binary stream encoder with environment in a Marshaller.
 func (ms *Marshaller) Write(w io.Writer, order ByteOrder, data interface{}) (n int, err error) {
 	return ms.writeValue(w, order, reflect.ValueOf(data))
 }
@@ -67,7 +69,7 @@ func (ms *Marshaller) writeValue(w io.Writer, order ByteOrder, v reflect.Value) 
 }
 
 // write a value as given type
-func (ms *Marshaller) writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, option typeOption) (n int, err error) {
+func (ms *Marshaller) writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType eType, option typeOption) (n int, err error) {
 
 	// type was a pointer or an interface
 	if option.indirectCount > 0 {
@@ -123,7 +125,7 @@ func (ms *Marshaller) writeMain(w io.Writer, order ByteOrder, v reflect.Value, e
 }
 
 // write an array
-func (ms *Marshaller) writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType iType, option typeOption) (n int, err error) {
+func (ms *Marshaller) writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType eType, option typeOption) (n int, err error) {
 
 	arrayKind := array.Kind()
 	//
@@ -303,7 +305,7 @@ func (ms *Marshaller) decodeText(encoded []byte, textEncoding string) (utf8 []by
 }
 
 // write string types
-func (ms *Marshaller) writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType iType, bufLen int, textEncoding string) (n int, err error) {
+func (ms *Marshaller) writeString(w io.Writer, order ByteOrder, v reflect.Value, encodeType eType, bufLen int, textEncoding string) (n int, err error) {
 	s := v.String()
 	stringBytes := []byte(s)
 
@@ -365,7 +367,7 @@ func (ms *Marshaller) writeString(w io.Writer, order ByteOrder, v reflect.Value,
 }
 
 // write a scalar value
-func (ms *Marshaller) writeScalar(w io.Writer, order ByteOrder, v reflect.Value, k iType) (n int, err error) {
+func (ms *Marshaller) writeScalar(w io.Writer, order ByteOrder, v reflect.Value, k eType) (n int, err error) {
 	enc := encodeFunc(v.Type(), k)
 	if enc == nil {
 		err = ErrInvalidType

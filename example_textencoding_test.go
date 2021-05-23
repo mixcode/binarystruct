@@ -7,7 +7,7 @@ import (
 
 	"github.com/mixcode/binarystruct"
 
-	// text encoders
+	// text encodings
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/encoding/unicode"
 )
@@ -17,11 +17,11 @@ func ExampleMarshaller_AddTextEncoding() {
 	// make a explicit marshaller
 	var marshaller = new(binarystruct.Marshaller)
 
-	// add Japanese Shift-JIS text encoder
+	// add Japanese Shift-JIS text encoding
 	// see "golang.org/x/text/encoding/japanese"
 	marshaller.AddTextEncoding("sjis", japanese.ShiftJIS)
 
-	// add UTF-16(little endian with BOM) text encoder
+	// add UTF-16(little endian with BOM) text encoding
 	// see "golang.org/x/text/encoding/unicode"
 	marshaller.AddTextEncoding("utf16", unicode.UTF16(unicode.LittleEndian, unicode.UseBOM))
 

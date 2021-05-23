@@ -5,12 +5,13 @@ Package binarystruct is an automatic type-converting binary data marshaller/unma
 Go's built-in binary encoding package, "encoding/binary" is the preferred method to deal with binary data structures. The binary package is quite easy to use, but some cases require additional type conversions when binary data are tightly packed.
 For example, an integer value in raw binary structure could be stored as a word or a byte, but the decoded value would be type-casted to an architecture-dependent integer value to use in the Go language context.
 
-This package simplifies the typecasting burdens by automatically handling conversion of struct fields by reading field tags.
+This package simplifies the typecasting burdens by automatically handling conversion of struct fields using field tags.
 
 
 ## Quick example
 
-For example, a binary data struct may have a magic header and three integers of byte, word, dword each. By writing field tags in Go struct definition, the binary values are automatically recognized and converted to proper Go values.
+Assume we have a binary data structure with a magic header and three integers of byte, word, dword each, like below.
+By writing binary data types to field tags in Go struct definition, the values are automatically recognized and converted to proper Go values.
 
 ```
 // source binary data

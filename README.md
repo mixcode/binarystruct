@@ -39,5 +39,5 @@ fmt.Println(strc)
 ```
 
 
-## See alse
+## See also
 See [go document](https://pkg.go.dev/github.com/mixcode/binarystruct) for details.

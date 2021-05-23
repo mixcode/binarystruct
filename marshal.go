@@ -19,7 +19,7 @@ func Marshal(govalue interface{}, order ByteOrder) (encoded []byte, err error) {
 	return (&ms).Marshal(govalue, order)
 }
 
-// Write encodes a go value into binary stream and writes to r.
+// Write encodes a go value into binary stream and writes to w.
 func Write(w io.Writer, order ByteOrder, govalue interface{}) (n int, err error) {
 	var ms Marshaller
 	return (&ms).Write(w, order, govalue)
@@ -27,19 +27,19 @@ func Write(w io.Writer, order ByteOrder, govalue interface{}) (n int, err error)
 
 // Marshaller is go-type to binary-type encoder with environmental values
 type Marshaller struct {
-	TextEncoder map[string]encoding.Encoding
+	TextEncoding map[string]encoding.Encoding
 
 	encoderCache map[string]*encoding.Encoder // cache of encoding.NewEncoder()
 	decoderCache map[string]*encoding.Decoder // cache of encoding.NewDecoder()
 }
 
-// AddTextEncoder set a new text encoder to Marshaller.
+// AddTextEncoding set a new text encoder to Marshaller.
 // Provided encodingName could be used in string tag's 'encoding' property, like `binary:"string,encoding=encodingName"`
-func (ms *Marshaller) AddTextEncoder(encodingName string, enc encoding.Encoding) {
-	if ms.TextEncoder == nil {
-		ms.TextEncoder = make(map[string]encoding.Encoding)
+func (ms *Marshaller) AddTextEncoding(encodingName string, enc encoding.Encoding) {
+	if ms.TextEncoding == nil {
+		ms.TextEncoding = make(map[string]encoding.Encoding)
 	}
-	ms.TextEncoder[encodingName] = enc
+	ms.TextEncoding[encodingName] = enc
 }
 
 // Marshaller.Marshal() is binary image encoder with environment in a Marshaller.
@@ -263,8 +263,8 @@ func (ms *Marshaller) encodeText(utf8 []byte, textEncoding string) (encoded []by
 		ec = ms.encoderCache[textEncoding]
 	}
 	if ec == nil {
-		if ms.TextEncoder != nil {
-			ec = ms.TextEncoder[textEncoding].NewEncoder()
+		if ms.TextEncoding != nil {
+			ec = ms.TextEncoding[textEncoding].NewEncoder()
 		}
 		if ec == nil {
 			err = fmt.Errorf("unknown text encoding %s", textEncoding)
@@ -289,8 +289,8 @@ func (ms *Marshaller) decodeText(encoded []byte, textEncoding string) (utf8 []by
 		dc = ms.decoderCache[textEncoding]
 	}
 	if dc == nil {
-		if ms.TextEncoder != nil {
-			dc = ms.TextEncoder[textEncoding].NewDecoder()
+		if ms.TextEncoding != nil {
+			dc = ms.TextEncoding[textEncoding].NewDecoder()
 		}
 		if dc == nil {
 			err = fmt.Errorf("unknown text encoding %s", textEncoding)

@@ -12,18 +12,18 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
-func ExampleMarshaller_AddTextEncoder() {
+func ExampleMarshaller_AddTextEncoding() {
 
 	// make a explicit marshaller
 	var marshaller = new(binarystruct.Marshaller)
 
 	// add Japanese Shift-JIS text encoder
 	// see "golang.org/x/text/encoding/japanese"
-	marshaller.AddTextEncoder("sjis", japanese.ShiftJIS)
+	marshaller.AddTextEncoding("sjis", japanese.ShiftJIS)
 
 	// add UTF-16(little endian with BOM) text encoder
 	// see "golang.org/x/text/encoding/unicode"
-	marshaller.AddTextEncoder("utf16", unicode.UTF16(unicode.LittleEndian, unicode.UseBOM))
+	marshaller.AddTextEncoding("utf16", unicode.UTF16(unicode.LittleEndian, unicode.UseBOM))
 
 	type st struct {
 		// wstring is []byte prefixed by a word for length

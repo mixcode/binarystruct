@@ -1,4 +1,4 @@
-// Copyright 2021 mixcode@github
+// Copyright 2021 github.com/mixcode
 
 //
 // An example of marshalling a complex struct to []byte

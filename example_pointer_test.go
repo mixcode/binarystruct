@@ -1,4 +1,4 @@
-// Copyright 2021 mixcode@github
+// Copyright 2021 github.com/mixcode
 
 package binarystruct_test
 

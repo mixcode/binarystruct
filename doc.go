@@ -1,4 +1,4 @@
-// Copyright 2021 mixcode@github
+// Copyright 2021 github.com/mixcode
 
 /*
 
@@ -8,9 +8,10 @@ Binary data formats are usually tightly packed to save spaces.
 Such data often require type conversions to be used in the Go language context.
 This package handles type conversions between Go data types and binary types of struct fields according to their tags.
 
-For example, assume we have a struct like below.
-The three integer fields are marshaled as 1-byte, 2-bytes, and 4-bytes according to their "binary" tag names.
-Strings also may be mapped to arrays accordingly.
+See the struct below for an example. Each field in this struct is tagged with "binary" tags.
+The three integer fields are tagged as 1-byte, 2-bytes, and 4-bytes long, and the Header string is tagged as a 4-byte sequence.
+Marshall and Unmarshal function reads the tag and converts each field to the specified binary format.
+
 	// a quick example
 	strc := struct {
 		Header       string `binary:"[4]byte"` // marshaled to 4 bytes
@@ -20,7 +21,7 @@ Strings also may be mapped to arrays accordingly.
 	}{"abcd", 1, 2, 3}
 
 	blob, err := binarystruct.Marshal(strc, binarystruct.BigEndian)
-	// marshaled blob will be
+	// marshaled blob will be:
 	// { 0x61, 0x62, 0x63, 0x64,
 	//   0x01,
 	//   0x00, 0x02,

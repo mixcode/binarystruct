@@ -23,10 +23,10 @@ blob := []byte { 0x61, 0x62, 0x63, 0x64,
 
 // フィールドタグ付きの構造体
 strc := struct {
-	Header       string `binary:"[4]byte"` // mapped to 4 bytes
-	ValueInt8    int    `binary:"int8"`    // mapped to single signed byte
-	ValueUint16  int    `binary:"uint16"`  // mapped to two bytes
-	ValueDword32 int    `binary:"dword"`   // mapped to four bytes
+	Header       string `binary:"[4]byte"` // maps to 4 bytes
+	ValueInt8    int    `binary:"int8"`    // maps to single signed byte
+	ValueUint16  int    `binary:"uint16"`  // maps to two bytes
+	ValueDword32 int    `binary:"dword"`   // maps to four bytes
 }{}
 
 // バイナリ→構造体変換
@@ -35,6 +35,10 @@ readsz, err := binarystruct.Unmarshal(blob, binarystruct.BigEndian, &strc)
 // 出力テスト
 fmt.Println(strc)
 // {abcd 1 2 3}
+
+// 構造体→バイナリ
+output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
+// output == blob
 
 ```
 

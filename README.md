@@ -42,6 +42,11 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 
 ```
 
+## Features
+
+* Automatic type conversion and range check based on field tag descriptions
+* Variable-length Array and String handling with references to other struct member variables
+* Text encoding support with "golang.org/x/text/encoding" interface
 
 ## See also
 See [go document](https://pkg.go.dev/github.com/mixcode/binarystruct) for details.

@@ -4,7 +4,7 @@
 
 
 ## multidimensional array
-	stuct {
+	struct {
 		MArr [][][]int	`binary:"[4][2][2]int8"`
 	}
 

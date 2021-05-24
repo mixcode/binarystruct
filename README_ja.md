@@ -1,4 +1,6 @@
-# binarystruct
+[![Go Reference](https://pkg.go.dev/badge/github.com/mixcode/binarystruct.svg)](https://pkg.go.dev/github.com/mixcode/binarystruct)
+
+# binarystruct: GO構造体のバイナリ変換
 
 「binarystruct」は生のバイナリデータとGo構造体の間の変換を半自動かするためのパッケージです。
 
@@ -42,6 +44,11 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 
 ```
 
+## 主な機能
+
+* タグ記述に基づいての型変換
+* 可変長配列・文字列。構造体の他のメンバーの値を参照できる
+* テキストエンコーディング
 
 ## ドキュメント
 詳細は[Goドキュメント](https://pkg.go.dev/github.com/mixcode/binarystruct) をご覧ください。

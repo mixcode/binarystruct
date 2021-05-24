@@ -86,8 +86,10 @@ func TestTextEncoding(t *testing.T) {
 
 	if err != nil {
 		t.Error(err)
-		// t.Errorf("%s", err)
-		// t.Fatal(err)
-		// t.Fatalf("%s", err)
+	}
+
+	ms.RemoveTextEncoding("sjis")
+	if len(ms.TextEncoding) != 1 {
+		t.Errorf("text encoding removal failed")
 	}
 }

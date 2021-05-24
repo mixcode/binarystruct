@@ -27,19 +27,32 @@ func Write(w io.Writer, order ByteOrder, govalue interface{}) (n int, err error)
 
 // Marshaller is go-type to binary-type encoder with environmental values
 type Marshaller struct {
-	TextEncoding map[string]encoding.Encoding
+	TextEncoding map[string]encoding.Encoding // map[encodingName]Encoding
 
 	encoderCache map[string]*encoding.Encoder // cache of encoding.NewEncoder()
 	decoderCache map[string]*encoding.Decoder // cache of encoding.NewDecoder()
 }
 
-// AddTextEncoding set a new text encoder to Marshaller.
+// AddTextEncoding set a new text encoder to a Marshaller.
 // Provided encodingName could be used in string tag's 'encoding' property, like `binary:"string,encoding=encodingName"`
 func (ms *Marshaller) AddTextEncoding(encodingName string, enc encoding.Encoding) {
 	if ms.TextEncoding == nil {
 		ms.TextEncoding = make(map[string]encoding.Encoding)
 	}
 	ms.TextEncoding[encodingName] = enc
+}
+
+// RemoveTextEncoding removes an encoding from a Marshaller.
+func (ms *Marshaller) RemoveTextEncoding(encodingName string) {
+	if ms.TextEncoding != nil {
+		delete(ms.TextEncoding, encodingName)
+	}
+	if ms.encoderCache != nil {
+		delete(ms.encoderCache, encodingName)
+	}
+	if ms.decoderCache != nil {
+		delete(ms.decoderCache, encodingName)
+	}
 }
 
 // Marshaller.Marshal() is binary image encoder with environment in a Marshaller.

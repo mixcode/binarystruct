@@ -46,9 +46,9 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 
 ## 主な機能
 
-* タグ記述に基づいての型変換
-* 可変長配列・文字列。構造体の他のメンバーの値を参照できる
-* テキストエンコーディング
+* タグ記述に基づいての型の変換
+* 可変長の配列・文字列サポート。長さに構造体の他のメンバーの値を指定できる
+* 文字列のテキストエンコーディング指定
 
 ## ドキュメント
 詳細は[Goドキュメント](https://pkg.go.dev/github.com/mixcode/binarystruct) をご覧ください。

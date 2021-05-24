@@ -50,7 +50,7 @@ type Header struct {
 	Strings   []string `binary:"[4]string(StrBufLen+1)"` // array of fixed sized strings
 }
 
-// More complex example
+// A complex example
 func Example() {
 	// build a struct
 	name := "max 16 chars"

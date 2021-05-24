@@ -1,3 +1,5 @@
+[![Go Reference](https://pkg.go.dev/badge/github.com/mixcode/binarystruct.svg)](https://pkg.go.dev/github.com/mixcode/binarystruct)
+
 # binarystruct : binary data encoder/decoder for native Go structs
 
 Package binarystruct is an automatic type-converting binary data encoder/decoder(or marshaller/unmarshaller) for go-language structs.
@@ -49,4 +51,4 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 * Text encoding support with "golang.org/x/text/encoding" interface
 
 ## See also
-See [go document](https://pkg.go.dev/github.com/mixcode/binarystruct) for details.
+See [go reference doc](https://pkg.go.dev/github.com/mixcode/binarystruct) for details.

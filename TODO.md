@@ -3,6 +3,20 @@
 # TODO?
 
 
+## add mul/div to size calculator
+
+
+## one-value marshaller/unmarshaller
+
+```
+// MarshalAs encodes a go value into binary data using suppried tag
+func MarshalAs(govalue interface{}, tag string, order ByteOrder) (encoded []byte, err error) {...}
+
+var a []int
+UnmarshalAs(a, "[4]byte", bst.LittleEndian)	// read [4]byte to []int
+```
+
+
 ## multidimensional array
 	struct {
 		MArr [][][]int	`binary:"[4][2][2]int8"`

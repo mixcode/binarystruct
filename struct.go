@@ -98,26 +98,27 @@ func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encod
 	fKind := fType.Kind()
 
 	// check field type
+	var fieldErr error
 	switch fKind {
 	case reflect.Invalid:
-		err = fmt.Errorf("invalid data type")
+		fieldErr = fmt.Errorf("invalid data type")
 	case reflect.Complex64, reflect.Complex128:
-		err = fmt.Errorf("complex type not supported")
+		fieldErr = fmt.Errorf("complex type not supported")
 	case reflect.UnsafePointer:
-		err = fmt.Errorf("pointer type not supported")
+		fieldErr = fmt.Errorf("pointer type not supported")
 	case reflect.Chan, reflect.Func, reflect.Map:
-		err = fmt.Errorf("unsupported type: %v", fType.Kind())
+		fieldErr = fmt.Errorf("unsupported type: %v", fType.Kind())
+	default:
+		encodeType, option = getNaturalType(strc.Field(i))
 	}
-	if err != nil {
-		return
-	}
-
-	encodeType, option = getNaturalType(strc.Field(i))
 
 	// read the tag
 	tags := strings.Split(field.Tag.Get(tagName), ",")
 	if len(tags) == 0 || tags[0] == "" {
 		// no tags to process
+		if fieldErr != nil {
+			err = fieldErr
+		}
 		return
 	}
 
@@ -129,7 +130,12 @@ func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encod
 	}
 	if encodeType == iInvalid && (parsedType != Pad && parsedType != Ignore) {
 		// value type is unknown and target type is not an ignoring type
-		err = fmt.Errorf("the field %s is not encodable", field.Name)
+		if fieldErr != nil {
+			// field type is non-encodable
+			err = fieldErr
+		} else {
+			err = fmt.Errorf("the field %s is not encodable", field.Name)
+		}
 		return
 	}
 	encodeType = parsedType

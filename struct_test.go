@@ -58,6 +58,48 @@ func TestEvaulateTagValue(t *testing.T) {
 
 }
 
+func TestArrayPointer(t *testing.T) {
+	type subSt struct {
+		N int8
+	}
+
+	type st struct {
+		Count int      `binary:"uint8"`
+		A     []*subSt `binary:"[Count]"`
+	}
+
+	blob := []byte{0x03, 0x01, 0x02, 0x03}
+
+	var out st
+	sz, err := Unmarshal(blob, LittleEndian, &out)
+	if err != nil {
+		t.Error(err)
+	}
+	if sz != len(blob) {
+		t.Errorf("read size mismatch: expected %d, actual %d", len(blob), sz)
+	}
+}
+
+func TestMiscStruct(t *testing.T) {
+
+	// Test ignoreing field with unsupported type
+	type st struct {
+		M     map[string]string `binary:"ignore"`
+		Count int               `binary:"uint8"`
+	}
+	blob := []byte{0x01}
+
+	var out st
+	sz, err := Unmarshal(blob, LittleEndian, &out)
+	if err != nil {
+		t.Error(err)
+	}
+	if sz != len(blob) {
+		t.Errorf("read size mismatch: expected %d, actual %d", len(blob), sz)
+	}
+
+}
+
 /*
 func TestMisc(t *testing.T) {
 	r := regexp.MustCompile(`^\s*(\[([^\]]+)\])?([^\s\(\)]+)(\(([^\)]+)\))?`)

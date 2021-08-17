@@ -60,7 +60,7 @@ func TestStruct(test *testing.T) {
 			return
 		}
 		if n != len(data) {
-			test.Errorf("invalid read size")
+			test.Errorf("invalid read size; expected %d, actual %d", len(data), n)
 			return
 		}
 

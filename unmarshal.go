@@ -111,6 +111,10 @@ func (ms *Marshaller) readMain(r io.Reader, order ByteOrder, v reflect.Value, en
 
 func (ms *Marshaller) readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType eType, option typeOption) (n int, err error) {
 
+	if slice.Kind() != reflect.Slice {
+		err = fmt.Errorf("must be a slice type; current type is %s", slice.Kind().String())
+		return
+	}
 	arrayLen := option.arrayLen
 
 	if slice.IsNil() {
@@ -136,22 +140,41 @@ func (ms *Marshaller) readSlice(r io.Reader, order ByteOrder, slice reflect.Valu
 			return fmt.Errorf("array index [%d]: %w", i, e)
 		}
 		var m int
-		for i := 0; i < l; i++ {
-			if elementType == Any {
-				m, err = ms.readValue(r, order, uslice.Index(i))
-			} else {
-				var o typeOption
-				o.bufLen = option.bufLen     // option may contain inheritable values
-				o.encoding = option.encoding // option may contain inheritable values
-				m, err = ms.readMain(r, order, uslice.Index(i), elementType, o)
+
+		if uslice.Type().Elem().Kind() == reflect.Uint8 &&
+			(elementType == Byte || elementType == Uint8) {
+			// Byte slice. Note that reflect.Int8 is not a byte slice.
+			b := uslice.Bytes()
+			if len(b) < l {
+				panic("invalid slice size")
 			}
-			n += m
+			m, err = io.ReadAtLeast(r, b, l)
 			if err != nil {
-				err = wErr(i, err)
 				return
 			}
+			n += m
+
+		} else {
+
+			for i := 0; i < l; i++ {
+				if elementType == Any {
+					m, err = ms.readValue(r, order, uslice.Index(i))
+				} else {
+					var o typeOption
+					o.bufLen = option.bufLen     // option may contain inheritable values
+					o.encoding = option.encoding // option may contain inheritable values
+					m, err = ms.readMain(r, order, uslice.Index(i), elementType, o)
+				}
+				n += m
+				if err != nil {
+					err = wErr(i, err)
+					return
+				}
+			}
 		}
+
 	}
+
 	loadSlice(slice, readLen)
 	if err != nil {
 		return

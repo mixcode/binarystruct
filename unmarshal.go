@@ -373,10 +373,13 @@ func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, 
 	}
 
 	buf := make([]byte, readsz)
-	m, err := io.ReadAtLeast(r, buf, readsz)
-	n += m
-	if err != nil {
-		return
+	m := 0
+	if readsz > 0 {
+		m, err = io.ReadAtLeast(r, buf, readsz)
+		n += m
+		if err != nil {
+			return
+		}
 	}
 
 	// process text encoding (before removing terminating zeros)

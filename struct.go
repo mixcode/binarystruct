@@ -155,10 +155,6 @@ func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encod
 
 	if m[5] != "" {
 		option.bufLen, err = evaluateTagValue(strc, m[5])
-		if option.bufLen == 0 {
-			err = fmt.Errorf("element size must not be zero")
-			return
-		}
 		if option.bufLen < 0 {
 			err = errNegativeSize
 			return

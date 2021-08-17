@@ -115,7 +115,8 @@ func (ms *Marshaller) readSlice(r io.Reader, order ByteOrder, slice reflect.Valu
 
 	if slice.IsNil() {
 		if arrayLen == 0 {
-			err = ErrUnknownLength
+			// No data: return nil
+			return
 		}
 		// make a new slice
 		s := reflect.MakeSlice(slice.Type(), arrayLen, arrayLen)

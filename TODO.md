@@ -3,6 +3,9 @@
 # TODO?
 
 
+## add 'omittable' flag (for the fields at the end of struct)
+
+
 ## add mul/div to size calculator
 
 

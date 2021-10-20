@@ -385,12 +385,12 @@ func (ms *Marshaller) writeString(w io.Writer, order ByteOrder, v reflect.Value,
 
 // write a scalar value
 func (ms *Marshaller) writeScalar(w io.Writer, order ByteOrder, v reflect.Value, k eType) (n int, err error) {
-	enc := encodeFunc(v.Type(), k)
+	sz, enc := encodeFunc(v.Type(), k)
 	if enc == nil {
 		err = ErrInvalidType
 		return
 	}
-	u64, sz, err := enc(v)
+	u64, err := enc(v)
 	if err != nil {
 		return
 	}

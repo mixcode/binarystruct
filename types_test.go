@@ -136,12 +136,12 @@ func TestScalarValueEncoding(t *testing.T) {
 		// encode value to binary
 		//
 		v := reflect.ValueOf(e.value)
-		enc := encodeFunc(v.Type(), e.typ)
+		sz, enc := encodeFunc(v.Type(), e.typ)
 		if enc == nil {
 			t.Errorf("encoder for %s not found", v.Kind())
 			continue
 		}
-		u, sz, err := enc(v)
+		u, err := enc(v)
 		if err != nil {
 			if !e.encodeErr {
 				t.Error(err)

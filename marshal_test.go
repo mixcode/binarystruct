@@ -8,10 +8,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/mixcode/binarystruct"
 	bst "github.com/mixcode/binarystruct"
 )
 
+/*
 func printHex(b []byte) {
 	sz := 8
 	i := 0
@@ -26,6 +26,7 @@ func printHex(b []byte) {
 		fmt.Println()
 	}
 }
+*/
 
 func TestStruct(test *testing.T) {
 
@@ -555,7 +556,7 @@ func ExampleMarshal() {
 		ValueUint16  int    `binary:"uint16"`  // marshaled to two bytes
 		ValueDword32 int    `binary:"dword"`   // marshaled to four bytes
 	}{"abcd", 1, 2, 3}
-	blob, err := binarystruct.Marshal(strc, binarystruct.BigEndian)
+	blob, err := bst.Marshal(strc, bst.BigEndian)
 
 	if err != nil {
 		panic(err)
@@ -583,7 +584,7 @@ func ExampleUnmarshal() {
 		ValueUint16  int    `binary:"uint16"`  // marshaled to two bytes
 		ValueDword32 int    `binary:"dword"`   // marshaled to four bytes
 	}{}
-	readsz, err := binarystruct.Unmarshal(blob, binarystruct.BigEndian, &strc)
+	readsz, err := bst.Unmarshal(blob, bst.BigEndian, &strc)
 
 	if err != nil {
 		panic(err)

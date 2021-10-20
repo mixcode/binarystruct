@@ -170,6 +170,10 @@ func (ms *Marshaller) writeArray(w io.Writer, order ByteOrder, array reflect.Val
 		// arrayLen = desiredLen
 	}
 
+	//
+	// TODO: optimize []byte write
+	//
+
 	wErr := func(i int, e error) error {
 		return fmt.Errorf("array index [%d]: %w", i, e)
 	}

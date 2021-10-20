@@ -269,6 +269,10 @@ func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Valu
 		return fmt.Errorf("array index [%d]: %w", i, e)
 	}
 
+	//
+	// TODO: optimize []byte read
+	//
+
 	var v reflect.Value
 	for i := 0; i < readLen; i++ {
 		if !destIsArray {

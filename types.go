@@ -224,6 +224,248 @@ func getNaturalType(v reflect.Value) (t eType, option typeOption) {
 
 // decodeFunc() generates a binary-type to go-type conversion function
 func decodeFunc(srcType eType, destRType reflect.Type) (bytesz int, decoder func(reflect.Value, uint64) error) {
+	// decode function with range error check
+
+	printerr := func(v interface{}, t reflect.Value) error {
+		return fmt.Errorf("value %v not fit in type %v", v, t.Type())
+	}
+
+	// get destination size
+	var srcKind iKind
+	if p, ok := properties[srcType]; ok {
+		srcKind = p.kind
+		bytesz = p.bytesize
+	}
+
+	destRKind := destRType.Kind()
+	switch destRKind {
+	case reflect.Bool:
+		decoder = func(v reflect.Value, u uint64) error {
+			v.SetBool(u != 0)
+			return nil
+		}
+		return
+
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if srcKind == intKind || srcKind == bitmapKind {
+			switch bytesz {
+			case 1:
+				decoder = func(v reflect.Value, u uint64) error {
+					n := int64(int8(u))
+					if v.OverflowInt(n) {
+						return printerr(n, v)
+					}
+					v.SetInt(int64(u))
+					return nil
+				}
+			case 2:
+				decoder = func(v reflect.Value, u uint64) error {
+					n := int64(int16(u))
+					if v.OverflowInt(n) {
+						return printerr(n, v)
+					}
+					v.SetInt(int64(u))
+					return nil
+				}
+			case 4:
+				decoder = func(v reflect.Value, u uint64) error {
+					n := int64(int32(u))
+					if v.OverflowInt(n) {
+						return printerr(n, v)
+					}
+					v.SetInt(int64(u))
+					return nil
+				}
+			case 8:
+				decoder = func(v reflect.Value, u uint64) error {
+					n := int64(u)
+					if v.OverflowInt(n) {
+						return printerr(n, v)
+					}
+					v.SetInt(int64(u))
+					return nil
+				}
+			default:
+				panic("invalid byte size")
+			}
+			return
+		} else if srcKind == uintKind {
+			decoder = func(v reflect.Value, u uint64) error {
+				n := int64(u)
+				if v.OverflowInt(n) {
+					return printerr(n, v)
+				}
+				v.SetInt(int64(u))
+				return nil
+			}
+			return
+		} else if srcType == Float32 {
+			decoder = func(v reflect.Value, u uint64) error {
+				f := math.Float32frombits(uint32(u))
+				n := int64(f)
+				if v.OverflowInt(n) {
+					return printerr(n, v)
+				}
+				v.SetInt(n)
+				return nil
+			}
+			return
+		} else if srcType == Float64 {
+			decoder = func(v reflect.Value, u uint64) error {
+				f := math.Float64frombits(u)
+				n := int64(f)
+				if v.OverflowInt(n) {
+					return printerr(n, v)
+				}
+				v.SetInt(n)
+				return nil
+			}
+			return
+		}
+
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if srcKind == intKind {
+			switch bytesz {
+			case 1:
+				decoder = func(v reflect.Value, u uint64) error {
+					n := int64(int8(u))
+					if n < 0 {
+						return printerr(n, v)
+					}
+					u = uint64(n)
+					if v.OverflowUint(u) {
+						return printerr(u, v)
+					}
+					v.SetUint(u)
+					return nil
+				}
+			case 2:
+				decoder = func(v reflect.Value, u uint64) error {
+					n := int64(int16(u))
+					if n < 0 {
+						return printerr(n, v)
+					}
+					u = uint64(n)
+					if v.OverflowUint(u) {
+						return printerr(u, v)
+					}
+					v.SetUint(u)
+					return nil
+				}
+			case 4:
+				decoder = func(v reflect.Value, u uint64) error {
+					n := int64(int32(u))
+					if n < 0 {
+						return printerr(n, v)
+					}
+					u = uint64(n)
+					if v.OverflowUint(u) {
+						return printerr(u, v)
+					}
+					v.SetUint(u)
+					return nil
+				}
+			case 8:
+				decoder = func(v reflect.Value, u uint64) error {
+					/*
+						n := int64(u)
+						if n < 0 {
+							return printerr(n, v)
+						}
+						u = uint64(n)
+						if v.OverflowUint(u) {
+							return printerr(u, v)
+						}
+					*/
+					v.SetUint(u)
+					return nil
+				}
+			default:
+				panic("invalid byte size")
+			}
+			return
+		} else if srcKind == uintKind || srcKind == bitmapKind {
+			decoder = func(v reflect.Value, u uint64) error {
+				if v.OverflowUint(u) {
+					return printerr(u, v)
+				}
+				v.SetUint(u)
+				return nil
+			}
+			return
+		} else if srcType == Float32 {
+			decoder = func(v reflect.Value, u uint64) error {
+				f := math.Float32frombits(uint32(u))
+				n := uint64(f)
+				if v.OverflowUint(n) {
+					return printerr(n, v)
+				}
+				v.SetUint(n)
+				return nil
+			}
+			return
+		} else if srcType == Float64 {
+			decoder = func(v reflect.Value, u uint64) error {
+				f := math.Float64frombits(u)
+				n := uint64(f)
+				if v.OverflowUint(n) {
+					return printerr(n, v)
+				}
+				v.SetUint(n)
+				return nil
+			}
+			return
+		}
+
+	case reflect.Float32, reflect.Float64:
+		if srcKind == intKind {
+			decoder = func(v reflect.Value, u uint64) error {
+				f := float64(int64(u))
+				if v.OverflowFloat(f) {
+					return printerr(f, v)
+				}
+				v.SetFloat(f)
+				return nil
+			}
+			return
+		} else if srcKind == uintKind {
+			decoder = func(v reflect.Value, u uint64) error {
+				f := float64(u)
+				if v.OverflowFloat(f) {
+					return printerr(f, v)
+				}
+				v.SetFloat(f)
+				return nil
+			}
+			return
+		} else if srcType == Float32 || srcType == Dword {
+			decoder = func(v reflect.Value, u uint64) error {
+				f := float64(math.Float32frombits(uint32(u)))
+				if v.OverflowFloat(f) {
+					return printerr(f, v)
+				}
+				v.SetFloat(f)
+				return nil
+			}
+			return
+		} else if srcType == Float64 || srcType == Qword {
+			decoder = func(v reflect.Value, u uint64) error {
+				f := math.Float64frombits(u)
+				if v.OverflowFloat(f) {
+					return printerr(f, v)
+				}
+				v.SetFloat(f)
+				return nil
+			}
+			return
+		}
+	}
+
+	return 0, nil
+}
+
+// decodeFunc() generates a binary-type to go-type conversion function
+func decodeFunc_OLD(srcType eType, destRType reflect.Type) (bytesz int, decoder func(reflect.Value, uint64) error) {
 
 	printerr := func(v interface{}, t reflect.Value) error {
 		return fmt.Errorf("value %v not fit in type %v", v, t.Type())
@@ -430,48 +672,126 @@ func encodeFunc(srcRType reflect.Type, destType eType) func(reflect.Value) (uint
 	switch sk {
 
 	case reflect.Bool:
-		if destType == Float32 {
+		switch destType {
+		case Float32:
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
 				f := float32(0)
 				if v.Bool() {
 					f = 1.0
 				}
-				return uint64(math.Float32bits(f)), destSize, nil
+				//return uint64(math.Float32bits(f)), destSize, nil
+				return uint64(math.Float32bits(f)), 4, nil
 			}
-		}
-		if destType == Float64 {
+		case Float64:
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
 				f := float64(0)
 				if v.Bool() {
 					f = 1.0
 				}
-				return math.Float64bits(f), destSize, nil
+				//return math.Float64bits(f), destSize, nil
+				return math.Float64bits(f), 8, nil
 			}
-		}
-		return func(v reflect.Value) (value uint64, bytesize int, err error) {
-			if v.Bool() {
-				value = 1
+		default:
+			switch destSize {
+			case 1:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if v.Bool() {
+						value = 1
+					}
+					bytesize = 1
+					return
+				}
+			case 2:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if v.Bool() {
+						value = 1
+					}
+					bytesize = 2
+					return
+				}
+			case 4:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if v.Bool() {
+						value = 1
+					}
+					bytesize = 4
+					return
+				}
+			case 8:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if v.Bool() {
+						value = 1
+					}
+					bytesize = 8
+					return
+				}
 			}
-			bytesize = destSize
-			return
+			panic("invalid byte size")
 		}
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		srcSize := int(srcRType.Size())
 		if destKind == bitmapKind { // byte/word/dword/qword
-			return func(v reflect.Value) (value uint64, bytesize int, err error) {
-				if int64(v.Type().Size()) < int64(destSize) {
-					// only byte size matters
-					err = printErrNotFit(value, destType)
-					return
+			switch destSize {
+			case 1:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if int64(v.Type().Size()) < int64(1) {
+						// only byte size matters
+						err = printErrNotFit(value, destType)
+						return
+					}
+					return uint64(v.Int()), 1, nil
 				}
-				return uint64(v.Int()), destSize, nil
+			case 2:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if int64(v.Type().Size()) < int64(2) {
+						// only byte size matters
+						err = printErrNotFit(value, destType)
+						return
+					}
+					return uint64(v.Int()), 2, nil
+				}
+			case 4:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if int64(v.Type().Size()) < int64(4) {
+						// only byte size matters
+						err = printErrNotFit(value, destType)
+						return
+					}
+					return uint64(v.Int()), 4, nil
+				}
+			case 8:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if int64(v.Type().Size()) < int64(8) {
+						// only byte size matters
+						err = printErrNotFit(value, destType)
+						return
+					}
+					return uint64(v.Int()), 8, nil
+				}
 			}
+			panic("invalid byte size")
 		} else if destKind == intKind && srcSize <= destSize {
 			// source value always fits in the destination
-			return func(v reflect.Value) (value uint64, bytesize int, err error) {
-				return uint64(v.Int()), destSize, nil
+			switch destSize {
+			case 1:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					return uint64(v.Int()), 1, nil
+				}
+			case 2:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					return uint64(v.Int()), 2, nil
+				}
+			case 4:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					return uint64(v.Int()), 4, nil
+				}
+			case 8:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					return uint64(v.Int()), 8, nil
+				}
 			}
+			panic("invalid byte size")
 		} else if destKind == intKind || destKind == uintKind {
 			// source value may not fit in the destination
 			min, max := int64(minu64), int64(maxu64)
@@ -489,31 +809,79 @@ func encodeFunc(srcRType reflect.Type, destType eType) func(reflect.Value) (uint
 		} else if destType == Float32 {
 			// convert integer to float32
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
-				return uint64(math.Float32bits(float32(v.Convert(f32type).Float()))), destSize, nil
+				return uint64(math.Float32bits(float32(v.Convert(f32type).Float()))), 4, nil
 			}
 		} else if destType == Float64 {
 			// convert integer to float64
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
-				return math.Float64bits(v.Convert(f64type).Float()), destSize, nil
+				return math.Float64bits(v.Convert(f64type).Float()), 8, nil
 			}
 		}
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		srcSize := int(srcRType.Size())
 		if destKind == bitmapKind { // byte/word/dword/qword
-			return func(v reflect.Value) (value uint64, bytesize int, err error) {
-				if int64(v.Type().Size()) < int64(destSize) {
-					// only byte size matters
-					err = printErrNotFit(value, destType)
-					return
+			switch destSize {
+			case 1:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if int64(v.Type().Size()) < int64(1) {
+						// only byte size matters
+						err = printErrNotFit(value, destType)
+						return
+					}
+					return v.Uint(), 1, nil
 				}
-				return v.Uint(), destSize, nil
+			case 2:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if int64(v.Type().Size()) < int64(2) {
+						// only byte size matters
+						err = printErrNotFit(value, destType)
+						return
+					}
+					return v.Uint(), 2, nil
+				}
+			case 4:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if int64(v.Type().Size()) < int64(4) {
+						// only byte size matters
+						err = printErrNotFit(value, destType)
+						return
+					}
+					return v.Uint(), 4, nil
+				}
+			case 8:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					if int64(v.Type().Size()) < int64(8) {
+						// only byte size matters
+						err = printErrNotFit(value, destType)
+						return
+					}
+					return v.Uint(), 8, nil
+				}
 			}
+			panic("invalid byte size")
+
 		} else if destKind == uintKind && srcSize <= destSize {
 			// source value always fits in the destination
-			return func(v reflect.Value) (value uint64, bytesize int, err error) {
-				return v.Uint(), destSize, nil
+			switch destSize {
+			case 1:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					return v.Uint(), 1, nil
+				}
+			case 2:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					return v.Uint(), 2, nil
+				}
+			case 4:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					return v.Uint(), 4, nil
+				}
+			case 8:
+				return func(v reflect.Value) (value uint64, bytesize int, err error) {
+					return v.Uint(), 8, nil
+				}
 			}
+			panic("invalid byte size")
 		} else if destKind == intKind || destKind == uintKind {
 			// source value may not fit in the destination
 			//max := maxu64
@@ -528,12 +896,14 @@ func encodeFunc(srcRType reflect.Type, destType eType) func(reflect.Value) (uint
 		} else if destType == Float32 {
 			// convert unsigned integer to float32
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
-				return uint64(math.Float32bits(float32(v.Convert(f32type).Float()))), destSize, nil
+				//return uint64(math.Float32bits(float32(v.Convert(f32type).Float()))), destSize, nil
+				return uint64(math.Float32bits(float32(v.Convert(f32type).Float()))), 4, nil
 			}
 		} else if destType == Float64 {
 			// convert unsigned to float64
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
-				return math.Float64bits(v.Convert(f64type).Float()), destSize, nil
+				//return math.Float64bits(v.Convert(f64type).Float()), destSize, nil
+				return math.Float64bits(v.Convert(f64type).Float()), 8, nil
 			}
 		}
 
@@ -541,11 +911,13 @@ func encodeFunc(srcRType reflect.Type, destType eType) func(reflect.Value) (uint
 		switch destType {
 		case Float32, Dword:
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
-				return uint64(math.Float32bits(float32(v.Float()))), destSize, nil
+				//return uint64(math.Float32bits(float32(v.Float()))), destSize, nil
+				return uint64(math.Float32bits(float32(v.Float()))), 4, nil
 			}
 		case Float64, Qword:
 			return func(v reflect.Value) (value uint64, bytesize int, err error) {
-				return math.Float64bits(v.Float()), destSize, nil
+				//return math.Float64bits(v.Float()), destSize, nil
+				return math.Float64bits(v.Float()), 8, nil
 			}
 		default:
 			ec := encodeFunc(i64type, destType)

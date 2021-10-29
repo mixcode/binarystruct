@@ -372,10 +372,30 @@ func (ms *Marshaller) writeString(w io.Writer, order ByteOrder, v reflect.Value,
 		return
 	}
 
+	// write terminating zero
+	switch encodeType {
+	case Zstring:
+		w.Write(terminatingZeros[:1])
+		n += 1
+		m += 1
+	case Z16string:
+		w.Write(terminatingZeros[:2])
+		n += 2
+		m += 2
+		//case Z32string:
+		//	w.Write(terminatingZeros[:4])
+	}
+
 	if m < bufLen {
 		// fill the leftovers
-		return zeroFill(w, bufLen-m)
+		m, err = zeroFill(w, bufLen-m)
+		n += m
+		if err != nil {
+			return
+		}
+		return
 	}
+
 	return
 }
 
@@ -435,3 +455,7 @@ func zeroFill(w io.Writer, sz int) (n int, err error) {
 	}
 	return
 }
+
+var (
+	terminatingZeros = []byte{0, 0, 0, 0}
+)

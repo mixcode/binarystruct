@@ -448,6 +448,30 @@ func TestStruct(test *testing.T) {
 		decodeCompareLE(exp, &out, &in)
 	}()
 
+	// zero-terminated string
+	func() {
+		type st struct {
+			S string `binary:"zstring"`
+		}
+		in := st{"hello"}
+		exp := []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f, 0}
+		encodeCompareLE(in, exp)
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
+	}()
+
+	// 2-byte terminated string
+	func() {
+		type st struct {
+			S string `binary:"z16string"`
+		}
+		in := st{"helloo"}
+		exp := []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x6f, 0, 0}
+		encodeCompareLE(in, exp)
+		out := st{}
+		decodeCompareLE(exp, &out, &in)
+	}()
+
 	// pointer deference
 	func() {
 		i6 := int32(6)

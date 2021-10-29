@@ -363,9 +363,133 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 	return
 }
 
+// read a zero-terminating bytes.
+// str is actual non-zero bytes. readsz may be len(str)+1.
+func readZString(r io.Reader) (str []byte, readsz int, err error) {
+	str = make([]byte, 0)
+	if br, ok := r.(io.ByteReader); ok {
+		// has a bytereader
+		var b byte
+		for {
+			b, err = br.ReadByte()
+			if err != nil {
+				return
+			}
+			readsz++
+			if b == 0 {
+				break
+			}
+			str = append(str, b)
+		}
+	} else {
+		bb := make([]byte, 1)
+		for {
+			_, err = r.Read(bb)
+			if err != nil {
+				return
+			}
+			readsz++
+			if bb[0] == 0 {
+				break
+			}
+			str = append(str, bb[0])
+		}
+	}
+	return
+}
+
+// read a two-zero-terminating bytes.
+// may be a uint16/UTF16 bytes contained in a []byte stream.
+// str is actual bytes excluding final two zeros. readsz may be len(str)+2.
+func readZ16String(r io.Reader) (str []byte, readsz int, err error) {
+	str = make([]byte, 0)
+	even := false
+	var prevb byte
+	if br, ok := r.(io.ByteReader); ok {
+		// has a bytereader
+		var b byte
+		for {
+			b, err = br.ReadByte()
+			if err != nil {
+				return
+			}
+			readsz++
+			if even && prevb == 0 && b == 0 {
+				break
+			}
+			str = append(str, b)
+			prevb = b
+			even = !even
+		}
+	} else {
+		bb := make([]byte, 1)
+		for {
+			_, err = r.Read(bb)
+			if err != nil {
+				return
+			}
+			readsz++
+			if even && prevb == 0 && bb[0] == 0 {
+				break
+			}
+			str = append(str, bb[0])
+			prevb = bb[0]
+			even = !even
+		}
+	}
+	return
+}
+
 // read string types
 func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, encodeType eType, bufLen int, textEncoding string) (n int, err error) {
 
+	switch encodeType {
+	case Zstring: // zero-terminated byte string
+		var buf []byte
+		buf, n, err = readZString(r)
+		if err != nil {
+			return
+		}
+		// process text encoding
+		strlen := len(buf)
+		if textEncoding != "" && strlen > 0 {
+			buf, err = ms.decodeText(buf, textEncoding)
+			if err != nil {
+				return
+			}
+			strlen = len(buf)
+		}
+		// remove additional terminaing zeros
+		for ; strlen > 0 && buf[strlen-1] == 0; strlen-- {
+			// empty
+		}
+		v.SetString(string(buf[:strlen]))
+		return
+
+	case Z16string: // zero-terminated UTF16 string
+		var buf []byte
+		buf, n, err = readZ16String(r)
+		if err != nil {
+			return
+		}
+		// process text encoding
+		strlen := len(buf)
+		if textEncoding != "" && strlen > 0 {
+			buf, err = ms.decodeText(buf, textEncoding)
+			if err != nil {
+				return
+			}
+			strlen = len(buf)
+		}
+		// remove additional terminaing zeros
+		for ; strlen > 0 && buf[strlen-1] == 0; strlen-- {
+			// empty
+		}
+		v.SetString(string(buf[:strlen]))
+		return
+	}
+
+	// Size-given string
 	// read string length
 	headersz := 0
 	switch encodeType {

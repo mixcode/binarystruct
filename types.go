@@ -64,6 +64,10 @@ const (
 	Bstring  // {size Uint8, string [size]byte}  `binary:"bstring"`
 	Wstring  // {size Uint16, string [size]byte} `binary:"wstring"`
 	Dwstring // {size Uint32, string [size]byte} `binary:"dwstring"`
+	// zero-terminated string types.
+	Zstring   // zero-terminated byte string, or C-style string. `binary:"zstring"`
+	Z16string // zero-word-terminated word string. `binary:"z16string"`
+	//z32string	// zero-dword-terminated dword string of unknown length.
 
 	// struct type
 	iStruct // internal struct type
@@ -612,10 +616,12 @@ var (
 		Float32: {floatKind, 4, 0, 0},
 		Float64: {floatKind, 8, 0, 0},
 
-		String:   {stringKind, 0, 0, 0},
-		Bstring:  {stringKind, 0, 0, 0},
-		Wstring:  {stringKind, 0, 0, 0},
-		Dwstring: {stringKind, 0, 0, 0},
+		String:    {stringKind, 0, 0, 0},
+		Bstring:   {stringKind, 0, 0, 0},
+		Wstring:   {stringKind, 0, 0, 0},
+		Dwstring:  {stringKind, 0, 0, 0},
+		Zstring:   {stringKind, 0, 0, 0},
+		Z16string: {stringKind, 0, 0, 0},
 
 		Pad:     {uintKind, 0, 0, 0},
 		iStruct: {structKind, 0, 0, 0},
@@ -656,6 +662,8 @@ var (
 		{"Bstring", Bstring},
 		{"Wstring", Wstring},
 		{"DWString", Dwstring},
+		{"Zstring", Zstring},
+		{"Z16string", Z16string},
 		{"Pad", Pad},
 		{"Struct", iStruct},
 		{"Any", Any},

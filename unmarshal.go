@@ -137,6 +137,10 @@ func (ms *Marshaller) readSlice(r io.Reader, order ByteOrder, slice reflect.Valu
 
 	loadSlice := func(uslice reflect.Value, l int) {
 		wErr := func(i int, e error) error {
+			if i == 0 && e == io.EOF {
+				// if EOF occurs at the first element, then the whole slice returns EOF
+				return e
+			}
 			return fmt.Errorf("array index [%d]: %w", i, e)
 		}
 		var m int
@@ -266,6 +270,10 @@ func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Valu
 	}
 
 	wErr := func(i int, e error) error {
+		if i == 0 && e == io.EOF {
+			// if EOF occurs at the first element, then the whole slice returns EOF
+			return e
+		}
 		return fmt.Errorf("array index [%d]: %w", i, e)
 	}
 
@@ -321,9 +329,13 @@ func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Valu
 func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err error) {
 	typ := strc.Type()
 	nField := typ.NumField()
-	wErr := func(i int, e error) error {
+	wErr := func(i int, e error) error { // return a wrapped error
+		if i == 0 && e == io.EOF {
+			// If EOF occured at the first field of the struct, then return a raw EOF
+			return e
+		}
 		f := typ.Field(i)
-		return fmt.Errorf("field <%s>: %w", f.Name, e)
+		return fmt.Errorf("field#%d <%s>: %w", i, f.Name, e)
 	}
 	for i := 0; i < nField; i++ {
 		// Read tag info if available

@@ -329,9 +329,11 @@ func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Valu
 func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err error) {
 	typ := strc.Type()
 	nField := typ.NumField()
+
+	firstElem := true
 	wErr := func(i int, e error) error { // return a wrapped error
-		if i == 0 && e == io.EOF {
-			// If EOF occured at the first field of the struct, then return a raw EOF
+		if firstElem {
+			// If EOF occurs at the first non-ignoring field, then return a raw EOF
 			return e
 		}
 		f := typ.Field(i)
@@ -345,7 +347,7 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 			return
 		}
 
-		if encodeType == Ignore { // `binary:"ignore"`
+		if encodeType == Ignore { // `binary:"ignore"` or `binary:"-"`
 			continue
 		}
 
@@ -371,6 +373,7 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 			return
 		}
 		n += m
+		firstElem = false
 	}
 	return
 }

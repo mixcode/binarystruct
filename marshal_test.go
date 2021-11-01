@@ -4,7 +4,9 @@ package binarystruct_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"testing"
 
@@ -24,6 +26,46 @@ func printHex(b []byte) {
 	if i%sz != 0 {
 		fmt.Println()
 	}
+}
+
+func TestEOF(t *testing.T) {
+
+	// test the returning EOF
+	type s1 struct {
+		N1, N2 byte
+	}
+	var v1 s1
+
+	zeroData := make([]byte, 0)
+	_, e := bst.Unmarshal(zeroData, bst.LittleEndian, &v1)
+	if e != io.EOF {
+		t.Fatal("EOF at the first element must return io.EOF")
+	}
+
+	oneData := make([]byte, 1)
+	_, e = bst.Unmarshal(oneData, bst.LittleEndian, &v1)
+	if e == io.EOF || errors.Unwrap(e) != io.EOF {
+		t.Fatal("EOF after the first element must return wrapped io.EOF")
+	}
+
+	// test the returning EOF with ignored fields
+	// test the returning EOF
+	type s2 struct {
+		I1     byte `binary:"ignore"`
+		I2     byte `binary:"-"`
+		N1, N2 byte
+	}
+	var v2 s2
+
+	_, e = bst.Unmarshal(zeroData, bst.LittleEndian, &v2)
+	if e != io.EOF {
+		t.Fatal("EOF at the non-ignoring first element must return io.EOF")
+	}
+	_, e = bst.Unmarshal(oneData, bst.LittleEndian, &v2)
+	if e == io.EOF || errors.Unwrap(e) != io.EOF {
+		t.Fatal("EOF after the first element must return wrapped io.EOF")
+	}
+
 }
 
 func TestStruct(test *testing.T) {
@@ -517,11 +559,12 @@ func TestStruct(test *testing.T) {
 	// some complex structure
 	func() {
 		type t struct {
-			U1     int    `binary:"uint8"`
-			I2     int    `binary:"word"`
-			B3     bool   `binary:"int8"`
-			IGNORE int    `binary:"ignore"` // ignore this value
-			N4     string `binary:"wstring"`
+			U1      int    `binary:"uint8"`
+			I2      int    `binary:"word"`
+			B3      bool   `binary:"int8"`
+			IGNORE  int    `binary:"ignore"` // ignore this value
+			IGNORE2 int    `binary:"-"`      // ignore this value
+			N4      string `binary:"wstring"`
 			//N5 string `binary:"string(10),encoding=utf16"`	// string encoding not implemented yet
 			N5 string `binary:"string(10)"`
 			A6 []int  `binary:"[8]byte"`
@@ -540,7 +583,8 @@ func TestStruct(test *testing.T) {
 			1,
 			2,
 			true,
-			9999, // ignoring value
+			9999,  // ignoring value
+			99999, // another ignoring value
 			"hello",
 			"hello2",
 			[]int{1, 2, 3, 4, 5},
@@ -563,8 +607,8 @@ func TestStruct(test *testing.T) {
 
 		// set implicitly written values
 		in.A6 = append(in.A6, []int{0, 0, 0}...)
-		// clear ignored values
-		in.IGNORE, in.unexported = 0, 0
+		// clear ignoring values
+		in.IGNORE, in.IGNORE2, in.unexported = 0, 0, 0
 		out := t{}
 		decodeCompareLE(exp, &out, &in)
 	}()

@@ -668,6 +668,7 @@ var (
 		{"Struct", iStruct},
 		{"Any", Any},
 		{"Ignore", Ignore},
+		{"-", Ignore},
 	}
 )
 

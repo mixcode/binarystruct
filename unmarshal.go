@@ -152,7 +152,7 @@ func (ms *Marshaller) readSlice(r io.Reader, order ByteOrder, slice reflect.Valu
 			if len(b) < l {
 				panic("invalid slice size")
 			}
-			m, err = io.ReadAtLeast(r, b, l)
+			m, err = io.ReadFull(r, b[:l])
 			if err != nil {
 				return
 			}
@@ -537,7 +537,7 @@ func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, 
 	buf := make([]byte, readsz)
 	m := 0
 	if readsz > 0 {
-		m, err = io.ReadAtLeast(r, buf, readsz)
+		m, err = io.ReadFull(r, buf)
 		n += m
 		if err != nil {
 			return
@@ -566,7 +566,7 @@ func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, 
 func readU64(r io.Reader, order ByteOrder, bytesize int) (u64 uint64, n int, err error) {
 	var buf [8]byte
 	b := buf[:bytesize]
-	n, err = io.ReadAtLeast(r, b, bytesize)
+	n, err = io.ReadFull(r, b)
 	if err != nil {
 		return
 	}

@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"strings"
 
 	"io"
 	"reflect"
@@ -36,15 +35,62 @@ func Read(r io.Reader, order ByteOrder, data interface{}) (n int, err error) {
 	return (&ms).readValue(r, order, reflect.ValueOf(data))
 }
 
+// UnmarshalAs decodes binary images into a Go value using the supplied tag. The Go value must be a writable type such as a slice, a pointer or an interface.
+func UnmarshalAs(input []byte, tag string, order ByteOrder, govalue interface{}) (n int, err error) {
+	var ms Marshaller
+	return (&ms).UnmarshalAs(input, tag, order, govalue)
+}
+
+// ReadAs reads binary data from r and decodes it into a Go value using the supplied tag. The Go value must be a writable type such as a slice, a pointer or an interface.
+func ReadAs(r io.Reader, tag string, order ByteOrder, data interface{}) (n int, err error) {
+	var ms Marshaller
+	return (&ms).ReadAs(r, tag, order, data)
+}
+
 // Unmarshaller.Unmarshal() is binary image decoder with environment in a Marshaller.
 func (ms *Marshaller) Unmarshal(input []byte, order binary.ByteOrder, govalue interface{}) (n int, err error) {
 	buf := bytes.NewBuffer(input)
 	return ms.Read(buf, order, govalue)
 }
 
+// Unmarshaller.UnmarshalAs() is binary image decoder with environment in a Marshaller using the supplied tag.
+func (ms *Marshaller) UnmarshalAs(input []byte, tag string, order binary.ByteOrder, govalue interface{}) (n int, err error) {
+	buf := bytes.NewBuffer(input)
+	return ms.ReadAs(buf, tag, order, govalue)
+}
+
 // Unmarshaller.Read() is binary stream decoder with environment in a Marshaller.
 func (ms *Marshaller) Read(r io.Reader, order binary.ByteOrder, data interface{}) (n int, err error) {
 	return ms.readValue(r, order, reflect.ValueOf(data))
+}
+
+// Unmarshaller.ReadAs() is binary stream decoder with environment in a Marshaller using the supplied tag.
+func (ms *Marshaller) ReadAs(r io.Reader, tag string, order binary.ByteOrder, data interface{}) (n int, err error) {
+	v := reflect.ValueOf(data)
+	k := v.Type().Kind()
+	if k == reflect.Ptr || k == reflect.Interface {
+		v, _ = dereferencePointer(v)
+	}
+
+	var fieldErr error
+	switch v.Kind() {
+	case reflect.Invalid:
+		fieldErr = fmt.Errorf("invalid data type")
+	case reflect.Complex64, reflect.Complex128:
+		fieldErr = fmt.Errorf("complex type not supported")
+	case reflect.UnsafePointer:
+		fieldErr = fmt.Errorf("pointer type not supported")
+	case reflect.Chan, reflect.Func, reflect.Map:
+		fieldErr = fmt.Errorf("unsupported type: %v", v.Kind())
+	}
+
+	naturalType, naturalOption := getNaturalType(v)
+	encodeType, option, err := parseTagString(tag, reflect.Value{}, naturalType, naturalOption, fieldErr)
+	if err != nil {
+		return 0, err
+	}
+
+	return ms.readMain(r, order, v, encodeType, option, reflect.Value{}, -1)
 }
 
 // read a reflect.Value
@@ -54,11 +100,42 @@ func (ms *Marshaller) readValue(r io.Reader, order ByteOrder, v reflect.Value) (
 		v, _ = dereferencePointer(v)
 	}
 	encodeType, option := getNaturalType(v)
-	return ms.readMain(r, order, v, encodeType, option)
+	return ms.readMain(r, order, v, encodeType, option, reflect.Value{}, -1)
 }
 
 // read a value as given type
-func (ms *Marshaller) readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType eType, option typeOption) (n int, err error) {
+func (ms *Marshaller) readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType eType, option typeOption, parentStruct reflect.Value, fieldIndex int) (n int, err error) {
+	order = resolveByteOrder(order, option.endian)
+
+	if option.serializer != "" {
+		serializer, ok := ms.serializers[option.serializer]
+		if !ok {
+			return 0, fmt.Errorf("unknown serializer: %s", option.serializer)
+		}
+		val, n, err := serializer.Deserialize(r, parentStruct, fieldIndex, order)
+		if err != nil {
+			return n, err
+		}
+		if !v.CanSet() {
+			return n, ErrCannotSet
+		}
+		valVal := reflect.ValueOf(val)
+		if valVal.Type().AssignableTo(v.Type()) {
+			v.Set(valVal)
+		} else if valVal.Type().ConvertibleTo(v.Type()) {
+			v.Set(valVal.Convert(v.Type()))
+		} else {
+			return n, fmt.Errorf("cannot assign deserialized value of type %T to field of type %s", val, v.Type().String())
+		}
+		return n, nil
+	}
+
+	if encodeType == Any {
+		var naturalOption typeOption
+		encodeType, naturalOption = getNaturalType(v)
+		option.indirectCount += naturalOption.indirectCount
+	}
+
 	// type was a pointer or an interface
 	if option.indirectCount > 0 {
 		for i := 0; i < option.indirectCount; i++ {
@@ -167,7 +244,7 @@ func (ms *Marshaller) readSlice(r io.Reader, order ByteOrder, slice reflect.Valu
 					var o typeOption
 					o.bufLen = option.bufLen     // option may contain inheritable values
 					o.encoding = option.encoding // option may contain inheritable values
-					m, err = ms.readMain(r, order, uslice.Index(i), elementType, o)
+					m, err = ms.readMain(r, order, uslice.Index(i), elementType, o, reflect.Value{}, -1)
 				}
 				n += m
 				if err != nil {
@@ -292,7 +369,7 @@ func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Valu
 			var o typeOption
 			o.bufLen = option.bufLen     // option may contain inheritable values
 			o.encoding = option.encoding // option may contain inheritable values
-			m, err = ms.readMain(r, order, v, elementType, o)
+			m, err = ms.readMain(r, order, v, elementType, o, reflect.Value{}, -1)
 		}
 		n += m
 		if err != nil {
@@ -313,7 +390,7 @@ func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Valu
 		newv := reflect.New(v.Type()).Elem()
 		o := typeOption{bufLen: option.bufLen, encoding: option.encoding}
 		for i := readLen; i < arrayLen; i++ {
-			m, err = ms.readMain(r, order, newv, elementType, o)
+			m, err = ms.readMain(r, order, newv, elementType, o, reflect.Value{}, -1)
 			n += m
 			if err != nil {
 				err = wErr(i, err)
@@ -328,7 +405,10 @@ func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Valu
 // read a struct
 func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err error) {
 	typ := strc.Type()
-	nField := typ.NumField()
+	meta, err := getStructMetadata(typ)
+	if err != nil {
+		return 0, err
+	}
 
 	firstElem := true
 	wErr := func(i int, e error) error { // return a wrapped error
@@ -339,37 +419,89 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 		f := typ.Field(i)
 		return fmt.Errorf("field#%d <%s>: %w", i, f.Name, e)
 	}
-	for i := 0; i < nField; i++ {
-		// Read tag info if available
-		encodeType, option, e := parseStructField(typ, strc, i)
-		if e != nil {
-			err = wErr(i, e)
+
+	for _, fMeta := range meta.fields {
+		if fMeta.ignore {
+			continue
+		}
+		if fMeta.unexported {
+			continue
+		}
+		if fMeta.fieldErr != nil && !fMeta.hasTag {
+			err = wErr(fMeta.index, fMeta.fieldErr)
 			return
 		}
 
-		if encodeType == Ignore { // `binary:"ignore"` or `binary:"-"`
-			continue
-		}
-
-		f := typ.Field(i)
-		name := f.Name
-		if len(name) == 0 || strings.ToUpper(name)[0] != name[0] {
-			// unexported type
-			continue
-		}
-
-		fKind := f.Type.Kind()
-		v := strc.Field(i)
+		fieldVal := strc.Field(fMeta.index)
+		fKind := typ.Field(fMeta.index).Type.Kind()
+		v := fieldVal
 		if fKind == reflect.Ptr || fKind == reflect.Interface {
 			// allocate pointers
 			v, _ = dereferencePointer(v)
+		}
+
+		var naturalType eType
+		var option typeOption
+		if v.IsValid() {
+			naturalType, option = getNaturalType(v)
+		}
+
+		if fMeta.hasTag {
+			if naturalType == iInvalid && (fMeta.encodeType != Pad && fMeta.encodeType != Ignore) {
+				if fMeta.fieldErr != nil {
+					err = wErr(fMeta.index, fMeta.fieldErr)
+				} else {
+					err = wErr(fMeta.index, fmt.Errorf("the field %s is not encodable", fMeta.name))
+				}
+				return
+			}
+			if fMeta.encodeType != Any {
+				naturalType = fMeta.encodeType
+			}
+			if fMeta.isArray {
+				option.isArray = true
+				if fMeta.arrayLenExpr != "" {
+					option.arrayLen, err = evaluateTagValue(strc, fMeta.arrayLenExpr)
+					if err != nil {
+						err = wErr(fMeta.index, err)
+						return
+					}
+					if option.arrayLen < 0 {
+						err = wErr(fMeta.index, errNegativeSize)
+						return
+					}
+				}
+			}
+			if fMeta.bufLenExpr != "" {
+				option.bufLen, err = evaluateTagValue(strc, fMeta.bufLenExpr)
+				if err != nil {
+					err = wErr(fMeta.index, err)
+					return
+				}
+				if option.bufLen < 0 {
+					err = wErr(fMeta.index, errNegativeSize)
+					return
+				}
+			}
+			if fMeta.encoding != "" {
+				option.encoding = fMeta.encoding
+			}
+			if fMeta.endian != endianNone {
+				option.endian = fMeta.endian
+			}
+			if fMeta.serializer != "" {
+				option.serializer = fMeta.serializer
+			}
+		}
+
+		if fKind == reflect.Ptr || fKind == reflect.Interface {
 			option.indirectCount = 0
 		}
 
 		var m int
-		m, err = ms.readMain(r, order, v, encodeType, option)
+		m, err = ms.readMain(r, order, v, naturalType, option, strc, fMeta.index)
 		if err != nil {
-			err = wErr(i, err)
+			err = wErr(fMeta.index, err)
 			return
 		}
 		n += m
@@ -457,6 +589,9 @@ func readZ16String(r io.Reader) (str []byte, readsz int, err error) {
 
 // read string types
 func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, encodeType eType, bufLen int, textEncoding string) (n int, err error) {
+	if textEncoding == "" {
+		textEncoding = ms.DefaultTextEncoding
+	}
 
 	switch encodeType {
 	case Zstring: // zero-terminated byte string

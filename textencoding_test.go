@@ -92,4 +92,38 @@ func TestTextEncoding(t *testing.T) {
 	if len(ms.TextEncoding) != 1 {
 		t.Errorf("text encoding removal failed")
 	}
+
+	// DefaultTextEncoding
+	func() {
+		var msDefault = new(bst.Marshaller)
+		msDefault.AddTextEncoding("sjis", japanese.ShiftJIS)
+		msDefault.DefaultTextEncoding = "sjis"
+
+		type st struct {
+			S string `binary:"wstring"` // no encoding option
+		}
+		in := st{S: "こんにちは峠丼"}
+		exp := []byte{
+			0x0e, 0x00, 0x82, 0xb1, 0x82, 0xf1, 0x82, 0xc9,
+			0x82, 0xbf, 0x82, 0xcd, 0x93, 0xbb, 0x98, 0xa5,
+		}
+		enc, e := msDefault.Marshal(&in, bst.LittleEndian)
+		if e != nil {
+			t.Error(e)
+			return
+		}
+		if !bytes.Equal(enc, exp) {
+			t.Errorf("default encoding: encoded bytes are not equal")
+			return
+		}
+		out := st{}
+		_, e = msDefault.Unmarshal(enc, bst.LittleEndian, &out)
+		if e != nil {
+			t.Error(e)
+			return
+		}
+		if !reflect.DeepEqual(&in, &out) {
+			t.Errorf("default encoding: decoded string is not equal")
+		}
+	}()
 }

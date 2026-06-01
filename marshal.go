@@ -8,7 +8,6 @@ import (
 	"io"
 	"math"
 	"reflect"
-	"strings"
 
 	"golang.org/x/text/encoding"
 )
@@ -25,9 +24,23 @@ func Write(w io.Writer, order ByteOrder, govalue interface{}) (n int, err error)
 	return (&ms).Write(w, order, govalue)
 }
 
+// MarshalAs encodes a go value into binary data using the supplied tag and returns it as []byte.
+func MarshalAs(govalue interface{}, tag string, order ByteOrder) (encoded []byte, err error) {
+	var ms Marshaller
+	return (&ms).MarshalAs(govalue, tag, order)
+}
+
+// WriteAs encodes a go value into a binary stream using the supplied tag and writes it to w.
+func WriteAs(w io.Writer, tag string, order ByteOrder, govalue interface{}) (n int, err error) {
+	var ms Marshaller
+	return (&ms).WriteAs(w, tag, order, govalue)
+}
+
 // Marshaller is go-type to binary-type encoder with environmental values
 type Marshaller struct {
-	TextEncoding map[string]encoding.Encoding // map[encodingName]Encoding
+	TextEncoding        map[string]encoding.Encoding // map[encodingName]Encoding
+	DefaultTextEncoding string                       // default text encoding name
+	serializers         map[string]Serializer        // registered custom serializers
 
 	encoderCache map[string]*encoding.Encoder // cache of encoding.NewEncoder()
 	decoderCache map[string]*encoding.Decoder // cache of encoding.NewDecoder()
@@ -55,6 +68,22 @@ func (ms *Marshaller) RemoveTextEncoding(encodingName string) {
 	}
 }
 
+// AddSerializer registers a custom Serializer with a Marshaller.
+// Provided name could be used in struct field tags, like `binary:"...,serializer=name"`
+func (ms *Marshaller) AddSerializer(name string, s Serializer) {
+	if ms.serializers == nil {
+		ms.serializers = make(map[string]Serializer)
+	}
+	ms.serializers[name] = s
+}
+
+// RemoveSerializer removes a registered custom Serializer.
+func (ms *Marshaller) RemoveSerializer(name string) {
+	if ms.serializers != nil {
+		delete(ms.serializers, name)
+	}
+}
+
 // Marshaller.Marshal() is binary image encoder with environment in a Marshaller.
 func (ms *Marshaller) Marshal(govalue interface{}, order ByteOrder) (encoded []byte, err error) {
 	var b bytes.Buffer
@@ -62,9 +91,48 @@ func (ms *Marshaller) Marshal(govalue interface{}, order ByteOrder) (encoded []b
 	return b.Bytes(), err
 }
 
+// Marshaller.MarshalAs() is binary image encoder with environment in a Marshaller using the supplied tag.
+func (ms *Marshaller) MarshalAs(govalue interface{}, tag string, order ByteOrder) (encoded []byte, err error) {
+	var b bytes.Buffer
+	_, err = ms.WriteAs(&b, tag, order, govalue)
+	return b.Bytes(), err
+}
+
 // Marshaller.Write() is binary stream encoder with environment in a Marshaller.
 func (ms *Marshaller) Write(w io.Writer, order ByteOrder, data interface{}) (n int, err error) {
 	return ms.writeValue(w, order, reflect.ValueOf(data))
+}
+
+// Marshaller.WriteAs() is binary stream encoder with environment in a Marshaller using the supplied tag.
+func (ms *Marshaller) WriteAs(w io.Writer, tag string, order ByteOrder, data interface{}) (n int, err error) {
+	v := reflect.ValueOf(data)
+	t := v.Type()
+	k := t.Kind()
+	for k == reflect.Ptr || k == reflect.Interface {
+		v = reflect.Indirect(v)
+		t = v.Type()
+		k = t.Kind()
+	}
+
+	var fieldErr error
+	switch k {
+	case reflect.Invalid:
+		fieldErr = fmt.Errorf("invalid data type")
+	case reflect.Complex64, reflect.Complex128:
+		fieldErr = fmt.Errorf("complex type not supported")
+	case reflect.UnsafePointer:
+		fieldErr = fmt.Errorf("pointer type not supported")
+	case reflect.Chan, reflect.Func, reflect.Map:
+		fieldErr = fmt.Errorf("unsupported type: %v", k)
+	}
+
+	naturalType, naturalOption := getNaturalType(v)
+	encodeType, option, err := parseTagString(tag, reflect.Value{}, naturalType, naturalOption, fieldErr)
+	if err != nil {
+		return 0, err
+	}
+
+	return ms.writeMain(w, order, v, encodeType, option, reflect.Value{}, -1)
 }
 
 // write a reflect.Value
@@ -78,11 +146,27 @@ func (ms *Marshaller) writeValue(w io.Writer, order ByteOrder, v reflect.Value) 
 	}
 	encodeType, option := getNaturalType(v)
 
-	return ms.writeMain(w, order, v, encodeType, option)
+	return ms.writeMain(w, order, v, encodeType, option, reflect.Value{}, -1)
 }
 
 // write a value as given type
-func (ms *Marshaller) writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType eType, option typeOption) (n int, err error) {
+func (ms *Marshaller) writeMain(w io.Writer, order ByteOrder, v reflect.Value, encodeType eType, option typeOption, parentStruct reflect.Value, fieldIndex int) (n int, err error) {
+
+	order = resolveByteOrder(order, option.endian)
+
+	if option.serializer != "" {
+		serializer, ok := ms.serializers[option.serializer]
+		if !ok {
+			return 0, fmt.Errorf("unknown serializer: %s", option.serializer)
+		}
+		return serializer.Serialize(w, v.Interface(), parentStruct, fieldIndex, order)
+	}
+
+	if encodeType == Any {
+		var naturalOption typeOption
+		encodeType, naturalOption = getNaturalType(v)
+		option.indirectCount += naturalOption.indirectCount
+	}
 
 	// type was a pointer or an interface
 	if option.indirectCount > 0 {
@@ -191,7 +275,7 @@ func (ms *Marshaller) writeArray(w io.Writer, order ByteOrder, array reflect.Val
 			var o typeOption
 			o.bufLen = option.bufLen     // option may contain inheritable values
 			o.encoding = option.encoding // option may contain inheritable values
-			m, err = ms.writeMain(w, order, e, elementType, o)
+			m, err = ms.writeMain(w, order, e, elementType, o, reflect.Value{}, -1)
 			if err != nil {
 				err = wErr(i, err)
 				return
@@ -232,32 +316,85 @@ func (ms *Marshaller) writeArray(w io.Writer, order ByteOrder, array reflect.Val
 // write a struct
 func (ms *Marshaller) writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err error) {
 	typ := strc.Type()
-	nField := typ.NumField()
+	meta, err := getStructMetadata(typ)
+	if err != nil {
+		return 0, err
+	}
 	wErr := func(i int, e error) error {
 		f := typ.Field(i)
 		return fmt.Errorf("field <%s>: %w", f.Name, e)
 	}
-	for i := 0; i < nField; i++ {
-		// Read tag info if available
-		encodeType, option, e := parseStructField(typ, strc, i)
-		if e != nil {
-			err = wErr(i, e)
+	for _, fMeta := range meta.fields {
+		if fMeta.ignore {
+			continue
+		}
+		if fMeta.unexported {
+			continue
+		}
+		if fMeta.fieldErr != nil && !fMeta.hasTag {
+			err = wErr(fMeta.index, fMeta.fieldErr)
 			return
 		}
 
-		if encodeType == Ignore { // `binary:"ignore"`
-			continue
+		fieldVal := strc.Field(fMeta.index)
+		var naturalType eType
+		var option typeOption
+		if fieldVal.IsValid() {
+			naturalType, option = getNaturalType(fieldVal)
 		}
-		name := typ.Field(i).Name
-		if len(name) == 0 || strings.ToUpper(name)[0] != name[0] {
-			// unexported type
-			continue
+
+		if fMeta.hasTag {
+			if naturalType == iInvalid && (fMeta.encodeType != Pad && fMeta.encodeType != Ignore) {
+				if fMeta.fieldErr != nil {
+					err = wErr(fMeta.index, fMeta.fieldErr)
+				} else {
+					err = wErr(fMeta.index, fmt.Errorf("the field %s is not encodable", fMeta.name))
+				}
+				return
+			}
+			if fMeta.encodeType != Any {
+				naturalType = fMeta.encodeType
+			}
+			if fMeta.isArray {
+				option.isArray = true
+				if fMeta.arrayLenExpr != "" {
+					option.arrayLen, err = evaluateTagValue(strc, fMeta.arrayLenExpr)
+					if err != nil {
+						err = wErr(fMeta.index, err)
+						return
+					}
+					if option.arrayLen < 0 {
+						err = wErr(fMeta.index, errNegativeSize)
+						return
+					}
+				}
+			}
+			if fMeta.bufLenExpr != "" {
+				option.bufLen, err = evaluateTagValue(strc, fMeta.bufLenExpr)
+				if err != nil {
+					err = wErr(fMeta.index, err)
+					return
+				}
+				if option.bufLen < 0 {
+					err = wErr(fMeta.index, errNegativeSize)
+					return
+				}
+			}
+			if fMeta.encoding != "" {
+				option.encoding = fMeta.encoding
+			}
+			if fMeta.endian != endianNone {
+				option.endian = fMeta.endian
+			}
+			if fMeta.serializer != "" {
+				option.serializer = fMeta.serializer
+			}
 		}
 
 		var m int
-		m, err = ms.writeMain(w, order, strc.Field(i), encodeType, option)
+		m, err = ms.writeMain(w, order, fieldVal, naturalType, option, strc, fMeta.index)
 		if err != nil {
-			err = wErr(i, err)
+			err = wErr(fMeta.index, err)
 			return
 		}
 		n += m
@@ -325,6 +462,9 @@ func (ms *Marshaller) writeString(w io.Writer, order ByteOrder, v reflect.Value,
 	var m int
 
 	// process text encoding
+	if textEncoding == "" {
+		textEncoding = ms.DefaultTextEncoding
+	}
 	if textEncoding != "" {
 		stringBytes, err = ms.encodeText(stringBytes, textEncoding)
 		if err != nil {

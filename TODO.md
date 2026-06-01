@@ -1,15 +1,18 @@
 
 
-# TODO?
+## TODO ideas
 
+### Benchmarks and advanced optimizers, ideas like precompiled P-code based decoder/encoder, or type and endian converter with SIMD assemblies.
 
-## add 'omittable' flag (for the fields at the end of struct)
+### Explicit endian marking in field tags: "big-endian", "little-endian", "inverse-endian"
 
+### add 'omittable' or 'optional' field tag, mainly for the fields at the end of struct.
 
-## add mul/div to size calculator
+### Default text encoding setting
 
+### add mul/div and parenthesis calculation to member size calculator
 
-## one-value marshaller/unmarshaller
+### one-value marshaller/unmarshaller for non-struct variables
 
 ```
 // MarshalAs encodes a go value into binary data using suppried tag
@@ -19,14 +22,13 @@ var a []int
 UnmarshalAs(a, "[4]byte", bst.LittleEndian)	// read [4]byte to []int
 ```
 
-
-## multidimensional array
+### multidimensional array
 	struct {
 		MArr [][][]int	`binary:"[4][2][2]int8"`
 	}
 
 
-## custom serializer
+### custom serializer
 
 	struct {
 		VariableSizeInt int	`binary:"[]custom(),serializer=[Serializer_Name]"`
@@ -40,6 +42,6 @@ UnmarshalAs(a, "[4]byte", bst.LittleEndian)	// read [4]byte to []int
 	}
 
 
-## Write a function to print offset and size of struct fields?
+### Write a function to print the offset and the size of struct fields?
 
 

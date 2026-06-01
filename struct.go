@@ -9,11 +9,32 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
 	tagName = "binary"
 )
+
+type structFieldMetadata struct {
+	index        int
+	name         string
+	hasTag       bool
+	encodeType   eType
+	isArray      bool
+	arrayLenExpr string
+	bufLenExpr   string
+	encoding     string
+	endian       endianOverride
+	serializer   string
+	ignore       bool
+	unexported   bool
+	fieldErr     error
+}
+
+type structMetadata struct {
+	fields []structFieldMetadata
+}
 
 var (
 	errNegativeSize = errors.New("the size must not be negative")
@@ -23,97 +44,253 @@ var (
 
 	// single entry of tag-value evaluation
 	mExpression = regexp.MustCompile(`\s*([\+\-])?\s*([^\s\+\-]+)`)
+
+	structMetadataCache sync.Map // map[reflect.Type]*structMetadata
 )
 
-// simple add-sub calculator, with struct field referencing
-func evaluateTagValue(strc reflect.Value, stmt string) (value int, err error) {
+type tokenType int
+const (
+	tokEOF tokenType = iota
+	tokNum
+	tokIdent
+	tokPlus
+	tokMinus
+	tokMul
+	tokDiv
+	tokLParen
+	tokRParen
+)
 
-	type entry struct {
-		operation string
-		value     string
-	}
-	poly := make([]entry, 0)
-
-	m := mExpression.FindAllStringSubmatchIndex(stmt, -1)
-	for _, n := range m {
-		e := entry{}
-		if n[2] >= 0 {
-			e.operation = stmt[n[2]:n[3]]
-		}
-		e.value = stmt[n[4]:n[5]]
-		poly = append(poly, e)
-	}
-
-	printerr := func(s string) error {
-		return fmt.Errorf("invalid argument %s", s)
-	}
-
-	var sum int64
-	for _, q := range poly {
-		// try to evaluate single expression as a interger value
-		var i64 int64
-		i64, e := strconv.ParseInt(q.value, 0, 64)
-		if e != nil {
-			// try to reference a struct member variable
-			if strc.Kind() != reflect.Struct {
-				// given data is not a struct
-				err = printerr(q.value)
-				return
-			}
-			typ := strc.Type()
-			f, ok := typ.FieldByName(q.value)
-			if !ok {
-				// no such field name
-				err = printerr(q.value)
-				return
-			}
-			v := strc.FieldByIndex(f.Index)
-			if !v.Type().ConvertibleTo(i64type) {
-				// the field cannot be converted to an integer
-				err = printerr(q.value)
-				return
-			}
-			i64 = v.Convert(i64type).Int()
-		}
-
-		switch q.operation {
-		case "+", "":
-			sum = sum + i64
-		case "-":
-			sum = sum - i64
-		default:
-			err = fmt.Errorf("invalid operation <%s>", q.operation)
-			return
-		}
-	}
-	value = int(sum)
-	return
+type token struct {
+	typ tokenType
+	val string
 }
 
-// read struct tag
-func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encodeType eType, option typeOption, err error) {
-
-	field := structType.Field(i)
-	fType := field.Type
-	fKind := fType.Kind()
-
-	// check field type
-	var fieldErr error
-	switch fKind {
-	case reflect.Invalid:
-		fieldErr = fmt.Errorf("invalid data type")
-	case reflect.Complex64, reflect.Complex128:
-		fieldErr = fmt.Errorf("complex type not supported")
-	case reflect.UnsafePointer:
-		fieldErr = fmt.Errorf("pointer type not supported")
-	case reflect.Chan, reflect.Func, reflect.Map:
-		fieldErr = fmt.Errorf("unsupported type: %v", fType.Kind())
-	default:
-		encodeType, option = getNaturalType(strc.Field(i))
+func tokenize(expr string) ([]token, error) {
+	var tokens []token
+	i := 0
+	n := len(expr)
+	for i < n {
+		c := expr[i]
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			i++
+			continue
+		}
+		if c == '+' {
+			tokens = append(tokens, token{tokPlus, "+"})
+			i++
+			continue
+		}
+		if c == '-' {
+			tokens = append(tokens, token{tokMinus, "-"})
+			i++
+			continue
+		}
+		if c == '*' {
+			tokens = append(tokens, token{tokMul, "*"})
+			i++
+			continue
+		}
+		if c == '/' {
+			tokens = append(tokens, token{tokDiv, "/"})
+			i++
+			continue
+		}
+		if c == '(' {
+			tokens = append(tokens, token{tokLParen, "("})
+			i++
+			continue
+		}
+		if c == ')' {
+			tokens = append(tokens, token{tokRParen, ")"})
+			i++
+			continue
+		}
+		if c >= '0' && c <= '9' {
+			start := i
+			if i+1 < n && expr[i] == '0' && (expr[i+1] == 'x' || expr[i+1] == 'X' || expr[i+1] == 'o' || expr[i+1] == 'O' || expr[i+1] == 'b' || expr[i+1] == 'B') {
+				i += 2
+			}
+			for i < n && ((expr[i] >= '0' && expr[i] <= '9') || (expr[i] >= 'a' && expr[i] <= 'f') || (expr[i] >= 'A' && expr[i] <= 'F') || expr[i] == '_') {
+				i++
+			}
+			tokens = append(tokens, token{tokNum, expr[start:i]})
+			continue
+		}
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
+			start := i
+			i++
+			for i < n && ((expr[i] >= 'a' && expr[i] <= 'z') || (expr[i] >= 'A' && expr[i] <= 'Z') || (expr[i] >= '0' && expr[i] <= '9') || expr[i] == '_') {
+				i++
+			}
+			tokens = append(tokens, token{tokIdent, expr[start:i]})
+			continue
+		}
+		return nil, fmt.Errorf("unexpected character: %c", c)
 	}
+	tokens = append(tokens, token{tokEOF, ""})
+	return tokens, nil
+}
+
+type tagParser struct {
+	tokens []token
+	pos    int
+	strc   reflect.Value
+}
+
+func (p *tagParser) peek() token {
+	if p.pos >= len(p.tokens) {
+		return token{tokEOF, ""}
+	}
+	return p.tokens[p.pos]
+}
+
+func (p *tagParser) consume() token {
+	t := p.peek()
+	if t.typ != tokEOF {
+		p.pos++
+	}
+	return t
+}
+
+func (p *tagParser) parseExpr() (int, error) {
+	val, err := p.parseTerm()
+	if err != nil {
+		return 0, err
+	}
+	for {
+		t := p.peek()
+		if t.typ == tokPlus {
+			p.consume()
+			r, err := p.parseTerm()
+			if err != nil {
+				return 0, err
+			}
+			val = val + r
+		} else if t.typ == tokMinus {
+			p.consume()
+			r, err := p.parseTerm()
+			if err != nil {
+				return 0, err
+			}
+			val = val - r
+		} else {
+			break
+		}
+	}
+	return val, nil
+}
+
+func (p *tagParser) parseTerm() (int, error) {
+	val, err := p.parseFactor()
+	if err != nil {
+		return 0, err
+	}
+	for {
+		t := p.peek()
+		if t.typ == tokMul {
+			p.consume()
+			r, err := p.parseFactor()
+			if err != nil {
+				return 0, err
+			}
+			val = val * r
+		} else if t.typ == tokDiv {
+			p.consume()
+			r, err := p.parseFactor()
+			if err != nil {
+				return 0, err
+			}
+			if r == 0 {
+				return 0, fmt.Errorf("division by zero")
+			}
+			val = val / r
+		} else {
+			break
+		}
+	}
+	return val, nil
+}
+
+func (p *tagParser) parseFactor() (int, error) {
+	t := p.peek()
+	if t.typ == tokPlus {
+		p.consume()
+		return p.parseFactor()
+	}
+	if t.typ == tokMinus {
+		p.consume()
+		val, err := p.parseFactor()
+		if err != nil {
+			return 0, err
+		}
+		return -val, nil
+	}
+	if t.typ == tokLParen {
+		p.consume()
+		val, err := p.parseExpr()
+		if err != nil {
+			return 0, err
+		}
+		if p.consume().typ != tokRParen {
+			return 0, fmt.Errorf("missing closing parenthesis")
+		}
+		return val, nil
+	}
+	if t.typ == tokNum {
+		p.consume()
+		i64, err := strconv.ParseInt(t.val, 0, 64)
+		if err != nil {
+			return 0, err
+		}
+		return int(i64), nil
+	}
+	if t.typ == tokIdent {
+		p.consume()
+		if p.strc.Kind() != reflect.Struct {
+			return 0, fmt.Errorf("cannot reference field %s of non-struct", t.val)
+		}
+		typ := p.strc.Type()
+		f, ok := typ.FieldByName(t.val)
+		if !ok {
+			return 0, fmt.Errorf("no field named %s", t.val)
+		}
+		v := p.strc.FieldByIndex(f.Index)
+		if !v.Type().ConvertibleTo(i64type) {
+			return 0, fmt.Errorf("field %s is not convertible to integer", t.val)
+		}
+		return int(v.Convert(i64type).Int()), nil
+	}
+	return 0, fmt.Errorf("unexpected token %s", t.val)
+}
+
+// evaluateTagValue evaluates arithmetic expressions for struct field tagging.
+func evaluateTagValue(strc reflect.Value, stmt string) (value int, err error) {
+	tokens, err := tokenize(stmt)
+	if err != nil {
+		return 0, err
+	}
+	p := &tagParser{
+		tokens: tokens,
+		strc:   strc,
+	}
+	value, err = p.parseExpr()
+	if err != nil {
+		return 0, err
+	}
+	if p.peek().typ != tokEOF {
+		return 0, fmt.Errorf("unexpected token at end of expression: %s", p.peek().val)
+	}
+	return value, nil
+}
+
+// parse tag string directly
+func parseTagString(tagStr string, strc reflect.Value, naturalType eType, naturalOption typeOption, fieldErr error) (encodeType eType, option typeOption, err error) {
+	encodeType = naturalType
+	option = naturalOption
 
 	// read the tag
-	tags := strings.Split(field.Tag.Get(tagName), ",")
+	tags := strings.Split(tagStr, ",")
 	if len(tags) == 0 || tags[0] == "" {
 		// no tags to process
 		if fieldErr != nil {
@@ -134,7 +311,7 @@ func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encod
 			// field type is non-encodable
 			err = fieldErr
 		} else {
-			err = fmt.Errorf("the field %s is not encodable", field.Name)
+			err = fmt.Errorf("the value is not encodable")
 		}
 		return
 	}
@@ -164,11 +341,40 @@ func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encod
 	for i := 1; i < len(tags); i++ {
 		t := strings.Split(tags[i], "=")
 		for j := 0; j < len(t); j++ {
-			t[i] = strings.TrimSpace(t[i])
+			t[j] = strings.TrimSpace(t[j])
 		}
 		switch t[0] {
 		case "encoding":
-			option.encoding = t[1]
+			if len(t) > 1 {
+				option.encoding = t[1]
+			} else {
+				err = fmt.Errorf("missing value for encoding tag")
+				return
+			}
+		case "endian":
+			if len(t) > 1 {
+				switch strings.ToLower(t[1]) {
+				case "big":
+					option.endian = endianBig
+				case "little":
+					option.endian = endianLittle
+				case "inverse":
+					option.endian = endianInverse
+				default:
+					err = fmt.Errorf("unknown endian value: %s", t[1])
+					return
+				}
+			} else {
+				err = fmt.Errorf("missing value for endian tag")
+				return
+			}
+		case "serializer":
+			if len(t) > 1 {
+				option.serializer = t[1]
+			} else {
+				err = fmt.Errorf("missing value for serializer tag")
+				return
+			}
 
 		default:
 			err = fmt.Errorf("unknown tag %s", t[0])
@@ -176,17 +382,122 @@ func parseStructField(structType reflect.Type, strc reflect.Value, i int) (encod
 		}
 	}
 
-	// binary: "ignore"		// ignore
-
-	// binary: "type"
-	// binary: "[size]type"
-	// binary: "[size]any"
-
-	// binary: "zstring[,encoding=ENC]"	// zero-terminated string
-	// binary: "zstring(size)[,encoding=ENC]"	// zero-terminated string with fixed size
-	// binary: "bstring[,encoding=ENC]"	// byte len + []byte
-	// binary: "wstring[,encoding=ENC]"	// word len + []byte
-	// binary: "dwstring[,encoding=ENC]"	// dword len + []byte
-
 	return
+}
+
+// getStructMetadata builds or retrieves cached metadata for the struct type.
+// getStructMetadata builds or retrieves cached metadata for the struct type.
+func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
+	if val, ok := structMetadataCache.Load(structType); ok {
+		return val.(*structMetadata), nil
+	}
+
+	nField := structType.NumField()
+	fields := make([]structFieldMetadata, 0, nField)
+
+	for i := 0; i < nField; i++ {
+		field := structType.Field(i)
+		fType := field.Type
+		fKind := fType.Kind()
+
+		var fieldErr error
+		switch fKind {
+		case reflect.Invalid:
+			fieldErr = fmt.Errorf("invalid data type")
+		case reflect.Complex64, reflect.Complex128:
+			fieldErr = fmt.Errorf("complex type not supported")
+		case reflect.UnsafePointer:
+			fieldErr = fmt.Errorf("pointer type not supported")
+		case reflect.Chan, reflect.Func, reflect.Map:
+			fieldErr = fmt.Errorf("unsupported type: %v", fType.Kind())
+		}
+
+		tagStr := field.Tag.Get(tagName)
+		tags := strings.Split(tagStr, ",")
+
+		meta := structFieldMetadata{
+			index:    i,
+			name:     field.Name,
+			fieldErr: fieldErr,
+		}
+
+		name := field.Name
+		if len(name) == 0 || strings.ToUpper(name)[0] != name[0] {
+			meta.unexported = true
+		}
+
+		if len(tags) == 0 || tags[0] == "" {
+			fields = append(fields, meta)
+			continue
+		}
+
+		meta.hasTag = true
+		m := mTag.FindStringSubmatch(tags[0])
+		typeTag := m[3]
+		parsedType := Any
+		if typeTag != "" {
+			parsedType = typeByName(typeTag)
+		}
+		meta.encodeType = parsedType
+
+		if parsedType == Ignore {
+			meta.ignore = true
+			fields = append(fields, meta)
+			continue
+		}
+
+		meta.isArray = m[1] != ""
+		if meta.isArray && m[2] != "" {
+			meta.arrayLenExpr = m[2]
+		}
+
+		if m[5] != "" {
+			meta.bufLenExpr = m[5]
+		}
+
+		// parse options
+		for idx := 1; idx < len(tags); idx++ {
+			t := strings.Split(tags[idx], "=")
+			for j := 0; j < len(t); j++ {
+				t[j] = strings.TrimSpace(t[j])
+			}
+			switch t[0] {
+			case "encoding":
+				if len(t) > 1 {
+					meta.encoding = t[1]
+				} else {
+					return nil, fmt.Errorf("missing value for encoding tag on field %s", field.Name)
+				}
+			case "endian":
+				if len(t) > 1 {
+					switch strings.ToLower(t[1]) {
+					case "big":
+						meta.endian = endianBig
+					case "little":
+						meta.endian = endianLittle
+					case "inverse":
+						meta.endian = endianInverse
+					default:
+						return nil, fmt.Errorf("unknown endian value: %s on field %s", t[1], field.Name)
+					}
+				} else {
+					return nil, fmt.Errorf("missing value for endian tag on field %s", field.Name)
+				}
+			case "serializer":
+				if len(t) > 1 {
+					meta.serializer = t[1]
+				} else {
+					return nil, fmt.Errorf("missing value for serializer tag on field %s", field.Name)
+				}
+			default:
+				return nil, fmt.Errorf("unknown tag %s on field %s", t[0], field.Name)
+			}
+		}
+
+		fields = append(fields, meta)
+	}
+
+	meta := &structMetadata{fields: fields}
+	structMetadataCache.Store(structType, meta)
+	return meta, nil
 }

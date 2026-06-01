@@ -4,6 +4,7 @@ package binarystruct_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -659,4 +660,208 @@ func ExampleUnmarshal() {
 
 	// Output:
 	// 11 {abcd 1 2 3}
+}
+
+func TestMarshalAs(t *testing.T) {
+	// 1. Scalar types
+	{
+		val := int(12345)
+		blob, err := bst.MarshalAs(val, "uint16", bst.LittleEndian)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(blob, []byte{0x39, 0x30}) {
+			t.Errorf("expected 0x3039, got %x", blob)
+		}
+
+		var out int
+		n, err := bst.UnmarshalAs(blob, "uint16", bst.LittleEndian, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 2 {
+			t.Errorf("expected read 2 bytes, got %d", n)
+		}
+		if out != 12345 {
+			t.Errorf("expected 12345, got %d", out)
+		}
+	}
+
+	// 2. String/slice types
+	{
+		val := "hello"
+		blob, err := bst.MarshalAs(val, "[8]byte", bst.LittleEndian)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedBlob := []byte{'h', 'e', 'l', 'l', 'o', 0, 0, 0}
+		if !bytes.Equal(blob, expectedBlob) {
+			t.Errorf("expected %x, got %x", expectedBlob, blob)
+		}
+
+		var out string
+		n, err := bst.UnmarshalAs(blob, "[8]byte", bst.LittleEndian, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 8 {
+			t.Errorf("expected read 8 bytes, got %d", n)
+		}
+		if out != "hello" {
+			t.Errorf("expected 'hello', got '%s'", out)
+		}
+	}
+}
+
+func TestEndianTags(t *testing.T) {
+	type structEndian struct {
+		BigVal     uint32 `binary:"uint32,endian=big"`
+		LittleVal  uint32 `binary:"uint32,endian=little"`
+		InverseVal uint32 `binary:"uint32,endian=inverse"`
+	}
+
+	in := structEndian{
+		BigVal:     0x12345678,
+		LittleVal:  0x12345678,
+		InverseVal: 0x12345678,
+	}
+
+	// Case A: Marshal with LittleEndian
+	{
+		blob, err := bst.Marshal(in, bst.LittleEndian)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedBlob := []byte{
+			// BigVal (always big): 0x12 34 56 78
+			0x12, 0x34, 0x56, 0x78,
+			// LittleVal (always little): 0x78 56 34 12
+			0x78, 0x56, 0x34, 0x12,
+			// InverseVal (inverse of LittleEndian -> BigEndian): 0x12 34 56 78
+			0x12, 0x34, 0x56, 0x78,
+		}
+		if !bytes.Equal(blob, expectedBlob) {
+			t.Errorf("expected %x, got %x", expectedBlob, blob)
+		}
+
+		var out structEndian
+		_, err = bst.Unmarshal(blob, bst.LittleEndian, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != in {
+			t.Errorf("expected %+v, got %+v", in, out)
+		}
+	}
+
+	// Case B: Marshal with BigEndian
+	{
+		blob, err := bst.Marshal(in, bst.BigEndian)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedBlob := []byte{
+			// BigVal (always big): 0x12 34 56 78
+			0x12, 0x34, 0x56, 0x78,
+			// LittleVal (always little): 0x78 56 34 12
+			0x78, 0x56, 0x34, 0x12,
+			// InverseVal (inverse of BigEndian -> LittleEndian): 0x78 56 34 12
+			0x78, 0x56, 0x34, 0x12,
+		}
+		if !bytes.Equal(blob, expectedBlob) {
+			t.Errorf("expected %x, got %x", expectedBlob, blob)
+		}
+
+		var out structEndian
+		_, err = bst.Unmarshal(blob, bst.BigEndian, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != in {
+			t.Errorf("expected %+v, got %+v", in, out)
+		}
+	}
+}
+
+type varintSerializer struct{}
+
+func (vs *varintSerializer) Serialize(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (n int, err error) {
+	v, ok := value.(int)
+	if !ok {
+		return 0, fmt.Errorf("expected int")
+	}
+	var buf [10]byte
+	length := binary.PutUvarint(buf[:], uint64(v))
+	return w.Write(buf[:length])
+}
+
+func (vs *varintSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (value interface{}, n int, err error) {
+	var val uint64
+	var shift uint
+	var bytesRead int
+	if br, ok := r.(io.ByteReader); ok {
+		for {
+			b, err := br.ReadByte()
+			if err != nil {
+				return nil, bytesRead, err
+			}
+			bytesRead++
+			val |= uint64(b&0x7f) << shift
+			if b&0x80 == 0 {
+				break
+			}
+			shift += 7
+		}
+	} else {
+		var b [1]byte
+		for {
+			_, err := r.Read(b[:])
+			if err != nil {
+				return nil, bytesRead, err
+			}
+			bytesRead++
+			val |= uint64(b[0]&0x7f) << shift
+			if b[0]&0x80 == 0 {
+				break
+			}
+			shift += 7
+		}
+	}
+	return int(val), bytesRead, nil
+}
+
+func TestCustomSerializer(t *testing.T) {
+	var ms = new(bst.Marshaller)
+	ms.AddSerializer("varint", &varintSerializer{})
+
+	type structWithCustom struct {
+		Prefix uint8
+		Val    int `binary:"custom,serializer=varint"`
+		Suffix uint8
+	}
+
+	in := structWithCustom{
+		Prefix: 0xaa,
+		Val:    300, // 300 in varint is 0xac, 0x02
+		Suffix: 0xbb,
+	}
+
+	blob, err := ms.Marshal(in, bst.LittleEndian)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedBlob := []byte{0xaa, 0xac, 0x02, 0xbb}
+	if !bytes.Equal(blob, expectedBlob) {
+		t.Errorf("expected %x, got %x", expectedBlob, blob)
+	}
+
+	var out structWithCustom
+	_, err = ms.Unmarshal(blob, bst.LittleEndian, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != in {
+		t.Errorf("expected %+v, got %+v", in, out)
+	}
 }

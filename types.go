@@ -6,10 +6,17 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"reflect"
 	"strings"
 )
+
+// Serializer is a user-defined binary encoder/decoder interface.
+type Serializer interface {
+	Serialize(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order ByteOrder) (n int, err error)
+	Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order ByteOrder) (value interface{}, n int, err error)
+}
 
 // type ByteOrder is an alias of encoding/binary.ByteOrder
 type ByteOrder = binary.ByteOrder
@@ -19,6 +26,22 @@ var (
 	BigEndian    binary.ByteOrder = binary.BigEndian
 	LittleEndian binary.ByteOrder = binary.LittleEndian
 )
+
+func resolveByteOrder(order ByteOrder, endian endianOverride) ByteOrder {
+	switch endian {
+	case endianBig:
+		return BigEndian
+	case endianLittle:
+		return LittleEndian
+	case endianInverse:
+		if order == BigEndian {
+			return LittleEndian
+		}
+		return BigEndian
+	default:
+		return order
+	}
+}
 
 // Name of encoding binary types recoginized in the struct field tags.
 type eType uint
@@ -87,6 +110,9 @@ const (
 	// then the the value's default encoding will be used.
 	Any
 
+	// Custom type allows registering a custom Serializer
+	Custom
+
 	// internal-only types
 	iArray // used in getNaturalType()
 )
@@ -124,12 +150,23 @@ func (t eType) iKind() iKind {
 	return iKind(iInvalid)
 }
 
+type endianOverride uint
+
+const (
+	endianNone endianOverride = iota
+	endianBig
+	endianLittle
+	endianInverse
+)
+
 type typeOption struct {
-	indirectCount int    // if nonzero, original type is a pointer/interface and this value cotains the number of indirections to the actual value
-	isArray       bool   // if true, tagged field is an array: `binary:"[arrayLen]TYPE"`
-	arrayLen      int    // length of the tagged array
-	bufLen        int    // tagged field is a string or a padding of length bufLen: `binary:"STRINGTYPE(buflen)"`
-	encoding      string // string encoding of the field: `binary:"string,encoding=ENC"`
+	indirectCount int            // if nonzero, original type is a pointer/interface and this value cotains the number of indirections to the actual value
+	isArray       bool           // if true, tagged field is an array: `binary:"[arrayLen]TYPE"`
+	arrayLen      int            // length of the tagged array
+	bufLen        int            // tagged field is a string or a padding of length bufLen: `binary:"STRINGTYPE(buflen)"`
+	encoding      string         // string encoding of the field: `binary:"string,encoding=ENC"`
+	endian        endianOverride // byte order override: `binary:"...,endian=big|little|inverse"`
+	serializer    string         // custom serializer name: `binary:"...,serializer=Serializer_Name"`
 }
 
 func getITypeFromRType(rt reflect.Type) (it eType) {
@@ -626,6 +663,7 @@ var (
 		Pad:     {uintKind, 0, 0, 0},
 		iStruct: {structKind, 0, 0, 0},
 		Any:     {anyKind, 0, 0, 0},
+		Custom:  {anyKind, 0, 0, 0},
 
 		Ignore: {anyKind, 0, 0, 0},
 
@@ -667,6 +705,8 @@ var (
 		{"Pad", Pad},
 		{"Struct", iStruct},
 		{"Any", Any},
+		{"Custom", Custom},
+		{"custom()", Custom},
 		{"Ignore", Ignore},
 		{"-", Ignore},
 	}

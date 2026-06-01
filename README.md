@@ -46,9 +46,13 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 
 ## Features
 
-* Automatic type conversion and range check based on field tag descriptions
-* Variable-length Array and String handling with references to other struct member variables
-* Text encoding support with "golang.org/x/text/encoding" interface
+* **Automatic type conversion and range check** based on field tag descriptions.
+* **Single-Value Marshalling**: Encode/decode individual non-struct variables using [MarshalAs](https://pkg.go.dev/github.com/mixcode/binarystruct#MarshalAs) / [UnmarshalAs](https://pkg.go.dev/github.com/mixcode/binarystruct#UnmarshalAs).
+* **Explicit Endian marking**: Override default byte order per field (e.g. `binary:"uint16,endian=inverse"` or `endian=big|little`).
+* **Default text encoding fallback**: Configure default text encoding on [Marshaller](https://pkg.go.dev/github.com/mixcode/binarystruct#Marshaller).
+* **Extended Tag Math**: Evaluate size expressions supporting operations `+`, `-`, `*`, `/`, and parentheses `()`.
+* **Custom Serializers**: Register custom encoders/decoders via `Serializer` interface and apply them using `serializer=Name` option.
+* **Optimized Struct Metadata Caching**: High-performance execution using parsed metadata caching, avoiding regex overhead at runtime.
 
 ## See also
 See [go reference doc](https://pkg.go.dev/github.com/mixcode/binarystruct) for details.

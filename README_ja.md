@@ -46,9 +46,13 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 
 ## 主な機能
 
-* タグ記述に基づいての型の変換
-* 可変長の配列・文字列サポート。長さに構造体の他のメンバーの値を指定できる
-* 文字列のテキストエンコーディング指定
+* **自動的な型変換と範囲チェック**: タグ記述に基づいての型の変換と、安全な範囲チェック。
+* **単一値のエンコード/デコード**: 構造体ではない変数も [MarshalAs](https://pkg.go.dev/github.com/mixcode/binarystruct#MarshalAs) と [UnmarshalAs](https://pkg.go.dev/github.com/mixcode/binarystruct#UnmarshalAs) で直接シリアライズ可能。
+* **明示的なエンディアン指定**: 構造体フィールドごとにエンディアンを指定可能（例: `binary:"uint16,endian=inverse"` や `endian=big|little`）。
+* **デフォルトテキストエンコーディング**: [Marshaller](https://pkg.go.dev/github.com/mixcode/binarystruct#Marshaller) にデフォルトのエンコーディングを指定可能。
+* **拡張されたタグ内計算式**: `+`, `-`, `*`, `/` およびかっこ `()` を含む数式評価をサポート。
+* **カスタムシリアライザ**: `Serializer` インターフェースを実装した独自シリアライザを `serializer=Name` オプションで適用可能。
+* **構造体メタデータのキャッシュ処理**: 正規表現などのパースをキャッシュ化し、シリアライズ時のパフォーマンスを大幅に向上。
 
 ## ドキュメント
 詳細は[Goドキュメント](https://pkg.go.dev/github.com/mixcode/binarystruct) をご覧ください。

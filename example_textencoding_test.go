@@ -61,3 +61,45 @@ func ExampleMarshaller_AddTextEncoding() {
 	// Marshaled: 0a 00 82 b1 82 f1 82 c9 82 bf 82 cd 06 00 ff fe e0 5c 3c 4e
 	// {こんにちは 峠丼}
 }
+
+func ExampleMarshaller_DefaultTextEncoding() {
+	var marshaller = new(binarystruct.Marshaller)
+
+	// Add Shift-JIS text encoding
+	marshaller.AddTextEncoding("sjis", japanese.ShiftJIS)
+
+	// Set DefaultTextEncoding to "sjis"
+	marshaller.DefaultTextEncoding = "sjis"
+
+	type st struct {
+		// No encoding option is specified; fallback to DefaultTextEncoding (Shift-JIS)
+		S string `binary:"wstring"`
+	}
+
+	in := st{
+		S: "こんにちは",
+	}
+
+	data, err := marshaller.Marshal(&in, binarystruct.LittleEndian)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Marshaled:")
+	for _, b := range data {
+		fmt.Printf(" %02x", b)
+	}
+	fmt.Println()
+
+	out := st{}
+	_, err = marshaller.Unmarshal(data, binarystruct.LittleEndian, &out)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("%v\n", out)
+
+	// Output:
+	// Marshaled: 0a 00 82 b1 82 f1 82 c9 82 bf 82 cd
+	// {こんにちは}
+}

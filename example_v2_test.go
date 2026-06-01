@@ -9,7 +9,6 @@ import (
 	"reflect"
 
 	"github.com/mixcode/binarystruct"
-	"golang.org/x/text/encoding/japanese"
 )
 
 // VarintSerializer encodes and decodes integer values as 7-bit varints.
@@ -60,29 +59,51 @@ func (vs *VarintSerializer) Deserialize(r io.Reader, parentStruct reflect.Value,
 	return int(val), bytesRead, nil
 }
 
-func Example_v2Features() {
-	// Initialize a Marshaller with v2 features (DefaultTextEncoding, Custom Serializers)
-	marshaller := &binarystruct.Marshaller{
-		DefaultTextEncoding: "sjis",
-	}
-	marshaller.AddTextEncoding("sjis", japanese.ShiftJIS)
-	marshaller.AddSerializer("varint", &VarintSerializer{})
-
+func Example_endianOverride() {
 	type Packet struct {
 		// Explicit Endian Marking: independent of active byte order
 		Length uint32 `binary:"uint32,endian=big"`
-
-		// Custom Serializer: uses the registered "varint" serializer
-		Count int `binary:"custom,serializer=varint"`
-
-		// Default Text Encoding Fallback: automatically uses Shift-JIS because no encoding tag is specified
-		Name string `binary:"wstring"`
+		Value  uint32 `binary:"uint32,endian=inverse"`
 	}
 
 	in := Packet{
 		Length: 0x12345678,
-		Count:  300, // encoded as [0xac, 0x02] in varint
-		Name:   "峠",  // "峠" in Shift-JIS is [0x93, 0xbb]
+		Value:  0x11223344,
+	}
+
+	// Marshal structural data with LittleEndian
+	blob, err := binarystruct.Marshal(in, binarystruct.LittleEndian)
+	if err != nil {
+		panic(err)
+	}
+
+	// Length is always BigEndian: 12 34 56 78
+	// Value is inverse of LittleEndian -> BigEndian: 11 22 33 44
+	fmt.Printf("Blob: %x\n", blob)
+
+	var restored Packet
+	_, err = binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &restored)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Restored: Length=%x, Value=%x\n", restored.Length, restored.Value)
+
+	// Output:
+	// Blob: 1234567811223344
+	// Restored: Length=12345678, Value=11223344
+}
+
+func ExampleMarshaller_AddSerializer() {
+	marshaller := new(binarystruct.Marshaller)
+	marshaller.AddSerializer("varint", &VarintSerializer{})
+
+	type Packet struct {
+		// Custom Serializer: uses the registered "varint" serializer
+		Count int `binary:"custom,serializer=varint"`
+	}
+
+	in := Packet{
+		Count: 300,
 	}
 
 	// Marshal structural data
@@ -91,35 +112,17 @@ func Example_v2Features() {
 		panic(err)
 	}
 
+	// 300 in varint is [0xac, 0x02]
 	fmt.Printf("Blob: %x\n", blob)
 
-	// Unmarshal back
-	var out Packet
-	_, err = marshaller.Unmarshal(blob, binarystruct.LittleEndian, &out)
+	var restored Packet
+	_, err = marshaller.Unmarshal(blob, binarystruct.LittleEndian, &restored)
 	if err != nil {
 		panic(err)
 	}
-
-	fmt.Printf("Restored: Length=%x, Count=%d, Name=%s\n", out.Length, out.Count, out.Name)
-
-	// One-Value Marshalling/Unmarshalling using MarshalAs and UnmarshalAs
-	singleVal := int(9876)
-	singleBlob, err := binarystruct.MarshalAs(singleVal, "uint16,endian=big", binarystruct.LittleEndian)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("Single Value Blob: %x\n", singleBlob)
-
-	var restoredVal int
-	_, err = binarystruct.UnmarshalAs(singleBlob, "uint16,endian=big", binarystruct.LittleEndian, &restoredVal)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("Restored Single Value: %d\n", restoredVal)
+	fmt.Printf("Restored: Count=%d\n", restored.Count)
 
 	// Output:
-	// Blob: 12345678ac02020093bb
-	// Restored: Length=12345678, Count=300, Name=峠
-	// Single Value Blob: 2694
-	// Restored Single Value: 9876
+	// Blob: ac02
+	// Restored: Count=300
 }

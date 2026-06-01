@@ -109,3 +109,28 @@ func Example() {
 
 	// Output:
 }
+
+func ExampleMarshalAs() {
+	val := int(12345)
+	blob, err := binarystruct.MarshalAs(val, "uint16", binarystruct.LittleEndian)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("%x\n", blob)
+	// Output:
+	// 3930
+}
+
+func ExampleUnmarshalAs() {
+	blob := []byte{0x39, 0x30}
+	var out int
+	_, err := binarystruct.UnmarshalAs(blob, "uint16", binarystruct.LittleEndian, &out)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(out)
+	// Output:
+	// 12345
+}

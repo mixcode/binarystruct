@@ -64,3 +64,37 @@ func Example_nestedStructs() {
 	// Restored SubInfo: Magic=0xabcd, Version=0x1
 	// Restored SubLeInfo: Magic=0xabcd, Version=0x1
 }
+
+func Example_endianOverride() {
+	type Packet struct {
+		// Explicit Endian Marking: independent of active byte order
+		Length uint32 `binary:"uint32,endian=big"`
+		Value  uint32 `binary:"uint32,endian=inverse"`
+	}
+
+	in := Packet{
+		Length: 0x12345678,
+		Value:  0x11223344,
+	}
+
+	// Marshal structural data with LittleEndian
+	blob, err := binarystruct.Marshal(in, binarystruct.LittleEndian)
+	if err != nil {
+		panic(err)
+	}
+
+	// Length is always BigEndian: 12 34 56 78
+	// Value is inverse of LittleEndian -> BigEndian: 11 22 33 44
+	fmt.Printf("Blob: %x\n", blob)
+
+	var restored Packet
+	_, err = binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &restored)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Restored: Length=%x, Value=%x\n", restored.Length, restored.Value)
+
+	// Output:
+	// Blob: 1234567811223344
+	// Restored: Length=12345678, Value=11223344
+}

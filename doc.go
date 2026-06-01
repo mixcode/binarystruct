@@ -3,35 +3,71 @@
 /*
 Package binarystruct is an automatic type-converting binary data marshaller/unmarshaller for Go structs and single values.
 
-Binary data formats are usually tightly packed to save space.
-Such data often requires type conversions to be used in the Go language context.
-This package handles type conversions between Go data types and binary types of struct fields according to their tags.
+Go's built-in binary encoding package, "encoding/binary" is the preferred method to deal with binary data structures. The binary package is quite easy to use, but some cases require additional type conversions when values are tightly packed.
+For example, an integer value in raw binary structure may be stored as a word or a byte, but the decoded value would be type-casted to an architecture-dependent integer for easy of use in the Go context.
+
+This package simplifies these typecasting burdens by automatically handling conversion of struct fields using field tags.
 
 # A Quick Example
 
-Each field in the struct is tagged with "binary" tags.
-The three integer fields are tagged as 1-byte, 2-bytes, and 4-bytes long, and the Header string is tagged as a 4-byte sequence.
-Marshal and Unmarshal functions read the tag and convert each field to the specified binary format.
+Assume we have a binary data structure with a magic header and three integers, byte, word, dword each.
+By writing binary data types to field tags in Go struct definition, the values are automatically recognized and converted to proper encoding types.
 
 	strc := struct {
-		Header       string `binary:"[4]byte"` // marshaled to 4 bytes
-		ValueInt8    int    `binary:"int8"`    // marshaled to single byte
-		ValueUint16  int    `binary:"uint16"`  // marshaled to two bytes
-		ValueDword32 int    `binary:"dword"`   // marshaled to four bytes
+		Header       string `binary:"[4]byte"` // maps to 4 bytes
+		ValueInt8    int    `binary:"int8"`    // maps to single signed byte
+		ValueUint16  int    `binary:"uint16"`  // maps to two bytes
+		ValueDword32 int    `binary:"dword"`   // maps to four bytes
 	}{"abcd", 1, 2, 3}
 
-	blob, err := binarystruct.Marshal(strc, binarystruct.BigEndian)
-	// marshaled blob will be:
-	// { 0x61, 0x62, 0x63, 0x64,
-	//   0x01,
-	//   0x00, 0x02,
-	//   0x00, 0x00, 0x00, 0x03 }
+	// Marshal a struct to []byte
+	blob, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 
-# Overview
+	// Unmarshal binary data back into the struct
+	readsz, err := binarystruct.Unmarshal(blob, binarystruct.BigEndian, &strc)
 
-Go's built-in "encoding/binary" package is the preferred way to deal with binary data structures.
-However, in many real-world use cases (e.g. file formats, network protocols), binary data is tightly packed to save space, requiring frequent manual type conversions (such as reading a 1-byte integer from binary and converting it to Go's natural `int` type).
+# Struct Tag Reference
 
-This package simplifies these typecasting burdens by performing automatic type conversion and range checking between Go types and binary formats as described in struct tags. It is designed for developers who need to read or write structured binary data (such as headers, packets, or records) without writing boilerplate decoding/encoding and conversion code.
+Struct fields can be annotated with the "binary" tag to define their binary layout, type conversions, and size bounds:
+
+	`binary:"[array_len]TYPE(buf_len),option1=val1,option2"`
+
+Example:
+	MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
+
+## Supported Binary Types
+
+  - int8, int16, int32, int64: Signed integers (1, 2, 4, 8 bytes).
+  - uint8, uint16, uint32, uint64: Unsigned integers (1, 2, 4, 8 bytes).
+  - byte, word, dword, qword: Type-agnostic bitmaps (1, 2, 4, 8 bytes).
+  - float32, float64: IEEE 754 floating point values (4, 8 bytes).
+  - string: Raw byte string. Padded with 0 up to optional (buf_len).
+  - bstring, wstring, dwstring: Length-prefixed string (1, 2, 4 bytes prefix).
+  - zstring, z16string: Null-terminated / null-word-terminated strings.
+  - pad: Zero-filled padding bytes of (buf_len) size (source value ignored).
+  - ignore, -: Ignored field during serialization.
+  - any: Natural type encoding (default).
+  - custom: Custom serializer override (must be paired with serializer option).
+
+## Tag Options
+
+  - encoding=NAME: Sets string text encoding (e.g. shift-jis, utf-8).
+  - endian=big|little|inverse: Overrides default byte order for this field.
+  - serializer=NAME: Applies a registered Serializer for custom encoding.
+  - omittable: Suppresses EOF errors at this field's start.
+  - omittable=Expr: Skips the field if byte size limits are reached.
+
+## Array and Size Expressions
+
+  - [len]TYPE: Specifies an array of the given length.
+  - TYPE(buf_len): Limits/pads string or padding buffer size.
+
+Both array length [len] and buffer size (buf_len) can use arithmetic expressions (+, -, *, /, and parentheses) referencing other struct fields:
+
+	type Packet struct {
+		HeaderSize  int    `binary:"uint8"`
+		PayloadSize int    `binary:"uint16"`
+		Payload     []byte `binary:"[PayloadSize - HeaderSize]byte"`
+	}
 */
 package binarystruct

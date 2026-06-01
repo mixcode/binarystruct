@@ -1,7 +1,6 @@
 // Copyright 2021-2026 github.com/mixcode
 
 /*
-
 Package binarystruct is an automatic type-converting binary data marshaller/unmarshaller for Go structs and single values.
 
 Binary data formats are usually tightly packed to save space.
@@ -34,6 +33,5 @@ Go's built-in "encoding/binary" package is the preferred way to deal with binary
 However, in many real-world use cases (e.g. file formats, network protocols), binary data is tightly packed to save space, requiring frequent manual type conversions (such as reading a 1-byte integer from binary and converting it to Go's natural `int` type).
 
 This package simplifies these typecasting burdens by performing automatic type conversion and range checking between Go types and binary formats as described in struct tags. It is designed for developers who need to read or write structured binary data (such as headers, packets, or records) without writing boilerplate decoding/encoding and conversion code.
-
 */
 package binarystruct

@@ -49,6 +49,7 @@ var (
 )
 
 type tokenType int
+
 const (
 	tokEOF tokenType = iota
 	tokNum

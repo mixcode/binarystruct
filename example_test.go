@@ -1,8 +1,6 @@
 // Copyright 2021 github.com/mixcode
 
-//
 // An example of marshalling a complex struct to []byte
-//
 package binarystruct_test
 
 import (

@@ -39,7 +39,7 @@ func TestEvaulateTagValue(t *testing.T) {
 		{" n1 - n3 ", -3, false},
 		{" 3*4 ", 12, false},
 		{" 12/3 ", 4, false},
-		{" (1+2)*3 ", 9, false},
+		{" (n1+2)*3 ", 9, false},
 		{" 1+s ", 0, true}, // cannot use non-numeric member
 		{" 1+u ", 0, true}, // cannot use non-numeric member
 	}

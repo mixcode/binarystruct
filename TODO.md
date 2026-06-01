@@ -1,47 +1,15 @@
+# TODO List
 
+## Completed (v2 Release)
+- [x] **One-value Marshaller/Unmarshaller**: Added `MarshalAs`, `UnmarshalAs`, `WriteAs`, and `ReadAs` to support encoding/decoding non-struct variables with explicit tags.
+- [x] **Explicit Endian Marking**: Added `endian=big`, `endian=little`, and `endian=inverse` tag options to control byte order per field, propagating down into nested structs.
+- [x] **Default Text Encoding Setting**: Added default text encoding control to `Marshaller`, supporting tags like `encoding=shift-jis` alongside custom text encoding registration.
+- [x] **Tag Evaluator Upgrades**: Added multiplication (`*`), division (`/`), and parentheses (`()`) support to the dynamic tag expression evaluator.
+- [x] **Custom Serializers**: Added support for custom encoder/decoders using the `Serializer` interface and `AddSerializer` on `Marshaller`.
+- [x] **Benchmarks & Advanced Optimizers**: Added caching of parsed struct layout metadata to avoid reflection and tag-parsing overhead on subsequent operations.
 
-## TODO ideas
-
-### Benchmarks and advanced optimizers, ideas like precompiled P-code based decoder/encoder, or type and endian converter with SIMD assemblies.
-
-### Explicit endian marking in field tags: "big-endian", "little-endian", "inverse-endian"
-
-### add 'omittable' or 'optional' field tag, mainly for the fields at the end of struct.
-
-### Default text encoding setting
-
-### add mul/div and parenthesis calculation to member size calculator
-
-### one-value marshaller/unmarshaller for non-struct variables
-
-```
-// MarshalAs encodes a go value into binary data using suppried tag
-func MarshalAs(govalue interface{}, tag string, order ByteOrder) (encoded []byte, err error) {...}
-
-var a []int
-UnmarshalAs(a, "[4]byte", bst.LittleEndian)	// read [4]byte to []int
-```
-
-### multidimensional array
-	struct {
-		MArr [][][]int	`binary:"[4][2][2]int8"`
-	}
-
-
-### custom serializer
-
-	struct {
-		VariableSizeInt int	`binary:"[]custom(),serializer=[Serializer_Name]"`
-	}
-
-	func (ms *Marshaller) AddSerializer(name string, serializer Serializer)
-
-	Interface Serializer {
-		func Serialize(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, ByteOrder) (sz, err)
-		func Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, ByteOrder) (value interface{}, sz, err)
-	}
-
-
-### Write a function to print the offset and the size of struct fields?
-
-
+## Pending / Future Ideas
+- [ ] **Omittable/Optional field tag**: Add support for `omittable` or `optional` tag options, especially for checking end-of-struct by comparing current offset against a dynamic struct size.
+- [ ] **Multidimensional arrays**: Support tags like `[4][2][2]int8` for nested Go slices/arrays.
+- [ ] **Advanced Optimizers**: Precompiled P-code based encoder/decoder, or SIMD-assisted type/endian conversions.
+- [ ] **Struct Inspection helper**: A function to print offsets and sizes of struct fields for debugging layouts.

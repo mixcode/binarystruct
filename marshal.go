@@ -337,6 +337,20 @@ func (ms *Marshaller) writeStruct(w io.Writer, order ByteOrder, strc reflect.Val
 		}
 
 		fieldVal := strc.Field(fMeta.index)
+
+		if fMeta.omittable {
+			if fMeta.omittableExpr != "" {
+				limit, errEval := evaluateTagValue(strc, fMeta.omittableExpr)
+				if errEval == nil && n >= limit {
+					break
+				}
+			}
+			fKind := typ.Field(fMeta.index).Type.Kind()
+			if (fKind == reflect.Ptr || fKind == reflect.Interface) && fieldVal.IsNil() {
+				break
+			}
+		}
+
 		var naturalType eType
 		var option typeOption
 		if fieldVal.IsValid() {

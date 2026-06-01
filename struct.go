@@ -17,19 +17,21 @@ const (
 )
 
 type structFieldMetadata struct {
-	index        int
-	name         string
-	hasTag       bool
-	encodeType   eType
-	isArray      bool
-	arrayLenExpr string
-	bufLenExpr   string
-	encoding     string
-	endian       endianOverride
-	serializer   string
-	ignore       bool
-	unexported   bool
-	fieldErr     error
+	index         int
+	name          string
+	hasTag        bool
+	encodeType    eType
+	isArray       bool
+	arrayLenExpr  string
+	bufLenExpr    string
+	encoding      string
+	endian        endianOverride
+	serializer    string
+	ignore        bool
+	unexported    bool
+	fieldErr      error
+	omittable     bool
+	omittableExpr string
 }
 
 type structMetadata struct {
@@ -489,6 +491,11 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 					meta.serializer = t[1]
 				} else {
 					return nil, fmt.Errorf("missing value for serializer tag on field %s", field.Name)
+				}
+			case "omittable":
+				meta.omittable = true
+				if len(t) > 1 {
+					meta.omittableExpr = t[1]
 				}
 			default:
 				return nil, fmt.Errorf("unknown tag %s on field %s", t[0], field.Name)

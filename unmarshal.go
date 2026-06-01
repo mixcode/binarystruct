@@ -434,6 +434,19 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 
 		fieldVal := strc.Field(fMeta.index)
 		fKind := typ.Field(fMeta.index).Type.Kind()
+
+		if fMeta.omittable && fMeta.omittableExpr != "" {
+			limit, errEval := evaluateTagValue(strc, fMeta.omittableExpr)
+			if errEval == nil && n >= limit {
+				break
+			}
+		}
+
+		wasNilPtr := false
+		if (fKind == reflect.Ptr || fKind == reflect.Interface) && fieldVal.IsNil() {
+			wasNilPtr = true
+		}
+
 		v := fieldVal
 		if fKind == reflect.Ptr || fKind == reflect.Interface {
 			// allocate pointers
@@ -501,6 +514,13 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 		var m int
 		m, err = ms.readMain(r, order, v, naturalType, option, strc, fMeta.index)
 		if err != nil {
+			if fMeta.omittable && (err == io.EOF || err == io.ErrUnexpectedEOF || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) && m == 0 {
+				if wasNilPtr {
+					fieldVal.Set(reflect.Zero(fieldVal.Type()))
+				}
+				err = nil
+				break
+			}
 			err = wErr(fMeta.index, err)
 			return
 		}

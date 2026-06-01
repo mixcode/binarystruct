@@ -65,6 +65,7 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 | **Safeモード** (`-tags safe`) | 純粋なリフレクションのみを用いる標準Go実装にフォールバックします。Google App Engineなどのセキュリティ上の制限がある環境で必須。 | リフレクションによる標準的なオーバーヘッド。 |
 | **SIMDモード** (`GOEXPERIMENT=simd -tags experiment_simd`) | Go 1.26 の実験的パッケージ `simd/archsimd` を用いて、AMD64上でのエンディアン変換（バイトスワップ）をベクター命令で処理します（CPU機能検知付き）。 | 大きな数値配列やスライスのベクター化によるスループット最大化。 |
 
-## ドキュメント
-詳細は[Goドキュメント](https://pkg.go.dev/github.com/mixcode/binarystruct) をご覧ください。
+## 関連情報・ドキュメント
+* [構造体タグ リファレンスマニュアル](STRUCT_TAGS_ja.md) - タグの対応型一覧、パラメータ一覧、動的計算式について。
+* [Goドキュメント](https://pkg.go.dev/github.com/mixcode/binarystruct) - API仕様について。
 

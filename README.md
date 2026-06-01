@@ -66,4 +66,5 @@ This package supports multiple build modes to balance performance, platform safe
 | **SIMD Mode** (`GOEXPERIMENT=simd -tags experiment_simd`) | Uses experimental Go 1.26 `simd/archsimd` to vectorize endian byte-swapping on AMD64 with CPU feature checks. | Maximum vectorized throughput for large arrays/slices. |
 
 ## See also
-See [go reference doc](https://pkg.go.dev/github.com/mixcode/binarystruct) for details.
+* [Struct Tag Reference Manual](STRUCT_TAGS.md) for details about tag types, options, and dynamic math expressions.
+* [Go Reference Doc](https://pkg.go.dev/github.com/mixcode/binarystruct) for API documentation.

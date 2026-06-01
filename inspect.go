@@ -122,10 +122,11 @@ func (sl *StructLayout) Format(cfg LayoutFormat) string {
 	separator := strings.Repeat("-", dividerLen)
 
 	sb.WriteString(divider + "\n")
-	sb.WriteString(headerText)
+	sb.WriteString(strings.TrimRight(headerText, " \t\r\n") + "\n")
 	sb.WriteString(separator + "\n")
 	for _, r := range rows {
-		sb.WriteString(fmt.Sprintf(headerPattern, r.offset, r.size, r.name, r.goType, r.binType, r.endian, r.value, r.details))
+		rowStr := fmt.Sprintf(headerPattern, r.offset, r.size, r.name, r.goType, r.binType, r.endian, r.value, r.details)
+		sb.WriteString(strings.TrimRight(rowStr, " \t\r\n") + "\n")
 	}
 	sb.WriteString(divider + "\n")
 

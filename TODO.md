@@ -7,9 +7,9 @@
 - [x] **Tag Evaluator Upgrades**: Added multiplication (`*`), division (`/`), and parentheses (`()`) support to the dynamic tag expression evaluator.
 - [x] **Custom Serializers**: Added support for custom encoder/decoders using the `Serializer` interface and `AddSerializer` on `Marshaller`.
 - [x] **Benchmarks & Advanced Optimizers**: Added caching of parsed struct layout metadata to avoid reflection and tag-parsing overhead on subsequent operations.
+- [x] **Omittable/Optional field tag**: Added `omittable` and `omittable=Expr` options to skip trailing or size-bounded fields on serialization and deserialization.
 
 ## Pending / Future Ideas
-- [ ] **Omittable/Optional field tag**: Add support for `omittable` or `optional` tag options, especially for checking end-of-struct by comparing current offset against a dynamic struct size.
 - [ ] **Multidimensional arrays**: Support tags like `[4][2][2]int8` for nested Go slices/arrays.
 - [ ] **Advanced Optimizers**: Precompiled P-code based encoder/decoder, or SIMD-assisted type/endian conversions.
 - [ ] **Struct Inspection helper**: A function to print offsets and sizes of struct fields for debugging layouts.

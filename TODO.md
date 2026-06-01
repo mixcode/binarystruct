@@ -11,5 +11,5 @@
 - [x] **Struct Inspection helper**: Added `Inspect` and layout description formatting with customizable base conversions (decimal/hex).
 
 ## Pending / Future Ideas
-- [ ] **Multidimensional arrays**: Support tags like `[4][2][2]int8` for nested Go slices/arrays.
+- [ ] **Multidimensional arrays (Low priority)**: Support tags like `[4][2][2]int8` for nested Go slices/arrays.
 - [ ] **Advanced Optimizers**: Precompiled P-code based encoder/decoder, or SIMD-assisted type/endian conversions.

@@ -28,43 +28,12 @@ Marshal and Unmarshal functions read the tag and convert each field to the speci
 	//   0x00, 0x02,
 	//   0x00, 0x00, 0x00, 0x03 }
 
-# Key Features
+# Overview
 
-1. Single-Value Marshalling:
-Encode and decode non-struct variables directly using MarshalAs and UnmarshalAs.
+Go's built-in "encoding/binary" package is the preferred way to deal with binary data structures.
+However, in many real-world use cases (e.g. file formats, network protocols), binary data is tightly packed to save space, requiring frequent manual type conversions (such as reading a 1-byte integer from binary and converting it to Go's natural `int` type).
 
-	var a []int
-	blob, err := binarystruct.MarshalAs(a, "[4]int8", binarystruct.LittleEndian)
-
-2. Explicit Endianness Override:
-Specify field-level endianness using `endian=big`, `endian=little`, or `endian=inverse`.
-
-	type Header struct {
-		Size   uint32 `binary:"uint32,endian=big"`     // Always BigEndian
-		Status uint16 `binary:"uint16,endian=inverse"` // Inverse of active byte order
-	}
-
-3. Default Text Encoding:
-Configure a fallback default text encoding on the Marshaller instance.
-
-	marshaller := &binarystruct.Marshaller{DefaultTextEncoding: "sjis"}
-	marshaller.AddTextEncoding("sjis", japanese.ShiftJIS)
-
-4. Complex Tag Evaluation:
-Reference other fields inside array/string sizes using formulas with support for `+`, `-`, `*`, `/`, and parenthesized expressions.
-
-	type Packet struct {
-		Length uint8
-		Data   []byte `binary:"[(Length*2)+4]byte"`
-	}
-
-5. Custom Serializers:
-Register and invoke user-defined encoders/decoders for specific fields using `serializer=Name`.
-
-	marshaller.AddSerializer("varint", myVarintSerializer)
-	type Record struct {
-		Val int `binary:"custom,serializer=varint"`
-	}
+This package simplifies these typecasting burdens by performing automatic type conversion and range checking between Go types and binary formats as described in struct tags. It is designed for developers who need to read or write structured binary data (such as headers, packets, or records) without writing boilerplate decoding/encoding and conversion code.
 
 */
 package binarystruct

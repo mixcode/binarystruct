@@ -8,8 +8,8 @@
 - [x] **Custom Serializers**: Added support for custom encoder/decoders using the `Serializer` interface and `AddSerializer` on `Marshaller`.
 - [x] **Benchmarks & Advanced Optimizers**: Added caching of parsed struct layout metadata to avoid reflection and tag-parsing overhead on subsequent operations.
 - [x] **Omittable/Optional field tag**: Added `omittable` and `omittable=Expr` options to skip trailing or size-bounded fields on serialization and deserialization.
+- [x] **Struct Inspection helper**: Added `Inspect` and layout description formatting with customizable base conversions (decimal/hex).
 
 ## Pending / Future Ideas
 - [ ] **Multidimensional arrays**: Support tags like `[4][2][2]int8` for nested Go slices/arrays.
 - [ ] **Advanced Optimizers**: Precompiled P-code based encoder/decoder, or SIMD-assisted type/endian conversions.
-- [ ] **Struct Inspection helper**: A function to print offsets and sizes of struct fields for debugging layouts.

@@ -48,3 +48,78 @@ func BenchmarkUnmarshal(b *testing.B) {
 		}
 	}
 }
+
+type sliceBenchStruct struct {
+	Data []uint32 `binary:"[1000]uint32"`
+}
+
+func BenchmarkMarshalSliceNative(b *testing.B) {
+	data := make([]uint32, 1000)
+	for i := range data {
+		data[i] = uint32(i)
+	}
+	in := sliceBenchStruct{Data: data}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := bst.Marshal(in, bst.LittleEndian)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMarshalSliceSwap(b *testing.B) {
+	data := make([]uint32, 1000)
+	for i := range data {
+		data[i] = uint32(i)
+	}
+	in := sliceBenchStruct{Data: data}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := bst.Marshal(in, bst.BigEndian)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkUnmarshalSliceNative(b *testing.B) {
+	data := make([]uint32, 1000)
+	for i := range data {
+		data[i] = uint32(i)
+	}
+	in := sliceBenchStruct{Data: data}
+	blob, err := bst.Marshal(in, bst.LittleEndian)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var out sliceBenchStruct
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := bst.Unmarshal(blob, bst.LittleEndian, &out)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkUnmarshalSliceSwap(b *testing.B) {
+	data := make([]uint32, 1000)
+	for i := range data {
+		data[i] = uint32(i)
+	}
+	in := sliceBenchStruct{Data: data}
+	blob, err := bst.Marshal(in, bst.BigEndian)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var out sliceBenchStruct
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := bst.Unmarshal(blob, bst.BigEndian, &out)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+

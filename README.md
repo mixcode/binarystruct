@@ -53,6 +53,17 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 * **Extended Tag Math**: Evaluate size expressions supporting operations `+`, `-`, `*`, `/`, and parentheses `()`.
 * **Custom Serializers**: Register custom encoders/decoders via `Serializer` interface and apply them using `serializer=Name` option.
 * **Optimized Struct Metadata Caching**: High-performance execution using parsed metadata caching, avoiding regex overhead at runtime.
+* **Unsafe Bytecode Interpreter & Slice Fast Paths**: High-performance interpreter using `unsafe.Pointer` and zero-allocation slice streaming (up to 214x speedup).
+
+## Performance Modes (Safe vs. Unsafe / SIMD)
+
+This package supports multiple build modes to balance performance, platform safety, and experimental hardware features:
+
+| Mode / Build Tags | Description | Performance Profile |
+| :--- | :--- | :--- |
+| **Default Mode** (Unsafe) | Bypasses reflection using direct memory operations with `unsafe.Pointer` interpreter and layout-compatible fast-paths. | **Maximum Speed** (up to 214x faster, 99.9% fewer allocations). |
+| **Safe Mode** (`-tags safe`) | Falls back to pure reflection-based Go. Required on restricted platforms (e.g. Google App Engine). | Standard Go reflection overhead. |
+| **SIMD Mode** (`GOEXPERIMENT=simd -tags experiment_simd`) | Uses experimental Go 1.26 `simd/archsimd` to vectorize endian byte-swapping on AMD64 with CPU feature checks. | Maximum vectorized throughput for large arrays/slices. |
 
 ## See also
 See [go reference doc](https://pkg.go.dev/github.com/mixcode/binarystruct) for details.

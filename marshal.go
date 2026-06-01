@@ -315,6 +315,9 @@ func (ms *Marshaller) writeArray(w io.Writer, order ByteOrder, array reflect.Val
 
 // write a struct
 func (ms *Marshaller) writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err error) {
+	if !safeMode {
+		return ms.unsafeWriteStruct(w, order, strc)
+	}
 	typ := strc.Type()
 	meta, err := getStructMetadata(typ)
 	if err != nil {

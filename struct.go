@@ -19,6 +19,7 @@ const (
 type structFieldMetadata struct {
 	index         int
 	name          string
+	offset        uintptr
 	hasTag        bool
 	encodeType    eType
 	isArray       bool
@@ -32,6 +33,8 @@ type structFieldMetadata struct {
 	fieldErr      error
 	omittable     bool
 	omittableExpr string
+	naturalType   eType
+	option        typeOption
 }
 
 type structMetadata struct {
@@ -421,8 +424,10 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 		meta := structFieldMetadata{
 			index:    i,
 			name:     field.Name,
+			offset:   field.Offset,
 			fieldErr: fieldErr,
 		}
+		meta.naturalType, meta.option = getStaticTypeInfo(field.Type)
 
 		name := field.Name
 		if len(name) == 0 || strings.ToUpper(name)[0] != name[0] {
@@ -499,6 +504,34 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 				}
 			default:
 				return nil, fmt.Errorf("unknown tag %s on field %s", t[0], field.Name)
+			}
+		}
+
+		if meta.hasTag {
+			if meta.encodeType != Any {
+				meta.naturalType = meta.encodeType
+			}
+			if meta.isArray {
+				meta.option.isArray = true
+				if meta.arrayLenExpr != "" {
+					if val, err := evaluateTagValue(reflect.Value{}, meta.arrayLenExpr); err == nil {
+						meta.option.arrayLen = val
+					}
+				}
+			}
+			if meta.bufLenExpr != "" {
+				if val, err := evaluateTagValue(reflect.Value{}, meta.bufLenExpr); err == nil {
+					meta.option.bufLen = val
+				}
+			}
+			if meta.encoding != "" {
+				meta.option.encoding = meta.encoding
+			}
+			if meta.endian != endianNone {
+				meta.option.endian = meta.endian
+			}
+			if meta.serializer != "" {
+				meta.option.serializer = meta.serializer
 			}
 		}
 

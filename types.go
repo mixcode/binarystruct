@@ -263,6 +263,40 @@ func getNaturalType(v reflect.Value) (t eType, option typeOption) {
 	return
 }
 
+func getStaticTypeInfo(typ reflect.Type) (t eType, option typeOption) {
+	kind := typ.Kind()
+
+	isNil := false
+	for kind == reflect.Ptr || kind == reflect.Interface {
+		option.indirectCount++
+		if kind == reflect.Interface {
+			t = Any
+			return
+		}
+		typ = typ.Elem()
+		kind = typ.Kind()
+		isNil = true
+	}
+
+	t = getITypeFromRType(typ)
+
+	if t == iArray {
+		elementType := typ.Elem()
+		k := elementType.Kind()
+		option.isArray = true
+		if k == reflect.Array || k == reflect.Slice {
+			t = Any
+			return
+		}
+		if !isNil && typ.Kind() == reflect.Array {
+			option.arrayLen = typ.Len()
+		}
+		t = getITypeFromRType(elementType)
+	}
+
+	return
+}
+
 // decodeFunc() generates a binary-type to go-type conversion function
 func decodeFunc(srcType eType, destRType reflect.Type) (bytesz int, decoder func(reflect.Value, uint64) error) {
 

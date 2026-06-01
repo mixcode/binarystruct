@@ -404,6 +404,9 @@ func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Valu
 
 // read a struct
 func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err error) {
+	if !safeMode {
+		return ms.unsafeReadStruct(r, order, strc)
+	}
 	typ := strc.Type()
 	meta, err := getStructMetadata(typ)
 	if err != nil {

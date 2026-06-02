@@ -49,9 +49,9 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 * **Automatic & Safe Type Conversions**: Effortlessly maps packed binary layouts into Go native types (e.g. converting `uint16` or `int8` streams directly into Go `int` fields) with range and bounds checks.
 * **Fine-Grained Layout Controls**: Control data alignment using explicit types like `byte`, `word`, `dword`, `qword`, and zero-filled padding bytes via the `pad(size)` tag.
 * **Dynamic Size Expressions**: Calculate array lengths and string buffer sizes dynamically based on other struct fields, supporting arithmetic operations (`+`, `-`, `*`, `/`) and parentheses (e.g., `[PayloadSize - (HeaderLength * 2)]byte`).
-* **High-Performance Unsafe Interpreter**: Uses dynamic layout compilation and a cached metadata interpreter. Unsafe Mode (default) bypasses reflection using `unsafe.Pointer` and zero-allocation slice streaming, yielding up to **214x speedups** and **99.9% fewer allocations**.
+* **High-Performance Structure Layout Interpreter**: Uses dynamic layout compilation and a cached metadata interpreter. Unsafe Mode (default) bypasses reflection using `unsafe.Pointer` and zero-allocation slice streaming, yielding up to **214x speedups** and **99.9% fewer allocations** than standard Go reflections.
 * **Interface & Polymorphic Handling**: Automatically deserializes into pre-assigned interface fields, or uses custom serializers to dynamically allocate types based on previously decoded header values.
-* **Multi-Language String Encoding**: Converts character encodings (e.g., `Shift-JIS`, `EUC-JP`, `UTF-16`) on string fields, with customizable default fallback encodings.
+* **Multi-Language String Encoding**: Supports converting custom character encodings (e.g., `Shift-JIS`, `UTF-16`) on string fields by registering encodings via `AddTextEncoding` with customizable default fallback encodings.
 * **Field-Level Endian Markings**: Override default byte orders per field (e.g., `endian=big`, `little`, or `inverse`), with recursive propagation down into nested structs.
 * **Single-Value Marshalling**: Serialize/deserialize standalone non-struct variables directly using `MarshalAs` / `UnmarshalAs` with custom tags.
 * **Custom Serializers**: Register custom encoders/decoders via the `Serializer` interface to handle complex validation or dynamic type mappings.

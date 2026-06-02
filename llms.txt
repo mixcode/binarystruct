@@ -1,0 +1,14 @@
+# binarystruct
+
+An automatic type-converting binary data marshaller/unmarshaller for Go structs and single values. Optimized for high-performance binary coding and decoding like network protocol packet handling.
+
+## Core APIs
+- [Marshal](marshal.go) — Encodes a struct or value into a binary stream.
+- [Unmarshal](unmarshal.go) — Decodes a binary stream back into Go variables.
+- [Inspect](struct.go) — Inspects structural byte offsets, sizes, and formats.
+
+## Documentation Index
+- [Full LLM Integration Guide](llms-full.txt) — Comprehensive coding rules, dynamic sizing, custom serializers, text encodings, and validation instructions.
+- [Struct Tag Reference](STRUCT_TAGS.md) — Detailed guide on binary struct tag syntax, options, and endianness overrides.
+- [Technical Specification](SPECIFICATION.md) — Ground-truth specification for runtime interpreter mechanics and compiler behavior.
+- [Static Code Generator (binarystruct-codegen)](binarystruct-codegen/README.md) — Standalone CLI tool details to compile tags into static, zero-allocation Go methods.

@@ -1,0 +1,21 @@
+# Developer Agent Guide (AGENTS.txt)
+
+This document provides instructions for AI developer agents modifying, extending, or maintaining the `binarystruct` repository.
+
+## 1. Ground Truth Specification
+* **Crucial Rule**: The source of truth for all syntax constraints, interpreter mapping, and codegen compiler behaviors is **[SPECIFICATION.md](SPECIFICATION.md)**.
+* When adding a new tag type, option, or keyword:
+  1. Follow the development step sequence defined in `SPECIFICATION.md`.
+  2. Implement changes on both the **dynamic runtime path** (`struct.go`, `marshal.go`/`unmarshal.go`, `unsafe_io.go`) and the **static compilation path** (`binarystruct-codegen/generator.go`).
+  3. Ensure both paths behave identically and pass the integration tests.
+
+## 2. Codebase Architecture Map
+* **[struct.go](struct.go)**: Layout parser and AST-like metadata compiler (`getStructMetadata`).
+* **[marshal.go](marshal.go) / [unmarshal.go](unmarshal.go)**: Reflection-based safe-mode runtime interpreter.
+* **[unsafe_io.go](unsafe_io.go)**: Reflection-free, high-performance unsafe pointer interpreter.
+* **[binarystruct-codegen/](binarystruct-codegen/)**: Separate compiler module generating static methods to bypass interpreters.
+* **[STRUCT_TAGS.md](STRUCT_TAGS.md)**: User-facing documentation for tag syntaxes.
+
+## 3. Development and Testing Rules
+* **Test Hygiene**: Keep the default test output quiet. Any subprocesses or integration tests (like [codegen_integration_test.go](codegen_integration_test.go)) must respect the `testing.Verbose()` flag and capture outputs instead of writing directly to stdout/stderr.
+* **Compatibility**: Ensure any optimizer or codegen enhancements fall back gracefully to the safe reflection mode if compiled with `-tags safe_binarystruct`.

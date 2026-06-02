@@ -109,3 +109,57 @@ type Packet struct {
 	Payload      []byte `binary:"[PayloadSize - (HeaderLength * 2)]byte"`
 }
 ```
+
+---
+
+## 6. インターフェースとポリモーフィズムの処理
+
+`binarystruct` は、インターフェース型（`interface{}` / `any`）のフィールドに対して、以下の2つの方法でシリアライズおよびデシリアライズを行うことができます。
+
+### 方法 1: 事前割り当て済みインターフェース（静的型決定）
+構造体のフィールドがインターフェース型である場合、デコーダーは `Unmarshal` が呼び出される前にそのフィールドに**具体的な値が事前割り当て（pre-assigned）**されているかをチェックします。事前割り当てされている場合、デコーダーはその割り当てられている具象型を自動的に判定してデコードします。
+
+```go
+type Packet struct {
+	Payload interface{} `binary:"any"` // 事前割り当てされた型のレイアウトとして解決される
+}
+
+// デコードされる予定の具体的な構造体をあらかじめ割り当てておく
+var data int32 = 0
+pkt := Packet{Payload: &data}
+
+// Unmarshal はバイナリデータを 'data' 変数に直接デコードします
+_, err := binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &pkt)
+```
+
+### 方法 2: カスタムシリアライザによる動的割り当て
+Type-Length-Value（TLV）や、パケットヘッダーの後に動的なメッセージボディが続くパケット形式のように、動的に具象型を割り当てたい場合は、カスタムの `Serializer` を使用します。
+
+カスタムデシリアライザ内では、すでにデコード済みの親構造体のフィールド（例: `Type` や `MessageID` など）の値を検査して、実行時に動的に適切な具象型を割り当てることができます。
+
+```go
+type Packet struct {
+	MsgType uint8       `binary:"uint8"`
+	Payload interface{} `binary:"custom,serializer=DynamicPayload"`
+}
+
+func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
+	// 親構造体のすでにデコード済みの "MsgType" フィールドをチェックする
+	msgTypeField := parentStruct.FieldByName("MsgType")
+	
+	// タイプ値に基づいて動的に構造体を割り当てる
+	var payload interface{}
+	switch msgTypeField.Uint() {
+	case 1:
+		payload = &MessageA{}
+	case 2:
+		payload = &MessageB{}
+	}
+
+	// 割り当てた構造体にバイナリストリームからデータをデコードする
+	n, err = binarystruct.Read(r, order, payload)
+	return payload, n, err
+}
+```
+
+実際にコンパイルして動作確認可能な詳細なコード例は、[example_interface_test.go](example_interface_test.go) を参照してください。

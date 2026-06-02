@@ -109,3 +109,57 @@ type Packet struct {
 	Payload      []byte `binary:"[PayloadSize - (HeaderLength * 2)]byte"`
 }
 ```
+
+---
+
+## 6. Interface & Polymorphic Handling
+
+`binarystruct` can serialize and deserialize fields of interface types (e.g., `interface{}` / `any`) using two distinct strategies:
+
+### Strategy 1: Pre-assigned Interfaces (Static Type Resolution)
+If a struct field is of an interface type, the decoder checks if the field has been **pre-assigned** with a concrete value before `Unmarshal` is called. If pre-assigned, the decoder automatically resolves the underlying concrete type:
+
+```go
+type Packet struct {
+	Payload interface{} `binary:"any"` // resolves to the pre-assigned type's layout
+}
+
+// Pre-assign the interface with the concrete structure expected in the stream
+var data int32 = 0
+pkt := Packet{Payload: &data}
+
+// Unmarshal decodes binary bytes directly into the 'data' variable
+_, err := binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &pkt)
+```
+
+### Strategy 2: Dynamic Allocation using a Custom Serializer
+For network packets or files containing polymorphic payloads (e.g. Type-Length-Value or packet headers followed by dynamic bodies), you can use a custom `Serializer`. 
+
+The custom deserializer can inspect previously decoded fields of the parent struct (e.g., a `Type` or `MessageID` field) and dynamically allocate the appropriate concrete type at runtime:
+
+```go
+type Packet struct {
+	MsgType uint8       `binary:"uint8"`
+	Payload interface{} `binary:"custom,serializer=DynamicPayload"`
+}
+
+func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
+	// Inspect the previously decoded "MsgType" field in the parent struct
+	msgTypeField := parentStruct.FieldByName("MsgType")
+	
+	// Allocate the appropriate structure dynamically
+	var payload interface{}
+	switch msgTypeField.Uint() {
+	case 1:
+		payload = &MessageA{}
+	case 2:
+		payload = &MessageB{}
+	}
+
+	// Decode binary stream into the allocated structure
+	n, err = binarystruct.Read(r, order, payload)
+	return payload, n, err
+}
+```
+
+For a complete, compile-checked demonstration, see [example_interface_test.go](example_interface_test.go).

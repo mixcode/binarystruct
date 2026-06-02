@@ -19,7 +19,9 @@ binarystruct-codegen -type TypeName[,TypeName2,...] [flags] [directory]
 | Flag | Description |
 | :--- | :--- |
 | `-type` | Comma-separated list of struct type names to generate methods for (**required**). |
-| `-output` | Output file name (default: `<first_type>_binary.go`). |
+| `-output` | Output file name (default: `<first_type>_binary.go` or `<first_type>.json` if `-json` is set). |
+| `-json` | Export parsed struct layout metadata to JSON instead of generating Go code. |
+| `-tests` | Include test files (`*_test.go`) when parsing package files. |
 
 ### Arguments
 
@@ -35,6 +37,9 @@ binarystruct-codegen -type Packet,Header
 
 # Specify output file and source directory
 binarystruct-codegen -type Packet -output packet_gen.go ./protocol
+
+# Export structural metadata for Packet as a JSON schema layout
+binarystruct-codegen -type Packet -json -output layout.json
 ```
 
 ### With `go:generate`

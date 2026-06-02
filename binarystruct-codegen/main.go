@@ -43,8 +43,9 @@ import (
 
 var (
 	typeNames    = flag.String("type", "", "comma-separated list of struct type names to generate methods for (required)")
-	outputFile   = flag.String("output", "", "output file name; default <first_type>_binary.go")
+	outputFile   = flag.String("output", "", "output file name; default <first_type>_binary.go (or <first_type>.json if -json is set)")
 	includeTests = flag.Bool("tests", false, "include test files (*_test.go) when parsing the package")
+	jsonOutput   = flag.Bool("json", false, "generate JSON representation of the struct layout instead of Go source code")
 )
 
 func usage() {
@@ -102,7 +103,11 @@ func main() {
 	// Default output file name
 	out := *outputFile
 	if out == "" {
-		out = strings.ToLower(types[0]) + "_binary.go"
+		if *jsonOutput {
+			out = strings.ToLower(types[0]) + ".json"
+		} else {
+			out = strings.ToLower(types[0]) + "_binary.go"
+		}
 	}
 	if !filepath.IsAbs(out) {
 		out = filepath.Join(absDir, out)
@@ -114,9 +119,15 @@ func main() {
 		IncludeTests: *includeTests,
 	}
 
-	if err := g.Generate(out); err != nil {
-		log.Fatalf("generation failed: %v", err)
+	if *jsonOutput {
+		if err := g.GenerateJSON(out); err != nil {
+			log.Fatalf("JSON generation failed: %v", err)
+		}
+		fmt.Printf("Generated binarystruct JSON layout for %s -> %s\n", *typeNames, filepath.Base(out))
+	} else {
+		if err := g.Generate(out); err != nil {
+			log.Fatalf("generation failed: %v", err)
+		}
+		fmt.Printf("Generated binarystruct methods for %s -> %s\n", *typeNames, filepath.Base(out))
 	}
-
-	fmt.Printf("Generated binarystruct methods for %s -> %s\n", *typeNames, filepath.Base(out))
 }

@@ -4,6 +4,7 @@ package binarystruct_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -125,5 +126,87 @@ func TestGeneratedMethods(t *testing.T) {
 			t.Log(string(testOutput))
 		}
 		t.Errorf("generated tests failed: %v", err)
+	}
+}
+
+func TestCodegen_JSONOutput(t *testing.T) {
+	relTmpDir, err := ioutil.TempDir(".", "tmp-binarystruct-codegen-json-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(relTmpDir)
+
+	tmpDir, err := filepath.Abs(relTmpDir)
+	if err != nil {
+		t.Fatalf("failed to get absolute path: %v", err)
+	}
+
+	codegenBin := filepath.Join(tmpDir, "binarystruct-codegen")
+	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./binarystruct-codegen")
+	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build codegen tool: %v\n%s", err, buildOut)
+	}
+
+	structFile := filepath.Join(tmpDir, "types.go")
+	structContent := `package tmp_codegen_test
+
+type TestStruct struct {
+	Age  uint8  ` + "`" + `binary:"uint8,range=18..120"` + "`" + `
+	Code string ` + "`" + `binary:"string(6),match=^[A-Z]{2}\\d{4}$"` + "`" + `
+}
+`
+	if err := ioutil.WriteFile(structFile, []byte(structContent), 0644); err != nil {
+		t.Fatalf("failed to write struct file: %v", err)
+	}
+
+	jsonFile := filepath.Join(tmpDir, "layout.json")
+	genCmd := exec.Command(codegenBin, "-type", "TestStruct", "-json", "-output", jsonFile, tmpDir)
+	var genStderr bytes.Buffer
+	genCmd.Stderr = &genStderr
+	if err := genCmd.Run(); err != nil {
+		t.Fatalf("codegen json run failed: %v\nStderr: %s", err, genStderr.String())
+	}
+
+	// Verify JSON content
+	jsData, err := ioutil.ReadFile(jsonFile)
+	if err != nil {
+		t.Fatalf("failed to read generated JSON file: %v", err)
+	}
+
+	type CodegenField struct {
+		Name         string            `json:"name"`
+		GoType       string            `json:"go_type"`
+		BinaryType   string            `json:"binary_type"`
+		IsArray      bool              `json:"is_array"`
+		ArrayLenExpr string            `json:"array_len_expr,omitempty"`
+		BufLenExpr   string            `json:"buf_len_expr,omitempty"`
+		Options      map[string]string `json:"options,omitempty"`
+	}
+
+	type CodegenStruct struct {
+		Name   string         `json:"name"`
+		Fields []CodegenField `json:"fields"`
+	}
+
+	var results []CodegenStruct
+	if err := json.Unmarshal(jsData, &results); err != nil {
+		t.Fatalf("failed to parse generated JSON: %v\nData: %s", err, jsData)
+	}
+
+	if len(results) != 1 || results[0].Name != "TestStruct" {
+		t.Fatalf("unexpected JSON results: %+v", results)
+	}
+
+	fields := results[0].Fields
+	if len(fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(fields))
+	}
+
+	if fields[0].Name != "Age" || fields[0].GoType != "uint8" || fields[0].BinaryType != "uint8" || fields[0].Options["range"] != "18..120" {
+		t.Errorf("unexpected Age field: %+v", fields[0])
+	}
+
+	if fields[1].Name != "Code" || fields[1].GoType != "string" || fields[1].BinaryType != "string" || fields[1].BufLenExpr != "6" || fields[1].Options["match"] != "^[A-Z]{2}\\d{4}$" {
+		t.Errorf("unexpected Code field: %+v", fields[1])
 	}
 }

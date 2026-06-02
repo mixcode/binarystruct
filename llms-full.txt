@@ -135,13 +135,21 @@ type UserRegistration struct {
 
 ---
 
-## 6. Static Code Generation
+## 6. Static Code Generation & JSON Export
 To achieve peak performance in production, compile struct layouts into static Go code using the standalone `binarystruct-codegen` tool located in the `/binarystruct-codegen` nested module.
 
 * **Workflow**:
   1. Add a `//go:generate` comment directive referencing the `binarystruct-codegen` CLI tool.
   2. Install the tool locally: `go install github.com/mixcode/binarystruct/binarystruct-codegen@latest`.
   3. Compile the static methods by running: `go generate ./...`.
+* **JSON Layout Export**: Export structural layout metadata to a JSON file (for external schemas or clients in other languages) using the `-json` flag:
+  ```bash
+  binarystruct-codegen -type Packet -json -output layout.json
+  ```
+* **Parsing Test Files**: By default, the parser ignores `*_test.go` files. Pass `-tests` to include structs defined in test files:
+  ```bash
+  binarystruct-codegen -type TestStruct -tests
+  ```
 * **Runtime Fast-Paths**: The main library automatically detects generated static methods via type assertion (interfaces `BinaryReader`, `BinaryWriter`, `MarshallerContextReader`, `MarshallerContextWriter`) and fast-paths directly to them during `Marshal` / `Unmarshal` calls.
 
 ### Example:

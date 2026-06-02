@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -653,4 +654,109 @@ func getEffectiveBinaryType(binType, goType string) string {
 	goType = strings.TrimPrefix(goType, "*")
 	goType = strings.TrimPrefix(goType, "[]")
 	return goType
+}
+
+func (g *Generator) GenerateJSON(outPath string) error {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, g.Dir, func(fi os.FileInfo) bool {
+		if fi.Name() == filepath.Base(outPath) {
+			return false
+		}
+		if strings.HasSuffix(fi.Name(), "_test.go") {
+			return g.IncludeTests
+		}
+		return true
+	}, 0)
+	if err != nil {
+		return fmt.Errorf("failed to parse directory: %w", err)
+	}
+
+	if len(pkgs) == 0 {
+		return fmt.Errorf("no Go packages found in %s", g.Dir)
+	}
+
+	var pkg *ast.Package
+	for _, p := range pkgs {
+		pkg = p
+		break
+	}
+
+	structs := make(map[string]*ast.StructType)
+	for _, file := range pkg.Files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				return true
+			}
+			structs[ts.Name.Name] = st
+			return true
+		})
+	}
+
+	type CodegenField struct {
+		Name         string            `json:"name"`
+		GoType       string            `json:"go_type"`
+		BinaryType   string            `json:"binary_type"`
+		IsArray      bool              `json:"is_array"`
+		ArrayLenExpr string            `json:"array_len_expr,omitempty"`
+		BufLenExpr   string            `json:"buf_len_expr,omitempty"`
+		Options      map[string]string `json:"options,omitempty"`
+	}
+
+	type CodegenStruct struct {
+		Name   string         `json:"name"`
+		Fields []CodegenField `json:"fields"`
+	}
+
+	var result []CodegenStruct
+
+	for _, typeName := range g.Types {
+		st, ok := structs[typeName]
+		if !ok {
+			return fmt.Errorf("type %s not found in package", typeName)
+		}
+		var fields []CodegenField
+		for _, field := range st.Fields.List {
+			if len(field.Names) == 0 {
+				continue
+			}
+			fieldName := field.Names[0].Name
+			goType := getGoTypeName(field.Type)
+			parsedTag := parseFieldTag(field.Tag)
+			if !parsedTag.hasTag {
+				continue
+			}
+			binType := getEffectiveBinaryType(parsedTag.binaryType, goType)
+
+			fields = append(fields, CodegenField{
+				Name:         fieldName,
+				GoType:       goType,
+				BinaryType:   binType,
+				IsArray:      parsedTag.isArray,
+				ArrayLenExpr: parsedTag.arrayLenExpr,
+				BufLenExpr:   parsedTag.bufLenExpr,
+				Options:      parsedTag.options,
+			})
+		}
+		result = append(result, CodegenStruct{
+			Name:   typeName,
+			Fields: fields,
+		})
+	}
+
+	js, err := json.MarshalIndent(result, "", "\t")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	if outPath == "" {
+		_, err = os.Stdout.Write(js)
+		return err
+	}
+
+	return ioutil.WriteFile(outPath, js, 0644)
 }

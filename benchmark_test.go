@@ -122,4 +122,3 @@ func BenchmarkUnmarshalSliceSwap(b *testing.B) {
 		}
 	}
 }
-

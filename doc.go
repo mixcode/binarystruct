@@ -33,6 +33,7 @@ Struct fields can be annotated with the "binary" tag to define their binary layo
 	`binary:"[array_len]TYPE(buf_len),option1=val1,option2"`
 
 Example:
+
 	MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
 
 ## Supported Binary Types

@@ -3,6 +3,7 @@
 package binarystruct
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -181,5 +182,45 @@ func TestInspect_CustomFormatter(t *testing.T) {
 	hexStr := layout.Format(LayoutFormat{OffsetBase: 16, SizeBase: 16, ValueBase: 16})
 	if !strings.Contains(hexStr, "0x0") || !strings.Contains(hexStr, "0xff") {
 		t.Errorf("hex table incorrect: \n%s", hexStr)
+	}
+}
+
+func TestInspect_ToJSON(t *testing.T) {
+	type Simple struct {
+		ID uint16 `binary:"uint16"`
+	}
+	s := Simple{ID: 255}
+	layout, err := Inspect(s, BigEndian)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	js, err := layout.ToJSON()
+	if err != nil {
+		t.Fatalf("failed to export layout to JSON: %v", err)
+	}
+
+	var parsed struct {
+		TypeName  string `json:"type_name"`
+		TotalSize int    `json:"total_size"`
+		Fields    []struct {
+			Name       string `json:"name"`
+			GoType     string `json:"go_type"`
+			BinaryType string `json:"binary_type"`
+			Offset     int    `json:"offset"`
+			Size       int    `json:"size"`
+		} `json:"fields"`
+	}
+
+	if err := json.Unmarshal(js, &parsed); err != nil {
+		t.Fatalf("failed to parse generated JSON: %v", err)
+	}
+
+	if parsed.TypeName != "Simple" || parsed.TotalSize != 2 {
+		t.Errorf("incorrect top-level layout values: %+v", parsed)
+	}
+
+	if len(parsed.Fields) != 1 || parsed.Fields[0].Name != "ID" || parsed.Fields[0].Offset != 0 || parsed.Fields[0].Size != 2 {
+		t.Errorf("incorrect field layout values: %+v", parsed.Fields)
 	}
 }

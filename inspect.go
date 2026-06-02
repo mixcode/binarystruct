@@ -4,6 +4,7 @@ package binarystruct
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -11,16 +12,16 @@ import (
 
 // FieldLayout holds layout details of a serialized struct field.
 type FieldLayout struct {
-	Index      int
-	Name       string
-	GoType     string
-	BinaryType string
-	Offset     int         // Offset from the start of the struct (in bytes)
-	Size       int         // Serialized size of the field (in bytes)
-	Tag        string      // Raw binary tag
-	Endian     string      // Byte order representation
-	RawValue   interface{} // Field's current value
-	Details    string      // Dynamic expressions, omission reason, etc.
+	Index      int         `json:"index"`
+	Name       string      `json:"name"`
+	GoType     string      `json:"go_type"`
+	BinaryType string      `json:"binary_type"`
+	Offset     int         `json:"offset"`              // Offset from the start of the struct (in bytes)
+	Size       int         `json:"size"`                // Serialized size of the field (in bytes)
+	Tag        string      `json:"tag"`                 // Raw binary tag
+	Endian     string      `json:"endian"`              // Byte order representation
+	RawValue   interface{} `json:"raw_value,omitempty"` // Field's current value
+	Details    string      `json:"details,omitempty"`   // Dynamic expressions, omission reason, etc.
 }
 
 // LayoutFormat holds format configurations for ASCII table generation.
@@ -39,14 +40,19 @@ var DefaultLayoutFormat = LayoutFormat{
 
 // StructLayout holds layout details of a serialized struct.
 type StructLayout struct {
-	TypeName  string
-	TotalSize int
-	Fields    []FieldLayout
+	TypeName  string        `json:"type_name"`
+	TotalSize int           `json:"total_size"`
+	Fields    []FieldLayout `json:"fields"`
 }
 
 // String returns a formatted ASCII table using the DefaultLayoutFormat.
 func (sl *StructLayout) String() string {
 	return sl.Format(DefaultLayoutFormat)
+}
+
+// ToJSON returns the JSON encoding of the struct layout.
+func (sl *StructLayout) ToJSON() ([]byte, error) {
+	return json.MarshalIndent(sl, "", "\t")
 }
 
 // Format returns a formatted ASCII table using custom formatting options.

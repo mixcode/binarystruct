@@ -23,6 +23,21 @@ var (
 	ErrUnknownLength = errors.New("unknown array, slice or string size")
 )
 
+// DecodeError is returned when unmarshalling fails, describing the field name and byte offset of the failure.
+type DecodeError struct {
+	Offset int
+	Field  string
+	Err    error
+}
+
+func (e *DecodeError) Error() string {
+	return fmt.Sprintf("decode error at offset %d (field %s): %v", e.Offset, e.Field, e.Err)
+}
+
+func (e *DecodeError) Unwrap() error {
+	return e.Err
+}
+
 // Unmarshal decodes binary images into a Go value. The Go value must be a writable type such as a slice, a pointer or an interface.
 func Unmarshal(input []byte, order ByteOrder, govalue interface{}) (n int, err error) {
 	var ms Marshaller
@@ -415,12 +430,16 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 
 	firstElem := true
 	wErr := func(i int, e error) error { // return a wrapped error
-		if firstElem {
+		if firstElem && (errors.Is(e, io.EOF) || errors.Is(e, io.ErrUnexpectedEOF)) {
 			// If EOF occurs at the first non-ignoring field, then return a raw EOF
 			return e
 		}
 		f := typ.Field(i)
-		return fmt.Errorf("field#%d <%s>: %w", i, f.Name, e)
+		return &DecodeError{
+			Offset: n,
+			Field:  f.Name,
+			Err:    e,
+		}
 	}
 
 	for _, fMeta := range meta.fields {

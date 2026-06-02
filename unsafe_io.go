@@ -6,6 +6,7 @@ package binarystruct
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -336,11 +337,15 @@ func (ms *Marshaller) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflec
 	}
 	firstElem := true
 	wErr := func(i int, e error) error {
-		if firstElem {
+		if firstElem && (errors.Is(e, io.EOF) || errors.Is(e, io.ErrUnexpectedEOF)) {
 			return e
 		}
 		f := typ.Field(i)
-		return fmt.Errorf("field#%d <%s>: %w", i, f.Name, e)
+		return &DecodeError{
+			Offset: n,
+			Field:  f.Name,
+			Err:    e,
+		}
 	}
 
 	for _, fMeta := range meta.fields {
@@ -799,5 +804,3 @@ func isCompatibleFastPath(goElType reflect.Type, elType eType) bool {
 	}
 	return false
 }
-
-

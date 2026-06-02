@@ -115,5 +115,29 @@ For packets containing polymorphic payloads (e.g. TLV or packet headers followed
 		n, err = binarystruct.Read(r, order, payload)
 		return payload, n, err
 	}
+
+# Optional & Omittable Fields
+
+binarystruct allows trailing fields of a struct to be optional via the "omittable" (or "optional") option.
+
+## EOF-based Omission
+
+If "omittable" is specified without an expression, reading the field will silently stop without error if the input stream reaches EOF at the beginning of the field. Pointers or interface fields that are nil will be omitted during serialization.
+
+	type Packet struct {
+		Required uint16
+		Optional uint32 `binary:"uint32,omittable"`
+	}
+
+## Expression-based Omission
+
+If "omittable=Expression" is specified, the field is omitted if the current byte count processed (n) is greater than or equal to the evaluated expression value.
+
+	type Packet struct {
+		TotalSize uint16
+		Val1      uint32
+		Extra1    uint32  `binary:"uint32,omittable=TotalSize"`
+		Extra2    *uint32 `binary:"uint32,omittable=TotalSize"`
+	}
 */
 package binarystruct

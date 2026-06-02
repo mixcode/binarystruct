@@ -65,8 +65,52 @@ This package supports multiple build modes to balance performance, platform safe
 | Mode / Build Tags | Description | Performance Profile |
 | :--- | :--- | :--- |
 | **Default Mode** (Unsafe) | Bypasses reflection using direct memory operations with `unsafe.Pointer` interpreter and layout-compatible fast-paths. | **Maximum Speed** (up to 214x faster, 99.9% fewer allocations). |
-| **Safe Mode** (`-tags safe`) | Falls back to pure reflection-based Go. Required on restricted platforms (e.g. Google App Engine). | Standard Go reflection overhead. |
+| **Safe Mode** (`-tags safe`) | Falls back to pure reflection-based Go. Required on restricted platforms. | Standard Go reflection overhead. |
 | **SIMD Mode** (`GOEXPERIMENT=simd -tags experiment_simd`) | Uses experimental Go 1.26 `simd/archsimd` to vectorize endian byte-swapping on AMD64 with CPU feature checks. | Maximum vectorized throughput for large arrays/slices. |
+
+### Building for Restricted Platforms
+
+If you deploy to sandboxed environments that restrict memory address access or block Go's `unsafe` package (e.g. Google App Engine standard environment), you must compile your project with the `safe` build tag:
+
+```bash
+go build -tags safe ./...
+go test -tags safe ./...
+```
+
+---
+
+## Struct Layout Inspection & Debugging
+
+`binarystruct` includes an `Inspect` helper that analyzes a struct's binary layout and prints out the offset, size, and value of each field. This is extremely helpful for debugging byte alignment and padding issues.
+
+```go
+type Packet struct {
+	Magic  string `binary:"[4]byte"`
+	Length uint16 `binary:"uint16"`
+	Flag   uint8  `binary:"uint8"`
+	Data   []byte `binary:"[2]byte"`
+}
+
+pkt := Packet{Magic: "HEAD", Length: 12, Flag: 1, Data: []byte{0xaa, 0xbb}}
+
+// Inspect the struct layout
+layout, _ := binarystruct.Inspect(&pkt, binarystruct.BigEndian)
+
+// Format and print it
+format := binarystruct.DefaultLayoutFormat
+format.BaseOffset = 16 // format offsets in hexadecimal
+fmt.Println(layout.Format(format))
+```
+
+Output:
+```text
++0x00(0x04) [4]byte Magic = [72 69 65 68] ("HEAD")
++0x04(0x02) uint16 Length = 12 (0x000c)
++0x06(0x01) uint8 Flag = 1 (0x01)
++0x07(0x02) [2]byte Data = [170 187]
+```
+
+---
 
 ## See also
 * [Struct Tag Reference Manual](STRUCT_TAGS.md) for details about tag types, options, and dynamic math expressions.

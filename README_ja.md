@@ -68,6 +68,50 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 | **Safeモード** (`-tags safe`) | 純粋なリフレクションのみを用いる標準Go実装にフォールバックします。Google App Engineなどのセキュリティ上の制限がある環境で必須。 | リフレクションによる標準的なオーバーヘッド。 |
 | **SIMDモード** (`GOEXPERIMENT=simd -tags experiment_simd`) | Go 1.26 の実験的パッケージ `simd/archsimd` を用いて、AMD64上でのエンディアン変換（バイトスワップ）をベクター命令で処理します（CPU機能検知付き）。 | 大きな数値配列やスライスのベクター化によるスループット最大化。 |
 
+### 制限されたプラットフォーム向けのビルド
+
+メモリアドレスへのアクセス制限や、Goの `unsafe` パッケージの使用が禁止されているサンドボックス環境（例：Google App Engine 標準環境）へデプロイする場合は、`safe` ビルドタグを有効にしてプロジェクトをコンパイルする必要があります：
+
+```bash
+go build -tags safe ./...
+go test -tags safe ./...
+```
+
+---
+
+## 構造体レイアウトの可視化とデバッグ
+
+`binarystruct` には、構造体のバイナリレイアウトを解析し、各フィールドのオフセット、サイズ、値を表示する `Inspect` ヘルパーが含まれています。これは、バイトアライメントやパディングの問題をデバッグする際に非常に便利です。
+
+```go
+type Packet struct {
+	Magic  string `binary:"[4]byte"`
+	Length uint16 `binary:"uint16"`
+	Flag   uint8  `binary:"uint8"`
+	Data   []byte `binary:"[2]byte"`
+}
+
+pkt := Packet{Magic: "HEAD", Length: 12, Flag: 1, Data: []byte{0xaa, 0xbb}}
+
+// 構造体のレイアウトを解析
+layout, _ := binarystruct.Inspect(&pkt, binarystruct.BigEndian)
+
+// フォーマットを設定して表示
+format := binarystruct.DefaultLayoutFormat
+format.BaseOffset = 16 // オフセットを16進数でフォーマット
+fmt.Println(layout.Format(format))
+```
+
+出力結果:
+```text
++0x00(0x04) [4]byte Magic = [72 69 65 68] ("HEAD")
++0x04(0x02) uint16 Length = 12 (0x000c)
++0x06(0x01) uint8 Flag = 1 (0x01)
++0x07(0x02) [2]byte Data = [170 187]
+```
+
+---
+
 ## 関連情報・ドキュメント
 * [構造体タグ リファレンスマニュアル](STRUCT_TAGS_ja.md) - タグの対応型一覧、パラメータ一覧、動的計算式について。
 * [Goドキュメント](https://pkg.go.dev/github.com/mixcode/binarystruct) - API仕様について。

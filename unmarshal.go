@@ -451,7 +451,7 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 		}
 
 		v := fieldVal
-		if fKind == reflect.Ptr || fKind == reflect.Interface {
+		if (fKind == reflect.Ptr || fKind == reflect.Interface) && fMeta.serializer == "" {
 			// allocate pointers
 			v, _ = dereferencePointer(v)
 		}
@@ -511,7 +511,9 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 		}
 
 		if fKind == reflect.Ptr || fKind == reflect.Interface {
-			option.indirectCount = 0
+			if fMeta.serializer == "" {
+				option.indirectCount = 0
+			}
 		}
 
 		var m int

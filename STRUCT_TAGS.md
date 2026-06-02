@@ -163,3 +163,35 @@ func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect
 ```
 
 For a complete, compile-checked demonstration, see [example_interface_test.go](example_interface_test.go).
+
+---
+
+## 7. Optional & Omittable Fields
+
+`binarystruct` allows fields at the end of a struct to be omitted during serialization and deserialization using the `omittable` (or `optional`) option. This is particularly useful for backward-compatible binary format versions or variable-length payloads.
+
+### EOF-based Omission
+By applying the `omittable` option without any expression, you designate the field as optional based on the end of the input stream.
+* **Unmarshal**: If the input stream is exhausted (`io.EOF` or `io.ErrUnexpectedEOF`) before reading any bytes for this field, the decoding completes successfully, and the field is left with its default value (or `nil` for pointers). If a partial read occurs, it still returns an error.
+* **Marshal**: If the field is a pointer or interface type and is `nil`, it will be completely omitted from the output stream.
+
+```go
+type Packet struct {
+	Required uint16
+	Optional uint32 `binary:"uint32,omittable"`
+}
+```
+
+### Expression-based Omission
+By assigning an expression (e.g. `omittable=Expression`), the field is omitted dynamically depending on the current read/write offset.
+* **Marshal & Unmarshal**: Before processing the field, the expression is evaluated. If the current byte count processed for the struct (`n`) is greater than or equal to the evaluated value, this field (and all subsequent fields) are skipped.
+* This is typically used in structures where a header field defines the total message size.
+
+```go
+type Packet struct {
+	TotalSize uint16
+	Val1      uint32
+	Extra1    uint32  `binary:"uint32,omittable=TotalSize"`
+	Extra2    *uint32 `binary:"uint32,omittable=TotalSize"`
+}
+```

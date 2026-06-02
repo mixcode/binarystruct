@@ -163,3 +163,37 @@ func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect
 ```
 
 実際にコンパイルして動作確認可能な詳細なコード例は、[example_interface_test.go](example_interface_test.go) を参照してください。
+
+---
+
+## 7. オプショナルおよびオミット可能なフィールド（Optional & Omittable Fields）
+
+`binarystruct` は、`omittable`（または `optional`）オプションを使用することで、構造体の末尾にあるフィールドをシリアライズおよびデシリアライズの対象外（オプショナル）にすることができます。これは、後方互換性のあるバイナリ形式のバージョン対応や、可変長ペイロードを処理する際に非常に便利です。
+
+省略の動作には以下の2種類があります。
+
+### EOFベースの省略（EOF-based Omission）
+式を指定せずに `omittable` オプションを指定した場合、入力ストリームの終端に基づいてフィールドをオプショナルとして扱います。
+* **デシリアライズ (Unmarshal)**: このフィールドの読み込みを開始する前に入力ストリームが終端（`io.EOF` または `io.ErrUnexpectedEOF`）に達した場合、エラーを出さずにデコードを正常終了します。フィールドの値はデフォルト値（ポインタの場合は `nil`）のままになります。ただし、フィールドの途中でデータが途切れた場合は部分読み込みエラーとなります。
+* **シリアライズ (Marshal)**: フィールドがポインタ型またはインターフェース型であり、その値が `nil` の場合、出力ストリームへの書き込みは完全に省略されます。
+
+```go
+type Packet struct {
+	Required uint16
+	Optional uint32 `binary:"uint32,omittable"`
+}
+```
+
+### 式ベースの省略（Expression-based Omission）
+`omittable=評価式` のように計算式を指定した場合、現在の読み込み/書き込みのバイトオフセットに応じて動的にフィールドが省略されます。
+* **シリアライズ＆デシリアライズ**: フィールドを処理する前に評価式が実行されます。構造体のこれまでに処理したバイト数（`n`）が評価値以上である場合、このフィールド（およびそれ以降のすべてのフィールド）の処理はスキップされます。
+* これは通常、ヘッダー内のフィールドがメッセージ全体のサイズを定義している構造などで使用されます。
+
+```go
+type Packet struct {
+	TotalSize uint16
+	Val1      uint32
+	Extra1    uint32  `binary:"uint32,omittable=TotalSize"`
+	Extra2    *uint32 `binary:"uint32,omittable=TotalSize"`
+}
+```

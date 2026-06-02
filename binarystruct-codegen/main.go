@@ -42,8 +42,9 @@ import (
 )
 
 var (
-	typeNames  = flag.String("type", "", "comma-separated list of struct type names to generate methods for (required)")
-	outputFile = flag.String("output", "", "output file name; default <first_type>_binary.go")
+	typeNames    = flag.String("type", "", "comma-separated list of struct type names to generate methods for (required)")
+	outputFile   = flag.String("output", "", "output file name; default <first_type>_binary.go")
+	includeTests = flag.Bool("tests", false, "include test files (*_test.go) when parsing the package")
 )
 
 func usage() {
@@ -108,8 +109,9 @@ func main() {
 	}
 
 	g := Generator{
-		Dir:   absDir,
-		Types: types,
+		Dir:          absDir,
+		Types:        types,
+		IncludeTests: *includeTests,
 	}
 
 	if err := g.Generate(out); err != nil {

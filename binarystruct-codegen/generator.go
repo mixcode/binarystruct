@@ -18,8 +18,9 @@ import (
 )
 
 type Generator struct {
-	Dir   string
-	Types []string
+	Dir          string
+	Types        []string
+	IncludeTests bool
 }
 
 type parsedFieldTag struct {
@@ -114,7 +115,13 @@ func translateExpression(expr string) string {
 func (g *Generator) Generate(outPath string) error {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, g.Dir, func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go") && fi.Name() != filepath.Base(outPath)
+		if fi.Name() == filepath.Base(outPath) {
+			return false
+		}
+		if strings.HasSuffix(fi.Name(), "_test.go") {
+			return g.IncludeTests
+		}
+		return true
 	}, 0)
 	if err != nil {
 		return fmt.Errorf("failed to parse directory: %w", err)
@@ -577,6 +584,17 @@ func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, bin
 		sizeExpr = fmt.Sprintf("len(s.%s)", fieldName)
 	}
 
+	if goType == "string" {
+		if binType == "byte" || binType == "uint8" {
+			fmt.Fprintf(buf, "\t{\n\t\twriteLen := int(%s)\n", sizeExpr)
+			buf.WriteString("\t\tstrBytes := make([]byte, writeLen)\n")
+			fmt.Fprintf(buf, "\t\tcopy(strBytes, s.%s)\n", fieldName)
+			buf.WriteString("\t\tm, err = w.Write(strBytes)\n")
+			buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
+			return
+		}
+	}
+
 	// Bulk write optimization for byte slices
 	if binType == "byte" || binType == "uint8" {
 		fmt.Fprintf(buf, "\t{\n\t\twriteLen := int(%s)\n", sizeExpr)
@@ -596,6 +614,20 @@ func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binT
 	if sizeExpr == "" {
 		buf.WriteString("\treturn n, errors.New(\"unknown array size expression\")\n")
 		return
+	}
+
+	if goType == "string" {
+		if binType == "byte" || binType == "uint8" {
+			fmt.Fprintf(buf, "\t{\n\t\treadLen := int(%s)\n", sizeExpr)
+			buf.WriteString("\t\tstrBytes := make([]byte, readLen)\n")
+			buf.WriteString("\t\tm, err = io.ReadFull(r, strBytes)\n")
+			buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n")
+			buf.WriteString("\t\tstrlen := len(strBytes)\n")
+			buf.WriteString("\t\tfor ; strlen > 0 && strBytes[strlen-1] == 0; strlen-- {}\n")
+			fmt.Fprintf(buf, "\t\ts.%s = string(strBytes[:strlen])\n", fieldName)
+			buf.WriteString("\t}\n")
+			return
+		}
 	}
 
 	// Slice initialization

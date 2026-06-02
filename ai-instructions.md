@@ -71,7 +71,14 @@ When unmarshalling into an interface field, you must choose one of two patterns:
 ## 3. Debugging Layout Issues
 If you encounter layout or padding issues, use the `Inspect` API to print out the struct's byte offsets, sizes, and values.
 
+* **Critical**: If your struct uses custom serializers or custom text encodings, you **MUST** call `marshaller.Inspect(...)` on your configured `Marshaller` instance. Using the package-level `binarystruct.Inspect(...)` will use a default marshaller and show custom fields with size `0`.
+
 ```go
+// For standard layouts:
 layout, _ := binarystruct.Inspect(&myStruct, binarystruct.BigEndian)
+
+// For custom configured marshallers (with custom serializers/encodings):
+layout, _ := marshaller.Inspect(&myStruct, binarystruct.BigEndian)
+
 fmt.Println(layout.Format(binarystruct.DefaultLayoutFormat))
 ```

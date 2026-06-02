@@ -110,6 +110,8 @@ Output:
 +0x07(0x02) [2]byte Data = [170 187]
 ```
 
+> **Note**: If your structure contains custom serializers or encodings, use `marshaller.Inspect(&pkt, ...)` on your custom-configured `Marshaller` instance instead of the package-level `binarystruct.Inspect(&pkt, ...)` to ensure custom options are correctly recognized during inspection.
+
 ---
 
 ## See also

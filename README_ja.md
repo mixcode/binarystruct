@@ -110,6 +110,8 @@ fmt.Println(layout.Format(format))
 +0x07(0x02) [2]byte Data = [170 187]
 ```
 
+> **注意**: 構造体にカスタムシリアライザやエンコーディングを使用している場合は、パッケージレベルの `binarystruct.Inspect(&pkt, ...)` ではなく、設定済みの Marshaller インスタンスの `marshaller.Inspect(&pkt, ...)` を使用してください。これにより、検証時にカスタム設定が正しく認識されます。
+
 ---
 
 ## 関連情報・ドキュメント

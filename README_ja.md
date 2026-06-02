@@ -47,9 +47,11 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 ## 主な機能
 
 * **自動的かつ安全な型変換**: パックされたバイナリレイアウトをGoの自然な型（例: `uint16` や `int8` ストリームから直接Goの `int` フィールド）へ、安全な値の範囲チェック付きで自動変換します。
+* **静的コード生成**: `binarystruct-codegen` ツールにより、構造体タグからリフレクション不要で最適化された `MarshalBinary` / `UnmarshalBinary` メソッドを生成します。Safeモードのリフレクションに対して最大**6.7倍の高速化**をほぼゼロアロケーションで実現し、`go:generate` との統合をサポートします。詳細は [`binarystruct-codegen/README.md`](binarystruct-codegen/README.md) を参照してください。
+* **超高速ランタイムインタプリタ**: タグ解析結果を初回ロード時にキャッシュし、Unsafeモード（デフォルト）では `unsafe.Pointer` とアロケーションフリーのスライス転送技術を用いることで、標準Goリフレクションと比較して最大**214倍の高速化**と**99.9%のメモリ割り当て削減**を実現します。
+* **宣言的バリデーション**: `range=min..max` による数値範囲チェックや `match=pattern` による正規表現文字列バリデーションにより、デシリアライズ時にインラインで検証を行い、違反時にはエラーを返します。
 * **きめ細かなレイアウト制御**: `byte`, `word`, `dword`, `qword` などの明示的なデータ型や、`pad(size)` によるゼロ埋めパディングを柔軟に設定できます。
 * **動的なサイズ計算式**: 配列の長さや文字列バッファサイズを、四則演算（`+`, `-`, `*`, `/`）と括弧 `()` を用いて他の構造体フィールドの値から動的に決定できます（例: `[PayloadSize - (HeaderLength * 2)]byte`）。
-* **超高速構造体レイアウトインタプリタ**: タグ解析結果を初回ロード時にキャッシュし、Unsafeモード（デフォルト）では `unsafe.Pointer` とアロケーションフリーのスライス転送技術を用いることで、標準Goリフレクションと比較して最大**214倍の高速化**と**99.9%のメモリ割り当て削減**を実現します。
 * **ポリモーフィズムとインターフェース処理**: 事前に割り当てられたインターフェースへの直感的な復元、またはカスタムシリアライザにより、デコード済みのヘッダー情報を基にした実行時の動的型割り当てに対応します。
 * **多言語テキストエンコーディング**: `AddTextEncoding` で文字コード（例: `Shift-JIS`, `UTF-16`）をあらかじめ登録しておくことで、文字列フィールドに対して文字コード変換に対応し、フォールバック用のデフォルトエンコードを設定できます。
 * **フィールド単位のエンディアン制御**: フィールドごとにエンディアン（`big`, `little`, `inverse`（反転））を指定でき、ネストされた構造体へも再帰的に伝播します。
@@ -130,20 +132,20 @@ fmt.Println(string(js))
 ### インストール
 コードジェネレータのCLIツールをインストールします：
 ```bash
-go install github.com/mixcode/binarystruct/codegen@latest
+go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
 ```
 
 ### 使用方法
 対象となる構造体の静的な `MarshalBinary` および `UnmarshalBinary` メソッドを生成します：
 ```bash
-codegen -type MyStruct,MyNestedStruct [対象のパッケージディレクトリ]
+binarystruct-codegen -type MyStruct,MyNestedStruct [対象のパッケージディレクトリ]
 ```
 デフォルトでは、指定した最初の型名を元にした `<型名>_binary.go` が同ディレクトリに出力されます。
 
 ### go generate との連携
 通常、Goソースファイル内に `go generate` コメントを追加して連携することをお勧めします：
 ```go
-//go:generate codegen -type Packet,Header
+//go:generate binarystruct-codegen -type Packet,Header
 type Packet struct {
 	Magic uint32 `binary:"uint32"`
 	Data  []byte `binary:"[10]byte"`

@@ -136,17 +136,17 @@ type UserRegistration struct {
 ---
 
 ## 6. Static Code Generation
-To achieve peak performance in production, compile struct layouts into static Go code using the standalone `codegen` tool located in the `/codegen` nested module.
+To achieve peak performance in production, compile struct layouts into static Go code using the standalone `binarystruct-codegen` tool located in the `/binarystruct-codegen` nested module.
 
 * **Workflow**:
-  1. Add a `//go:generate` comment directive referencing the `codegen` CLI tool.
-  2. Install the tool locally: `go install github.com/mixcode/binarystruct/codegen@latest`.
+  1. Add a `//go:generate` comment directive referencing the `binarystruct-codegen` CLI tool.
+  2. Install the tool locally: `go install github.com/mixcode/binarystruct/binarystruct-codegen@latest`.
   3. Compile the static methods by running: `go generate ./...`.
 * **Runtime Fast-Paths**: The main library automatically detects generated static methods via type assertion (interfaces `BinaryReader`, `BinaryWriter`, `MarshallerContextReader`, `MarshallerContextWriter`) and fast-paths directly to them during `Marshal` / `Unmarshal` calls.
 
 ### Example:
 ```go
-//go:generate codegen -type Packet
+//go:generate binarystruct-codegen -type Packet
 type Packet struct {
 	Magic uint32 `binary:"uint32"`
 	Data  []byte `binary:"[16]byte"`

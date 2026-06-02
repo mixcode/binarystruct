@@ -1,6 +1,6 @@
 // Copyright 2026 github.com/mixcode
 
-// codegen generates static MarshalBinary/UnmarshalBinary methods
+// binarystruct-codegen generates static MarshalBinary/UnmarshalBinary methods
 // for structs annotated with `binary:"..."` tags, producing optimized code that
 // avoids runtime reflection.
 //
@@ -8,7 +8,7 @@
 //
 // Usage:
 //
-//	codegen -type TypeName[,TypeName2,...] [flags] [directory]
+//	binarystruct-codegen -type TypeName[,TypeName2,...] [flags] [directory]
 //
 // Flags:
 //
@@ -23,13 +23,13 @@
 // Example:
 //
 //	# Generate methods for Packet and Header types in the current directory
-//	codegen -type Packet,Header
+//	binarystruct-codegen -type Packet,Header
 //
 //	# Generate to a specific output file
-//	codegen -type Packet -output packet_gen.go ./protocol
+//	binarystruct-codegen -type Packet -output packet_gen.go ./protocol
 //
 //	# Use with go:generate
-//	//go:generate codegen -type Packet,Header
+//	//go:generate binarystruct-codegen -type Packet,Header
 package main
 
 import (
@@ -47,10 +47,10 @@ var (
 )
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `codegen: generate static MarshalBinary/UnmarshalBinary methods.
+	fmt.Fprintf(os.Stderr, `binarystruct-codegen: generate static MarshalBinary/UnmarshalBinary methods.
 
 Usage:
-  codegen -type TypeName[,TypeName2,...] [flags] [directory]
+  binarystruct-codegen -type TypeName[,TypeName2,...] [flags] [directory]
 
 Flags:
 `)
@@ -72,7 +72,7 @@ See https://github.com/mixcode/binarystruct for the full library documentation.
 
 func main() {
 	log.SetFlags(0)
-	log.SetPrefix("codegen: ")
+	log.SetPrefix("binarystruct-codegen: ")
 	flag.Usage = usage
 	flag.Parse()
 

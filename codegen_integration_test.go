@@ -13,15 +13,15 @@ import (
 
 func TestCodegen_Integration(t *testing.T) {
 	// 1. Create a temp directory inside workspace
-	tmpDir, err := ioutil.TempDir(".", "tmp-codegen-test")
+	tmpDir, err := ioutil.TempDir(".", "tmp-binarystruct-codegen-test")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	// Build the codegen binary
-	codegenBin := filepath.Join(tmpDir, "codegen")
-	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./codegen")
+	codegenBin := filepath.Join(tmpDir, "binarystruct-codegen")
+	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./binarystruct-codegen")
 	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to build codegen tool: %v\n%s", err, buildOut)
 	}

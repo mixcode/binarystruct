@@ -1,17 +1,17 @@
-# codegen
+# binarystruct-codegen
 
 Static code generator for [binarystruct](https://github.com/mixcode/binarystruct). Generates optimized `MarshalBinary` / `UnmarshalBinary` methods from struct `binary:"..."` tags, eliminating runtime reflection overhead.
 
 ## Install
 
 ```bash
-go install github.com/mixcode/binarystruct/codegen@latest
+go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
 ```
 
 ## Usage
 
 ```
-codegen -type TypeName[,TypeName2,...] [flags] [directory]
+binarystruct-codegen -type TypeName[,TypeName2,...] [flags] [directory]
 ```
 
 ### Flags
@@ -31,16 +31,16 @@ codegen -type TypeName[,TypeName2,...] [flags] [directory]
 
 ```bash
 # Generate methods for Packet and Header types in the current directory
-codegen -type Packet,Header
+binarystruct-codegen -type Packet,Header
 
 # Specify output file and source directory
-codegen -type Packet -output packet_gen.go ./protocol
+binarystruct-codegen -type Packet -output packet_gen.go ./protocol
 ```
 
 ### With `go:generate`
 
 ```go
-//go:generate codegen -type Packet,Header
+//go:generate binarystruct-codegen -type Packet,Header
 ```
 
 ## What Gets Generated
@@ -59,7 +59,7 @@ These implement `MarshallerContextWriter` / `MarshallerContextReader`, enabling 
 
 ## Supported Tag Features
 
-The codegen tool supports the full `binary:"..."` tag syntax including:
+The binarystruct-codegen tool supports the full `binary:"..."` tag syntax including:
 
 - All primitive types (`int8`–`int64`, `uint8`–`uint64`, `float32`, `float64`, `byte`, `word`, `dword`, `qword`)
 - String types (`string(N)`, `bstring`, `wstring`, `dwstring`, `zstring`, `z16string`)

@@ -52,7 +52,7 @@ graph TD
     C1 --> C2[Safe Mode: unmarshal.go]
     C1 --> C3[Unsafe Mode: unsafe_io.go]
     
-    D --> D1[AST Parser: codegen/generator.go]
+    D --> D1[AST Parser: binarystruct-codegen/generator.go]
     D1 --> D2[Go Writer: Generated Methods]
     
     C2 --> E[Serialized Stream]
@@ -99,7 +99,7 @@ When introducing a new binary type, tag option, or modifier, you **must** check 
 - [ ] **Step 4: Unsafe-Mode Interpreter (`unsafe_io.go`)**
   Update the pointer-offset loop in `unsafeWriteStruct` and `unsafeReadStruct` to optimize operations using direct memory access (unsafe pointer casting).
 
-- [ ] **Step 5: Code Generator (`codegen/generator.go`)**
+- [ ] **Step 5: Code Generator (`binarystruct-codegen/generator.go`)**
   Update `parseFieldTag` to extract the option/type. Update `generateFieldWrite` / `generateFieldRead` (and array handlers) to emit the compiled Go statements.
 
 - [ ] **Step 6: Interface Verifications**

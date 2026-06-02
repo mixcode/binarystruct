@@ -23,6 +23,6 @@ go.work
 go.work.sum
 
 # Codegen binary
-codegen/codegen
+binarystruct-codegen/binarystruct-codegen
 
 

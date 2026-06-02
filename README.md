@@ -47,12 +47,13 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 ## Features
 
 * **Automatic & Safe Type Conversions**: Effortlessly maps packed binary layouts into Go native types (e.g. converting `uint16` or `int8` streams directly into Go `int` fields) with range and bounds checks.
+* **Declarative Validation**: Validate deserialized values inline with `range=min..max` for numeric bounds checks and `match=pattern` for regex string validation, returning errors on violation.
 * **Fine-Grained Layout Controls**: Control data alignment using explicit types like `byte`, `word`, `dword`, `qword`, and zero-filled padding bytes via the `pad(size)` tag.
 * **Dynamic Size Expressions**: Calculate array lengths and string buffer sizes dynamically based on other struct fields, supporting arithmetic operations (`+`, `-`, `*`, `/`) and parentheses (e.g., `[PayloadSize - (HeaderLength * 2)]byte`).
-* **High-Performance Structure Layout Interpreter**: Uses dynamic layout compilation and a cached metadata interpreter. Unsafe Mode (default) bypasses reflection using `unsafe.Pointer` and zero-allocation slice streaming, yielding up to **214x speedups** and **99.9% fewer allocations** than standard Go reflections.
 * **Interface & Polymorphic Handling**: Automatically deserializes into pre-assigned interface fields, or uses custom serializers to dynamically allocate types based on previously decoded header values.
+* **High-Performance Runtime Interpreter**: Uses dynamic layout compilation and a cached metadata interpreter. Unsafe Mode (default) bypasses reflection using `unsafe.Pointer` and zero-allocation slice streaming, yielding giant performance gain compared with safe mode using Go reflection.
+* **Static Code Generation**: Includes a `binarystruct-codegen` tool that generates optimized, reflection-free `MarshalBinary` / `UnmarshalBinary` methods from struct tags. Achieves up to **6.7x speedup** over safe-mode reflection with near-zero allocations. Supports `go:generate` integration. See [`binarystruct-codegen/README.md`](binarystruct-codegen/README.md).
 * **Multi-Language String Encoding**: Supports converting custom character encodings (e.g., `Shift-JIS`, `UTF-16`) on string fields by registering encodings via `AddTextEncoding` with customizable default fallback encodings.
-* **Field-Level Endian Markings**: Override default byte orders per field (e.g., `endian=big`, `little`, or `inverse`), with recursive propagation down into nested structs.
 * **Single-Value Marshalling**: Serialize/deserialize standalone non-struct variables directly using `MarshalAs` / `UnmarshalAs` with custom tags.
 * **Custom Serializers**: Register custom encoders/decoders via the `Serializer` interface to handle complex validation or dynamic type mappings.
 * **Struct Inspection Helper**: Includes an `Inspect` API that formats struct layouts, displaying field offsets, sizes, types, and values in customizable bases (decimal, hex, binary).
@@ -114,7 +115,7 @@ Output:
 
 ### Exporting Layout to JSON
 
-You can export the analyzed layout metadata as a JSON schema. This is highly useful for integrating with external systems or generating schema structures in other languages:
+You can export the analyzed layout metadata as a JSON schema. This is useful for integrating with external systems or generating schema structures in other languages:
 
 ```go
 js, _ := layout.ToJSON()
@@ -130,20 +131,20 @@ fmt.Println(string(js))
 ### Installation
 Install the code generator CLI:
 ```bash
-go install github.com/mixcode/binarystruct/codegen@latest
+go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
 ```
 
 ### Usage
 Generate static `MarshalBinary` and `UnmarshalBinary` methods for your structs:
 ```bash
-codegen -type MyStruct,MyNestedStruct [path/to/package/directory]
+binarystruct-codegen -type MyStruct,MyNestedStruct [path/to/package/directory]
 ```
 By default, it writes the generated code to `<first_type>_binary.go` in the same directory.
 
 ### Go Generate Integration
 We recommend integrating it into your Go source files using `go generate`:
 ```go
-//go:generate codegen -type Packet,Header
+//go:generate binarystruct-codegen -type Packet,Header
 type Packet struct {
 	Magic uint32 `binary:"uint32"`
 	Data  []byte `binary:"[10]byte"`
@@ -187,4 +188,4 @@ if err != nil {
 
 ## See also
 * [Struct Tag Reference Manual](STRUCT_TAGS.md) for details about tag types, options, and dynamic math expressions.
-* [Go Reference Doc](https://pkg.go.dev/github.com/mixcode/binarystruct) for API documentation.
+* [Go Reference Doc](https://pkg.go.dev/github.com/mixcode/binarystruct) for Go package documentation.

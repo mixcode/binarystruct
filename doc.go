@@ -160,5 +160,14 @@ When unmarshalling fails, errors are returned as a DecodeError pointer which con
 			// inspect decodeErr.Offset and decodeErr.Field
 		}
 	}
+
+# Static Code Generation
+
+To achieve peak performance in production, compile your struct layouts into static Go code using the standalone binarystruct-codegen tool:
+
+	go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
+	binarystruct-codegen -type Packet,Header
+
+For more information, see the README.md file in the binarystruct-codegen package directory.
 */
 package binarystruct

@@ -622,4 +622,3 @@ func getEffectiveBinaryType(binType, goType string) string {
 	goType = strings.TrimPrefix(goType, "[]")
 	return goType
 }
-

@@ -422,6 +422,28 @@ func (ms *Marshaller) readArray(r io.Reader, order ByteOrder, array reflect.Valu
 
 // read a struct
 func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err error) {
+	if strc.CanInterface() {
+		val := strc.Interface()
+		if mr, ok := val.(MarshallerContextReader); ok {
+			return mr.ReadBinaryWithMarshaller(ms, r, order)
+		}
+		if br, ok := val.(BinaryReader); ok {
+			return br.ReadBinary(r, order)
+		}
+	}
+	if strc.CanAddr() {
+		addr := strc.Addr()
+		if addr.CanInterface() {
+			val := addr.Interface()
+			if mr, ok := val.(MarshallerContextReader); ok {
+				return mr.ReadBinaryWithMarshaller(ms, r, order)
+			}
+			if br, ok := val.(BinaryReader); ok {
+				return br.ReadBinary(r, order)
+			}
+		}
+	}
+
 	if !safeMode {
 		return ms.unsafeReadStruct(r, order, strc)
 	}
@@ -654,7 +676,7 @@ func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, 
 		// process text encoding
 		strlen := len(buf)
 		if textEncoding != "" && strlen > 0 {
-			buf, err = ms.decodeText(buf, textEncoding)
+			buf, err = ms.DecodeText(buf, textEncoding)
 			if err != nil {
 				return
 			}
@@ -676,7 +698,7 @@ func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, 
 		// process text encoding
 		strlen := len(buf)
 		if textEncoding != "" && strlen > 0 {
-			buf, err = ms.decodeText(buf, textEncoding)
+			buf, err = ms.DecodeText(buf, textEncoding)
 			if err != nil {
 				return
 			}
@@ -732,7 +754,7 @@ func (ms *Marshaller) readString(r io.Reader, order ByteOrder, v reflect.Value, 
 
 	// process text encoding (before removing terminating zeros)
 	if textEncoding != "" && m > 0 {
-		buf, err = ms.decodeText(buf, textEncoding)
+		buf, err = ms.DecodeText(buf, textEncoding)
 		if err != nil {
 			return
 		}
@@ -879,4 +901,14 @@ func skipBytes(r io.Reader, sz int) (n int, err error) {
 		}
 	}
 	return
+}
+
+// BinaryReader is implemented by types that can deserialize themselves from a stream.
+type BinaryReader interface {
+	ReadBinary(r io.Reader, order ByteOrder) (int, error)
+}
+
+// MarshallerContextReader is implemented by types that can deserialize themselves from a stream using a Marshaller context.
+type MarshallerContextReader interface {
+	ReadBinaryWithMarshaller(ms *Marshaller, r io.Reader, order ByteOrder) (int, error)
 }

@@ -4,6 +4,7 @@ package binarystruct
 
 import (
 	"bytes"
+	stdencoding "encoding"
 	"fmt"
 	"io"
 	"math"
@@ -315,6 +316,44 @@ func (ms *Marshaller) writeArray(w io.Writer, order ByteOrder, array reflect.Val
 
 // write a struct
 func (ms *Marshaller) writeStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err error) {
+	if strc.CanInterface() {
+		val := strc.Interface()
+		if mw, ok := val.(MarshallerContextWriter); ok {
+			return mw.WriteBinaryWithMarshaller(ms, w, order)
+		}
+		if bw, ok := val.(BinaryWriter); ok {
+			return bw.WriteBinary(w, order)
+		}
+		if bm, ok := val.(stdencoding.BinaryMarshaler); ok {
+			var blob []byte
+			blob, err = bm.MarshalBinary()
+			if err != nil {
+				return 0, err
+			}
+			return w.Write(blob)
+		}
+	}
+	if strc.CanAddr() {
+		addr := strc.Addr()
+		if addr.CanInterface() {
+			val := addr.Interface()
+			if mw, ok := val.(MarshallerContextWriter); ok {
+				return mw.WriteBinaryWithMarshaller(ms, w, order)
+			}
+			if bw, ok := val.(BinaryWriter); ok {
+				return bw.WriteBinary(w, order)
+			}
+			if bm, ok := val.(stdencoding.BinaryMarshaler); ok {
+				var blob []byte
+				blob, err = bm.MarshalBinary()
+				if err != nil {
+					return 0, err
+				}
+				return w.Write(blob)
+			}
+		}
+	}
+
 	if !safeMode {
 		return ms.unsafeWriteStruct(w, order, strc)
 	}
@@ -419,8 +458,8 @@ func (ms *Marshaller) writeStruct(w io.Writer, order ByteOrder, strc reflect.Val
 	return
 }
 
-// encode string with installed encoding
-func (ms *Marshaller) encodeText(utf8 []byte, textEncoding string) (encoded []byte, err error) {
+// EncodeText encodes a string with installed encoding.
+func (ms *Marshaller) EncodeText(utf8 []byte, textEncoding string) (encoded []byte, err error) {
 	if textEncoding == "" {
 		encoded = utf8
 		return
@@ -445,8 +484,8 @@ func (ms *Marshaller) encodeText(utf8 []byte, textEncoding string) (encoded []by
 	return ec.Bytes(utf8)
 }
 
-// decode string with instlled encoding
-func (ms *Marshaller) decodeText(encoded []byte, textEncoding string) (utf8 []byte, err error) {
+// DecodeText decodes a string with installed encoding.
+func (ms *Marshaller) DecodeText(encoded []byte, textEncoding string) (utf8 []byte, err error) {
 	if textEncoding == "" {
 		utf8 = encoded
 		return
@@ -483,7 +522,7 @@ func (ms *Marshaller) writeString(w io.Writer, order ByteOrder, v reflect.Value,
 		textEncoding = ms.DefaultTextEncoding
 	}
 	if textEncoding != "" {
-		stringBytes, err = ms.encodeText(stringBytes, textEncoding)
+		stringBytes, err = ms.EncodeText(stringBytes, textEncoding)
 		if err != nil {
 			return
 		}
@@ -616,3 +655,13 @@ func zeroFill(w io.Writer, sz int) (n int, err error) {
 var (
 	terminatingZeros = []byte{0, 0, 0, 0}
 )
+
+// BinaryWriter is implemented by types that can serialize themselves to a stream.
+type BinaryWriter interface {
+	WriteBinary(w io.Writer, order ByteOrder) (int, error)
+}
+
+// MarshallerContextWriter is implemented by types that can serialize themselves to a stream using a Marshaller context.
+type MarshallerContextWriter interface {
+	WriteBinaryWithMarshaller(ms *Marshaller, w io.Writer, order ByteOrder) (int, error)
+}

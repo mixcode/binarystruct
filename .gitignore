@@ -17,3 +17,12 @@
 .*
 _*
 *.swp
+
+# Workspace files
+go.work
+go.work.sum
+
+# Codegen binary
+codegen/codegen
+
+

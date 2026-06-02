@@ -80,6 +80,12 @@ The binarystruct-codegen tool supports the full `binary:"..."` tag syntax includ
 
 For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the parent project.
 
+## Runnable Example
+
+A fully self-contained runnable example is provided in the [example](example) directory:
+- [types.go](example/types.go) — Defines a `Packet` struct with tag declarations and a `go:generate` directive.
+- [example_test.go](example/example_test.go) — Demonstrates marshaling and unmarshaling using the generated methods.
+
 ## Documentation
 
 For full library documentation, tag syntax details, and benchmarks, see the [binarystruct README](https://github.com/mixcode/binarystruct).

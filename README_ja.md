@@ -56,7 +56,7 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 * **単一値のシリアライズ**: 構造体でない変数単体に対しても、カスタムタグを指定して `MarshalAs` / `UnmarshalAs` で直接エンコード/デコードできます。
 * **カスタムシリアライザ**: `Serializer` インターフェースを実装して Marshaller に登録することで、複雑なデータ検証や動的マッピングを処理できます。
 * **構造体レイアウト検証ヘルパー**: 構造体のメモリ上のオフセット、サイズ、型、値を10進数/16進数/2進数でカスタマイズして可視化できる `Inspect` API を提供します。
-* **Safeモードへのフォールバック**: Google App Engineなどでの実行環境制限がある場合、`-tags safe` ビルドフラグで純粋なリフレクションによる標準Go実装に切り替え可能です。
+* **Safeモードへのフォールバック**: Google App Engineなどでの実行環境制限がある場合、`-tags safe_binarystruct` ビルドフラグで純粋なリフレクションによる標準Go実装に切り替え可能です。
 
 ## 動作モード（Safe vs. Unsafe / SIMD）
 
@@ -65,16 +65,16 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 | モード / ビルドタグ | 概要 | パフォーマンス・特徴 |
 | :--- | :--- | :--- |
 | **デフォルト（Unsafe）** | `unsafe.Pointer` インタプリタとレイアウト適合スライスの高速処理パスを用いて、リフレクションなしで直接メモリアドレスにアクセスします。 | **最高速度**（最大214倍高速、メモリ割り当てを99.9%削減）。 |
-| **Safeモード** (`-tags safe`) | 純粋なリフレクションのみを用いる標準Go実装にフォールバックします。Google App Engineなどのセキュリティ上の制限がある環境で必須。 | リフレクションによる標準的なオーバーヘッド。 |
+| **Safeモード** (`-tags safe_binarystruct`) | 純粋なリフレクションのみを用いる標準Go実装にフォールバックします。Google App Engineなどのセキュリティ上の制限がある環境で必須。 | リフレクションによる標準的なオーバーヘッド。 |
 | **SIMDモード** (`GOEXPERIMENT=simd -tags experiment_simd`) | Go 1.26 の実験的パッケージ `simd/archsimd` を用いて、AMD64上でのエンディアン変換（バイトスワップ）をベクター命令で処理します（CPU機能検知付き）。 | 大きな数値配列やスライスのベクター化によるスループット最大化。 |
 
 ### 制限されたプラットフォーム向けのビルド
 
-メモリアドレスへのアクセス制限や、Goの `unsafe` パッケージの使用が禁止されているサンドボックス環境（例：Google App Engine 標準環境）へデプロイする場合は、`safe` ビルドタグを有効にしてプロジェクトをコンパイルする必要があります：
+メモリアドレスへのアクセス制限や、Goの `unsafe` パッケージの使用が禁止されているサンドボックス環境（例：Google App Engine 標準環境）へデプロイする場合は、`safe_binarystruct` ビルドタグを有効にしてプロジェクトをコンパイルする必要があります：
 
 ```bash
-go build -tags safe ./...
-go test -tags safe ./...
+go build -tags safe_binarystruct ./...
+go test -tags safe_binarystruct ./...
 ```
 
 ---

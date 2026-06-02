@@ -1,6 +1,6 @@
 // Copyright 2026 github.com/mixcode
 
-//go:build !safe && amd64 && go1.26 && experiment_simd
+//go:build !safe_binarystruct && amd64 && go1.26 && experiment_simd
 
 package binarystruct
 

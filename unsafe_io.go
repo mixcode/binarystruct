@@ -1,6 +1,6 @@
 // Copyright 2026 github.com/mixcode
 
-//go:build !safe
+//go:build !safe_binarystruct
 
 package binarystruct
 

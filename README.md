@@ -56,7 +56,7 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 * **Single-Value Marshalling**: Serialize/deserialize standalone non-struct variables directly using `MarshalAs` / `UnmarshalAs` with custom tags.
 * **Custom Serializers**: Register custom encoders/decoders via the `Serializer` interface to handle complex validation or dynamic type mappings.
 * **Struct Inspection Helper**: Includes an `Inspect` API that formats struct layouts, displaying field offsets, sizes, types, and values in customizable bases (decimal, hex, binary).
-* **Safe Mode Fallback**: Pure reflection-based Go fallback activated via `-tags safe` build flag for restricted platforms like Google App Engine.
+* **Safe Mode Fallback**: Pure reflection-based Go fallback activated via `-tags safe_binarystruct` build flag for restricted platforms like Google App Engine.
 
 ## Performance Modes (Safe vs. Unsafe / SIMD)
 
@@ -65,16 +65,16 @@ This package supports multiple build modes to balance performance, platform safe
 | Mode / Build Tags | Description | Performance Profile |
 | :--- | :--- | :--- |
 | **Default Mode** (Unsafe) | Bypasses reflection using direct memory operations with `unsafe.Pointer` interpreter and layout-compatible fast-paths. | **Maximum Speed** (up to 214x faster, 99.9% fewer allocations). |
-| **Safe Mode** (`-tags safe`) | Falls back to pure reflection-based Go. Required on restricted platforms. | Standard Go reflection overhead. |
+| **Safe Mode** (`-tags safe_binarystruct`) | Falls back to pure reflection-based Go. Required on restricted platforms. | Standard Go reflection overhead. |
 | **SIMD Mode** (`GOEXPERIMENT=simd -tags experiment_simd`) | Uses experimental Go 1.26 `simd/archsimd` to vectorize endian byte-swapping on AMD64 with CPU feature checks. | Maximum vectorized throughput for large arrays/slices. |
 
 ### Building for Restricted Platforms
 
-If you deploy to sandboxed environments that restrict memory address access or block Go's `unsafe` package (e.g. Google App Engine standard environment), you must compile your project with the `safe` build tag:
+If you deploy to sandboxed environments that restrict memory address access or block Go's `unsafe` package (e.g. Google App Engine standard environment), you must compile your project with the `safe_binarystruct` build tag:
 
 ```bash
-go build -tags safe ./...
-go test -tags safe ./...
+go build -tags safe_binarystruct ./...
+go test -tags safe_binarystruct ./...
 ```
 
 ---

@@ -1,5 +1,8 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/mixcode/binarystruct.svg)](https://pkg.go.dev/github.com/mixcode/binarystruct)
 
+> [!NOTE]
+> **AI Agents**: AIエージェント開発用のリファレンスおよび実装ルールは [llms-full.txt](llms-full.txt) を参照してください。
+
 # binarystruct: GO構造体のバイナリ変換
 
 「binarystruct」は生のバイナリデータとGo構造体の間の変換を半自動かするためのパッケージです。

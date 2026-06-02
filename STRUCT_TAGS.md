@@ -77,6 +77,20 @@ Marks a trailing field as optional.
 * If an expression is given (e.g. `omittable=LimitExpr`), serialization and deserialization will skip this field if the current byte index `n` is greater than or equal to the evaluated value.
 * **Usage**: `Extra uint32 `binary:"uint32,omittable"``
 
+### `range=min..max`
+Enforces range constraints on integer, unsigned integer, and float fields during deserialization.
+* **Usage**: `Value uint16 `binary:"uint16,range=1..100"``
+* Boundaries can be left open:
+  * `range=0..` (values $\ge$ 0).
+  * `range=..100` (values $\le$ 100).
+* If a value is out of range, the decoding fails with `ErrValidationError` wrapped inside a `DecodeError`.
+
+### `match=pattern`
+Enforces regular expression matching on string fields during deserialization.
+* **Usage**: `Code string `binary:"string(4),match=^[A-Z]+$"``
+* The regex pattern is precompiled once during struct analysis for optimal performance.
+* If a string does not match the pattern, the decoding fails with `ErrValidationError` wrapped inside a `DecodeError`.
+
 ---
 
 ## 4. Array and Buffer Size Notation

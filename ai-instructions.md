@@ -28,6 +28,8 @@ This document contains rules, syntax constraints, and patterns to help LLM agent
 * `endian=big|little|inverse`: Byte order override. `inverse` flips the parent's byte order recursively.
 * `serializer=NAME`: Reference to a custom registered serializer.
 * `omittable[=Expression]`: Marks a trailing field as optional (suppresses `io.EOF` errors at start of field or skips based on struct byte-offset check).
+* `range=min..max`: Enforces range check validation on integers and float values (e.g. `range=1..100`, open ranges `range=0..` or `range=..100`).
+* `match=pattern`: Enforces regex match validation on string values (e.g. `match=^[A-Z0-9]+$`).
 
 ---
 
@@ -113,3 +115,21 @@ if err != nil {
 	}
 }
 ```
+
+---
+
+## 5. Declarative Validation
+`binarystruct` performs runtime validation checks during deserialization (Unmarshalling) when `range` or `match` options are present in the struct tags.
+
+* **Error Types**: If a validation constraint is violated, the unmarshalling function returns a `DecodeError` wrapping `binarystruct.ErrValidationError`.
+* **Zero Overhead for Unused Fields**: Fields without validation options incur no runtime validation overhead.
+* **Precompiled Regex**: Regex patterns (`match=pattern`) are compiled once when the struct metadata is cached, avoiding expensive recompilation in the hot loop.
+
+### Example struct with validation:
+```go
+type UserRegistration struct {
+	Age uint8  `binary:"uint8,range=18..120"`
+	Code string `binary:"string(6),match=^[A-Z]{2}\\d{4}$"` // e.g., US1234
+}
+```
+

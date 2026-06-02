@@ -77,6 +77,20 @@ MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
 * 式付きで指定した場合（例: `omittable=LimitExpr`）、現在のバイト処理位置 `n` が評価値以上の場合に処理をスキップします。
 * **使用例**: `Extra uint32 `binary:"uint32,omittable"``
 
+### `range=min..max`
+デシリアライズ時に、整数、符号なし整数、浮動小数点フィールドの範囲バリデーションを行います。
+* **使用例**: `Value uint16 `binary:"uint16,range=1..100"``
+* 境界値は省略（オープン）可能です：
+  * `range=0..` (0以上の値).
+  * `range=..100` (100以下の値).
+* 値が範囲外の場合、デコード処理は `ErrValidationError` をラップした `DecodeError` を返して失敗します。
+
+### `match=pattern`
+デシリアライズ時に、文字列フィールドが正規表現パターンにマッチするかどうかバリデーションを行います。
+* **使用例**: `Code string `binary:"string(4),match=^[A-Z]+$"``
+* パフォーマンス向上のため、正規表現は構造体のメタデータ解析時に一度だけ事前コンパイルされます。
+* 文字列がパターンにマッチしない場合、デコード処理は `ErrValidationError` をラップした `DecodeError` を返して失敗します。
+
 ---
 
 ## 4. 配列およびバッファサイズ表記

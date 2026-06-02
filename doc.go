@@ -57,6 +57,8 @@ Example:
   - serializer=NAME: Applies a registered Serializer for custom encoding.
   - omittable: Suppresses EOF errors at this field's start.
   - omittable=Expr: Skips the field if byte size limits are reached.
+  - range=min..max: Performs range validation check on integers and floats.
+  - match=pattern: Performs regex match validation check on string fields.
 
 ## Array and Size Expressions
 

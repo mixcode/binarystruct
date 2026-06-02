@@ -140,5 +140,23 @@ If "omittable=Expression" is specified, the field is omitted if the current byte
 		Extra1    uint32  `binary:"uint32,omittable=TotalSize"`
 		Extra2    *uint32 `binary:"uint32,omittable=TotalSize"`
 	}
+
+# JSON Layout Export
+
+The compiled struct layout metadata can be exported as a formatted JSON document by calling ToJSON on the StructLayout:
+
+	js, err := layout.ToJSON()
+
+# Detailed Error Reporting with Byte Offset
+
+When unmarshalling fails, errors are returned as a DecodeError pointer which contains the byte Offset and Field path of the failure:
+
+	_, err := binarystruct.Unmarshal(corrupted, order, &pkt)
+	if err != nil {
+		var decodeErr *binarystruct.DecodeError
+		if errors.As(err, &decodeErr) {
+			// inspect decodeErr.Offset and decodeErr.Field
+		}
+	}
 */
 package binarystruct

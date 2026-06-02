@@ -82,3 +82,34 @@ layout, _ := marshaller.Inspect(&myStruct, binarystruct.BigEndian)
 
 fmt.Println(layout.Format(binarystruct.DefaultLayoutFormat))
 ```
+
+### JSON Layout Export
+To export structural schema metadata to other languages (for codegen or external clients), export the layout to JSON:
+
+```go
+js, _ := layout.ToJSON()
+// js contains JSON string with "type_name", "total_size", and "fields"
+```
+
+---
+
+## 4. Accurate Error Diagnosis (Failure Byte-Offset)
+
+When debugging failures (premature EOFs, array sizing mismatches, etc.), inspect the returned error's properties. All unmarshal/read failures are wrapped in a custom `DecodeError` that exposes:
+* `Offset`: The exact byte offset where decoding failed.
+* `Field`: The struct field name that was being decoded when the failure occurred.
+* `Err`: The underlying error.
+
+Always check for `DecodeError` to diagnose data stream mismatches:
+
+```go
+_, err := marshaller.Unmarshal(data, binarystruct.BigEndian, &pkt)
+if err != nil {
+	var decodeErr *binarystruct.DecodeError
+	if errors.As(err, &decodeErr) {
+		// Log the precise byte offset and corrupt field path
+		log.Printf("corrupted packet at offset %d, field %s: %v", 
+			decodeErr.Offset, decodeErr.Field, decodeErr.Err)
+	}
+}
+```

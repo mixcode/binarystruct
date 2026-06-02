@@ -112,6 +112,32 @@ fmt.Println(layout.Format(format))
 
 > **注意**: 構造体にカスタムシリアライザやエンコーディングを使用している場合は、パッケージレベルの `binarystruct.Inspect(&pkt, ...)` ではなく、設定済みの Marshaller インスタンスの `marshaller.Inspect(&pkt, ...)` を使用してください。これにより、検証時にカスタム設定が正しく認識されます。
 
+### レイアウトのJSON出力
+
+解析されたレイアウトのメタデータをJSONスキーマとして出力することができます。これは、外部システムとの統合や他言語でのスキーマ構造の自動生成に便利です：
+
+```go
+js, _ := layout.ToJSON()
+fmt.Println(string(js))
+```
+
+---
+
+## バイトオフセット付きの詳細なエラーレポート
+
+バイナリデータのデシリアライズ（Unmarshal）中にエラー（予期しないEOFなど）が発生した場合、エラーはカスタム構造体 `DecodeError` にラップされて返されます。これにより、失敗が発生した正確なバイトオフセットとフィールド名を特定できます：
+
+```go
+_, err := binarystruct.Unmarshal(corruptedData, binarystruct.BigEndian, &pkt)
+if err != nil {
+	var decodeErr *binarystruct.DecodeError
+	if errors.As(err, &decodeErr) {
+		fmt.Printf("エラー発生位置 (バイトオフセット): %d, フィールド: %q, 詳細: %v\n", 
+			decodeErr.Offset, decodeErr.Field, decodeErr.Err)
+	}
+}
+```
+
 ---
 
 ## 関連情報・ドキュメント

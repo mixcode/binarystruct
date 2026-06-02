@@ -112,6 +112,32 @@ Output:
 
 > **Note**: If your structure contains custom serializers or encodings, use `marshaller.Inspect(&pkt, ...)` on your custom-configured `Marshaller` instance instead of the package-level `binarystruct.Inspect(&pkt, ...)` to ensure custom options are correctly recognized during inspection.
 
+### Exporting Layout to JSON
+
+You can export the analyzed layout metadata as a JSON schema. This is highly useful for integrating with external systems or generating schema structures in other languages:
+
+```go
+js, _ := layout.ToJSON()
+fmt.Println(string(js))
+```
+
+---
+
+## Detailed Error Reporting with Byte Offset
+
+When unmarshalling binary payloads, failures (such as premature EOF) return errors wrapped in a custom `DecodeError` struct. This allows you to inspect the exact byte offset and field name where the failure occurred:
+
+```go
+_, err := binarystruct.Unmarshal(corruptedData, binarystruct.BigEndian, &pkt)
+if err != nil {
+	var decodeErr *binarystruct.DecodeError
+	if errors.As(err, &decodeErr) {
+		fmt.Printf("Error at byte offset %d, field %q: %v\n", 
+			decodeErr.Offset, decodeErr.Field, decodeErr.Err)
+	}
+}
+```
+
 ---
 
 ## See also

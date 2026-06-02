@@ -1,4 +1,4 @@
-[![Go Reference](https://pkg.go.dev/badge/github.com/mixcode/binarystruct.svg)](https://pkg.go.dev/github.com/mixcode/binarystruct)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mixcode/binarystruct.svg)](https://pkg.go.dev/github.com/mixcode/binarystruct) [![LLM Friendly](https://img.shields.io/badge/LLM-Friendly-blue)](llms.txt)
 
 > [!NOTE]
 > **AI Agents**: AIエージェント開発用のリファレンスおよび実装ルールは [llms-full.txt](llms-full.txt) を参照してください。

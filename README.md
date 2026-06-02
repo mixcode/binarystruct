@@ -156,6 +156,16 @@ Run `go generate ./...` to compile your serialization methods.
 * If custom serializers or text encodings are present, context-aware interfaces (`MarshallerContextReader` / `MarshallerContextWriter`) are generated to automatically retrieve custom handlers from the `Marshaller` context at runtime.
 * The main `binarystruct.Marshal` and `binarystruct.Unmarshal` library calls automatically detect these generated methods and fast-path to executing them directly.
 
+### Performance Comparison
+
+A deserialization benchmark decoding a realistic 280-byte packet containing range validations, a nested struct with 8 fields, and a dynamic slice of bytes yielded the following results (on a 13th Gen Intel Core i5-13600K):
+
+| Mode / Strategy | Execution Time | Heap Allocations | Performance Boost |
+| :--- | :--- | :--- | :--- |
+| **Safe Mode** (`-tags safe_binarystruct`) | `4,260 ns/op` | `47 allocs/op` | Baseline |
+| **Unsafe Mode** (Default Interpreter) | `3,670 ns/op` | `22 allocs/op` | +16% Speed, -53% Allocations |
+| **Static Codegen** (Compiled) | `634 ns/op` | `8 allocs/op` | **+570% Speed (6.7x faster)**, **-83% Allocations** |
+
 ---
 
 ## Detailed Error Reporting with Byte Offset

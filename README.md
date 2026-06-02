@@ -46,14 +46,17 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 
 ## Features
 
-* **Automatic type conversion and range check** based on field tag descriptions.
-* **Single-Value Marshalling**: Encode/decode individual non-struct variables using [MarshalAs](https://pkg.go.dev/github.com/mixcode/binarystruct#MarshalAs) / [UnmarshalAs](https://pkg.go.dev/github.com/mixcode/binarystruct#UnmarshalAs).
-* **Explicit Endian marking**: Override default byte order per field (e.g. `binary:"uint16,endian=inverse"` or `endian=big|little`).
-* **Default text encoding fallback**: Configure default text encoding on [Marshaller](https://pkg.go.dev/github.com/mixcode/binarystruct#Marshaller).
-* **Extended Tag Math**: Evaluate size expressions supporting operations `+`, `-`, `*`, `/`, and parentheses `()`.
-* **Custom Serializers**: Register custom encoders/decoders via `Serializer` interface and apply them using `serializer=Name` option.
-* **Optimized Struct Metadata Caching**: High-performance execution using parsed metadata caching, avoiding regex overhead at runtime.
-* **Unsafe Bytecode Interpreter & Slice Fast Paths**: High-performance interpreter using `unsafe.Pointer` and zero-allocation slice streaming (up to 214x speedup).
+* **Automatic & Safe Type Conversions**: Effortlessly maps packed binary layouts into Go native types (e.g. converting `uint16` or `int8` streams directly into Go `int` fields) with range and bounds checks.
+* **Fine-Grained Layout Controls**: Control data alignment using explicit types like `byte`, `word`, `dword`, `qword`, and zero-filled padding bytes via the `pad(size)` tag.
+* **Dynamic Size Expressions**: Calculate array lengths and string buffer sizes dynamically based on other struct fields, supporting arithmetic operations (`+`, `-`, `*`, `/`) and parentheses (e.g., `[PayloadSize - (HeaderLength * 2)]byte`).
+* **High-Performance Unsafe Interpreter**: Uses dynamic layout compilation and a cached metadata interpreter. Unsafe Mode (default) bypasses reflection using `unsafe.Pointer` and zero-allocation slice streaming, yielding up to **214x speedups** and **99.9% fewer allocations**.
+* **Interface & Polymorphic Handling**: Automatically deserializes into pre-assigned interface fields, or uses custom serializers to dynamically allocate types based on previously decoded header values.
+* **Multi-Language String Encoding**: Converts character encodings (e.g., `Shift-JIS`, `EUC-JP`, `UTF-16`) on string fields, with customizable default fallback encodings.
+* **Field-Level Endian Markings**: Override default byte orders per field (e.g., `endian=big`, `little`, or `inverse`), with recursive propagation down into nested structs.
+* **Single-Value Marshalling**: Serialize/deserialize standalone non-struct variables directly using `MarshalAs` / `UnmarshalAs` with custom tags.
+* **Custom Serializers**: Register custom encoders/decoders via the `Serializer` interface to handle complex validation or dynamic type mappings.
+* **Struct Inspection Helper**: Includes an `Inspect` API that formats struct layouts, displaying field offsets, sizes, types, and values in customizable bases (decimal, hex, binary).
+* **Safe Mode Fallback**: Pure reflection-based Go fallback activated via `-tags safe` build flag for restricted platforms like Google App Engine.
 
 ## Performance Modes (Safe vs. Unsafe / SIMD)
 

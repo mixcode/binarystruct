@@ -123,6 +123,41 @@ fmt.Println(string(js))
 
 ---
 
+## プロダクション向けの静的コード生成（Codegen）
+
+`binarystruct` は、構造体のレイアウト定義から静的なGoメソッドを自動生成するスタンドアロンのコードジェネレータツールを提供しています。プロダクション環境で使用することで、実行時のレイアウト解析やリフレクションのオーバーヘッドを完全に排除し、最大のパフォーマンスを得ることができます。
+
+### インストール
+コードジェネレータのCLIツールをインストールします：
+```bash
+go install github.com/mixcode/binarystruct/codegen@latest
+```
+
+### 使用方法
+対象となる構造体の静的な `MarshalBinary` および `UnmarshalBinary` メソッドを生成します：
+```bash
+codegen -type MyStruct,MyNestedStruct [対象のパッケージディレクトリ]
+```
+デフォルトでは、指定した最初の型名を元にした `<型名>_binary.go` が同ディレクトリに出力されます。
+
+### go generate との連携
+通常、Goソースファイル内に `go generate` コメントを追加して連携することをお勧めします：
+```go
+//go:generate codegen -type Packet,Header
+type Packet struct {
+	Magic uint32 `binary:"uint32"`
+	Data  []byte `binary:"[10]byte"`
+}
+```
+`go generate ./...` を実行することで、シリアライズメソッドが自動生成・コンパイルされます。
+
+### 仕組みと特徴
+* 生成されたコードは、Go標準の `encoding.BinaryMarshaler` および `encoding.BinaryUnmarshaler` インタフェースの他、高パフォーマンスなストリーミングインタフェース（`BinaryReader` / `BinaryWriter`）を実装します。
+* カスタムシリアライザやテキストエンコーディングが指定されている場合、コンテキスト対応インタフェース（`MarshallerContextReader` / `MarshallerContextWriter`）が生成され、実行時に自動的に [Marshaller] コンテキストから適切なハンドラを取得します。
+* パッケージレベルの `binarystruct.Marshal` / `binarystruct.Unmarshal` を使用している場合でも、対象オブジェクトが生成されたメソッドを実装している場合は、自動的にリフレクションをバイパスして生成されたメソッドを高速実行（ファストパス）します。
+
+---
+
 ## バイトオフセット付きの詳細なエラーレポート
 
 バイナリデータのデシリアライズ（Unmarshal）中にエラー（予期しないEOFなど）が発生した場合、エラーはカスタム構造体 `DecodeError` にラップされて返されます。これにより、失敗が発生した正確なバイトオフセットとフィールド名を特定できます：

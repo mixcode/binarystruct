@@ -12,6 +12,8 @@
 - [x] **Advanced Optimizers**: Implemented P-code cached static metadata, unsafe pointer interpreter engine, and layout-compatible fast-paths with vectorized endian byte-swapping supporting SIMD `simd/archsimd` fallbacks (yielding up to 214x speedups and 99.9% allocation reductions).
 - [x] **JSON Layout Export & Failure Offset**: Added JSON layout serialization format for layout metadata and enhanced `DecodeError` to report the exact failure byte-offset and field name.
 - [x] **Declarative Validation**: Implemented `range=min..max` and `match=pattern` validation constraints within `binary` tags, performing safe & unsafe checks during unmarshal.
+- [x] **Static Code Generation (Codegen)**: Added a standalone nested module compiler CLI tool (`codegen`) that generates optimized static Go serialization and deserialization code, fully eliminating runtime reflection and layout interpretation.
+
 
 ## Pending / Future Ideas
 - [ ] **Multidimensional arrays (Low priority)**: Support tags like `[4][2][2]int8` for nested Go slices/arrays.

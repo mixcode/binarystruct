@@ -123,6 +123,41 @@ fmt.Println(string(js))
 
 ---
 
+## Static Code Generation for Production
+
+`binarystruct` includes a standalone code generation tool that compiles struct layouts into static Go methods. In production, this completely eliminates runtime layout interpretation and reflection overhead, yielding maximum performance.
+
+### Installation
+Install the code generator CLI:
+```bash
+go install github.com/mixcode/binarystruct/codegen@latest
+```
+
+### Usage
+Generate static `MarshalBinary` and `UnmarshalBinary` methods for your structs:
+```bash
+codegen -type MyStruct,MyNestedStruct [path/to/package/directory]
+```
+By default, it writes the generated code to `<first_type>_binary.go` in the same directory.
+
+### Go Generate Integration
+We recommend integrating it into your Go source files using `go generate`:
+```go
+//go:generate codegen -type Packet,Header
+type Packet struct {
+	Magic uint32 `binary:"uint32"`
+	Data  []byte `binary:"[10]byte"`
+}
+```
+Run `go generate ./...` to compile your serialization methods.
+
+### How It Works
+* The generated code implements standard Go `encoding.BinaryMarshaler` and `encoding.BinaryUnmarshaler` interfaces, and high-performance streaming interfaces (`BinaryReader` / `BinaryWriter`).
+* If custom serializers or text encodings are present, context-aware interfaces (`MarshallerContextReader` / `MarshallerContextWriter`) are generated to automatically retrieve custom handlers from the `Marshaller` context at runtime.
+* The main `binarystruct.Marshal` and `binarystruct.Unmarshal` library calls automatically detect these generated methods and fast-path to executing them directly.
+
+---
+
 ## Detailed Error Reporting with Byte Offset
 
 When unmarshalling binary payloads, failures (such as premature EOF) return errors wrapped in a custom `DecodeError` struct. This allows you to inspect the exact byte offset and field name where the failure occurred:

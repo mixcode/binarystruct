@@ -35,6 +35,14 @@ type structFieldMetadata struct {
 	omittableExpr string
 	naturalType   eType
 	option        typeOption
+	hasRange      bool
+	rangeMin      float64
+	rangeMax      float64
+	hasRangeMin   bool
+	hasRangeMax   bool
+	hasMatch      bool
+	matchPattern  string
+	matchRegexp   *regexp.Regexp
 }
 
 type structMetadata struct {
@@ -501,6 +509,46 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 				meta.omittable = true
 				if len(t) > 1 {
 					meta.omittableExpr = t[1]
+				}
+			case "range":
+				if len(t) > 1 {
+					meta.hasRange = true
+					bounds := strings.Split(t[1], "..")
+					if len(bounds) != 2 {
+						return nil, fmt.Errorf("invalid range format on field %s; must be min..max", field.Name)
+					}
+					minStr := strings.TrimSpace(bounds[0])
+					maxStr := strings.TrimSpace(bounds[1])
+					if minStr != "" {
+						minVal, errParse := strconv.ParseFloat(minStr, 64)
+						if errParse != nil {
+							return nil, fmt.Errorf("invalid range min value on field %s: %w", field.Name, errParse)
+						}
+						meta.rangeMin = minVal
+						meta.hasRangeMin = true
+					}
+					if maxStr != "" {
+						maxVal, errParse := strconv.ParseFloat(maxStr, 64)
+						if errParse != nil {
+							return nil, fmt.Errorf("invalid range max value on field %s: %w", field.Name, errParse)
+						}
+						meta.rangeMax = maxVal
+						meta.hasRangeMax = true
+					}
+				} else {
+					return nil, fmt.Errorf("missing value for range tag on field %s", field.Name)
+				}
+			case "match":
+				if len(t) > 1 {
+					meta.hasMatch = true
+					meta.matchPattern = t[1]
+					re, errCompile := regexp.Compile(meta.matchPattern)
+					if errCompile != nil {
+						return nil, fmt.Errorf("invalid regex pattern %q on field %s: %w", meta.matchPattern, field.Name, errCompile)
+					}
+					meta.matchRegexp = re
+				} else {
+					return nil, fmt.Errorf("missing value for match tag on field %s", field.Name)
 				}
 			default:
 				return nil, fmt.Errorf("unknown tag %s on field %s", t[0], field.Name)

@@ -21,6 +21,9 @@ var (
 
 	// cannot determine the length of an array or slice
 	ErrUnknownLength = errors.New("unknown array, slice or string size")
+
+	// validation constraint failed
+	ErrValidationError = errors.New("validation failed")
 )
 
 // DecodeError is returned when unmarshalling fails, describing the field name and byte offset of the failure.
@@ -548,6 +551,10 @@ func (ms *Marshaller) readStruct(r io.Reader, order ByteOrder, strc reflect.Valu
 			err = wErr(fMeta.index, err)
 			return
 		}
+		if err = validateField(v, &fMeta); err != nil {
+			err = wErr(fMeta.index, err)
+			return
+		}
 		n += m
 		firstElem = false
 	}
@@ -777,6 +784,51 @@ func (ms *Marshaller) readScalar(r io.Reader, order ByteOrder, v reflect.Value, 
 	}
 	err = dec(v, u64)
 	return
+}
+
+func validateField(v reflect.Value, fMeta *structFieldMetadata) error {
+	if !fMeta.hasRange && !fMeta.hasMatch {
+		return nil
+	}
+	k := v.Kind()
+	if k == reflect.Slice || k == reflect.Array {
+		l := v.Len()
+		for i := 0; i < l; i++ {
+			if err := validateValue(v.Index(i), fMeta); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return validateValue(v, fMeta)
+}
+
+func validateValue(v reflect.Value, fMeta *structFieldMetadata) error {
+	if fMeta.hasRange {
+		var val float64
+		switch v.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			val = float64(v.Int())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			val = float64(v.Uint())
+		case reflect.Float32, reflect.Float64:
+			val = v.Float()
+		default:
+			return fmt.Errorf("range validation not supported on type %s", v.Type().String())
+		}
+		if (fMeta.hasRangeMin && val < fMeta.rangeMin) || (fMeta.hasRangeMax && val > fMeta.rangeMax) {
+			return fmt.Errorf("value %v is out of range [%g, %g]: %w", val, fMeta.rangeMin, fMeta.rangeMax, ErrValidationError)
+		}
+	}
+	if fMeta.hasMatch {
+		if v.Kind() != reflect.String {
+			return fmt.Errorf("match validation not supported on type %s", v.Type().String())
+		}
+		if !fMeta.matchRegexp.MatchString(v.String()) {
+			return fmt.Errorf("value %q does not match pattern %s: %w", v.String(), fMeta.matchPattern, ErrValidationError)
+		}
+	}
+	return nil
 }
 
 // follow pointers to the end

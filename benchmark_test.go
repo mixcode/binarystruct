@@ -122,3 +122,63 @@ func BenchmarkUnmarshalSliceSwap(b *testing.B) {
 		}
 	}
 }
+
+type benchValidationRangeStruct struct {
+	U8  uint8   `binary:"uint8,range=0..10"`
+	U16 uint16  `binary:"uint16,range=0..10"`
+	U32 uint32  `binary:"uint32,range=0..10"`
+	U64 uint64  `binary:"uint64,range=0..10"`
+	I8  int8    `binary:"int8,range=-10..10"`
+	I16 int16   `binary:"int16,range=-10..10"`
+	I32 int32   `binary:"int32,range=-10..10"`
+	I64 int64   `binary:"int64,range=-10..10"`
+	F32 float32 `binary:"float32,range=0..10"`
+	F64 float64 `binary:"float64,range=0..10"`
+	S   string  `binary:"string(10)"`
+}
+
+type benchValidationRegexStruct struct {
+	U8  uint8
+	U16 uint16
+	U32 uint32
+	U64 uint64
+	I8  int8
+	I16 int16
+	I32 int32
+	I64 int64
+	F32 float32
+	F64 float64
+	S   string `binary:"string(10),match=^[a-z]+$"`
+}
+
+func BenchmarkUnmarshal_RangeValidation(b *testing.B) {
+	in := benchValidationRangeStruct{1, 2, 3, 4, -1, -2, -3, -4, 0.9, 1.1, "hello"}
+	blob, err := bst.Marshal(in, bst.LittleEndian)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var out benchValidationRangeStruct
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := bst.Unmarshal(blob, bst.LittleEndian, &out)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkUnmarshal_RegexValidation(b *testing.B) {
+	in := benchValidationRegexStruct{1, 2, 3, 4, -1, -2, -3, -4, 0.9, 1.1, "hello"}
+	blob, err := bst.Marshal(in, bst.LittleEndian)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var out benchValidationRegexStruct
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := bst.Unmarshal(blob, bst.LittleEndian, &out)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}

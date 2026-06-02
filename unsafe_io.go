@@ -434,6 +434,9 @@ func (ms *Marshaller) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflec
 				}
 				return n, wErr(fMeta.index, err)
 			}
+			if err = validateField(fieldVal, &fMeta); err != nil {
+				return n, wErr(fMeta.index, err)
+			}
 			n += m
 			firstElem = false
 			continue
@@ -459,6 +462,9 @@ func (ms *Marshaller) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflec
 					err = nil
 					break
 				}
+				return n, wErr(fMeta.index, err)
+			}
+			if err = validateField(structVal, &fMeta); err != nil {
 				return n, wErr(fMeta.index, err)
 			}
 			n += m
@@ -503,6 +509,9 @@ func (ms *Marshaller) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflec
 				}
 			}
 			if ok {
+				if err = validateField(fieldVal, &fMeta); err != nil {
+					return n, wErr(fMeta.index, err)
+				}
 				n += m
 				firstElem = false
 				continue
@@ -516,6 +525,9 @@ func (ms *Marshaller) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflec
 					err = nil
 					break
 				}
+				return n, wErr(fMeta.index, err)
+			}
+			if err = validateField(fieldVal, &fMeta); err != nil {
 				return n, wErr(fMeta.index, err)
 			}
 			n += m
@@ -544,6 +556,9 @@ func (ms *Marshaller) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflec
 					err = nil
 					break
 				}
+				return n, wErr(fMeta.index, err)
+			}
+			if err = validateField(fieldVal, &fMeta); err != nil {
 				return n, wErr(fMeta.index, err)
 			}
 			n += m
@@ -585,6 +600,9 @@ func (ms *Marshaller) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflec
 				err = nil
 				break
 			}
+			return n, wErr(fMeta.index, err)
+		}
+		if err = validateField(strc.Field(fMeta.index), &fMeta); err != nil {
 			return n, wErr(fMeta.index, err)
 		}
 		n += m

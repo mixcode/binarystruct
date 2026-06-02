@@ -5,6 +5,7 @@ package binarystruct_test
 import (
 	"bytes"
 	"io"
+	"reflect"
 	"testing"
 
 	bst "github.com/mixcode/binarystruct"
@@ -106,5 +107,41 @@ func TestCodegenContextInterface_FastPath(t *testing.T) {
 	}
 	if s2.Val != "hello" {
 		t.Errorf("expected hello, got %s", s2.Val)
+	}
+}
+
+// mockSerializer is a minimal Serializer for testing GetSerializer.
+type mockSerializer struct{}
+
+func (mockSerializer) Serialize(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (int, error) {
+	return 0, nil
+}
+func (mockSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (interface{}, int, error) {
+	return nil, 0, nil
+}
+
+func TestGetSerializer(t *testing.T) {
+	var ms bst.Marshaller
+
+	// GetSerializer on empty Marshaller should return nil
+	if s := ms.GetSerializer("foo"); s != nil {
+		t.Error("expected nil for unregistered serializer on empty Marshaller")
+	}
+
+	// Register and retrieve
+	ms.AddSerializer("myser", mockSerializer{})
+	if s := ms.GetSerializer("myser"); s == nil {
+		t.Error("expected non-nil for registered serializer")
+	}
+
+	// Not found after registration of a different name
+	if s := ms.GetSerializer("other"); s != nil {
+		t.Error("expected nil for unregistered name")
+	}
+
+	// Remove and verify gone
+	ms.RemoveSerializer("myser")
+	if s := ms.GetSerializer("myser"); s != nil {
+		t.Error("expected nil after removal")
 	}
 }

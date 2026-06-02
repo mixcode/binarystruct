@@ -121,7 +121,7 @@ For packets containing polymorphic payloads (e.g. TLV or packet headers followed
 
 # Optional & Omittable Fields
 
-binarystruct allows trailing fields of a struct to be optional via the "omittable" (or "optional") option.
+binarystruct allows trailing fields of a struct to be optional via the "omittable" option.
 
 ## EOF-based Omission
 

@@ -415,7 +415,6 @@ func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binTyp
 		// Write prefix for prefixed strings
 		switch binType {
 		case "bstring":
-			buf.WriteString("\t\torder.PutUint16(tmp[:2], uint16(len(strBytes)))\n") // wait, bstring length is 1 byte
 			buf.WriteString("\t\ttmp[0] = byte(len(strBytes))\n")
 			buf.WriteString("\t\tm, err = w.Write(tmp[:1])\n\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n")
 		case "wstring":

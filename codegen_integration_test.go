@@ -22,10 +22,8 @@ func TestCodegen_Integration(t *testing.T) {
 	// Build the codegen binary
 	codegenBin := filepath.Join(tmpDir, "codegen")
 	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./codegen")
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		t.Fatalf("failed to build codegen tool: %v", err)
+	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build codegen tool: %v\n%s", err, buildOut)
 	}
 
 	// 2. Write the test struct file
@@ -113,10 +111,19 @@ func TestGeneratedMethods(t *testing.T) {
 	}
 
 	// 5. Run the generated tests using go test
-	testCmd := exec.Command("go", "test", "-v", "./"+tmpDir)
-	testCmd.Stdout = os.Stdout
-	testCmd.Stderr = os.Stderr
-	if err := testCmd.Run(); err != nil {
+	testArgs := []string{"test", "./" + tmpDir}
+	if testing.Verbose() {
+		testArgs = append(testArgs, "-v")
+	}
+	testCmd := exec.Command("go", testArgs...)
+	testOutput, err := testCmd.CombinedOutput()
+	if testing.Verbose() {
+		t.Log(string(testOutput))
+	}
+	if err != nil {
+		if !testing.Verbose() {
+			t.Log(string(testOutput))
+		}
 		t.Errorf("generated tests failed: %v", err)
 	}
 }

@@ -182,7 +182,7 @@ For a complete, compile-checked demonstration, see [example_interface_test.go](e
 
 ## 7. Optional & Omittable Fields
 
-`binarystruct` allows fields at the end of a struct to be omitted during serialization and deserialization using the `omittable` (or `optional`) option. This is particularly useful for backward-compatible binary format versions or variable-length payloads.
+`binarystruct` allows fields at the end of a struct to be omitted during serialization and deserialization using the `omittable` option. This is particularly useful for backward-compatible binary format versions or variable-length payloads.
 
 ### EOF-based Omission
 By applying the `omittable` option without any expression, you designate the field as optional based on the end of the input stream.

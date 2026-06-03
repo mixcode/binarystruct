@@ -809,6 +809,11 @@ func (ms *Marshaller) readScalar(r io.Reader, order ByteOrder, v reflect.Value, 
 }
 
 func validateField(v reflect.Value, fMeta *structFieldMetadata) error {
+	if fMeta.hasConst {
+		if err := validateConst(v, fMeta); err != nil {
+			return err
+		}
+	}
 	if !fMeta.hasRange && !fMeta.hasMatch {
 		return nil
 	}
@@ -851,6 +856,63 @@ func validateValue(v reflect.Value, fMeta *structFieldMetadata) error {
 		}
 	}
 	return nil
+}
+
+// validateConst checks that a decoded field equals its const= value, returning
+// an ErrValidationError on mismatch. Integers compare by value; byte-sequence
+// fields compare bytes.
+func validateConst(v reflect.Value, fMeta *structFieldMetadata) error {
+	if fMeta.constIsBytes {
+		got, ok := valueBytes(v)
+		if !ok {
+			return fmt.Errorf("const validation not supported on type %s", v.Type().String())
+		}
+		if !bytes.Equal(got, fMeta.constBytes) {
+			return fmt.Errorf("const mismatch: got %#x, want %#x: %w", got, fMeta.constBytes, ErrValidationError)
+		}
+		return nil
+	}
+	switch v.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if v.Int() != fMeta.constInt {
+			return fmt.Errorf("const mismatch: got %d, want %d: %w", v.Int(), fMeta.constInt, ErrValidationError)
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		if v.Uint() != uint64(fMeta.constInt) {
+			return fmt.Errorf("const mismatch: got %d, want %d: %w", v.Uint(), uint64(fMeta.constInt), ErrValidationError)
+		}
+	default:
+		return fmt.Errorf("const validation not supported on type %s", v.Type().String())
+	}
+	return nil
+}
+
+// valueBytes extracts the raw bytes of a string, byte slice, or byte array
+// value for const comparison.
+func valueBytes(v reflect.Value) ([]byte, bool) {
+	switch v.Kind() {
+	case reflect.String:
+		return []byte(v.String()), true
+	case reflect.Slice, reflect.Array:
+		switch v.Type().Elem().Kind() {
+		case reflect.Uint8:
+			if v.Kind() == reflect.Slice {
+				return v.Bytes(), true
+			}
+			b := make([]byte, v.Len())
+			for i := range b {
+				b[i] = byte(v.Index(i).Uint())
+			}
+			return b, true
+		case reflect.Int8:
+			b := make([]byte, v.Len())
+			for i := range b {
+				b[i] = byte(v.Index(i).Int())
+			}
+			return b, true
+		}
+	}
+	return nil, false
 }
 
 // follow pointers to the end

@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -287,6 +288,9 @@ func (g *Generator) Generate(outPath string) error {
 			if _, ok := parsedTag.options["range"]; ok {
 				needFmt = true
 			}
+			if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
+				needFmt = true
+			}
 			if val, ok := parsedTag.options["serializer"]; ok && val != "" {
 				needErrors = true
 				needFmt = true
@@ -430,6 +434,14 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 			continue
 		}
 
+		// const: emit a fixed value (emit-only), ignoring the struct field.
+		if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
+			if err := g.generateConstWrite(buf, goType, binType, parsedTag, fieldInfo, cexpr); err != nil {
+				return fmt.Errorf("field %s: %w", fieldName, err)
+			}
+			continue
+		}
+
 		if parsedTag.isArray {
 			if err := g.generateArrayWrite(buf, fieldName, goType, binType, parsedTag, fieldInfo); err != nil {
 				return fmt.Errorf("field %s: %w", fieldName, err)
@@ -493,10 +505,94 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 		} else {
 			g.generateFieldRead(buf, "s."+fieldName, goType, binType, parsedTag, typeName, fieldName)
 		}
+
+		// const: validate the field equals its fixed value after reading.
+		if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
+			if err := g.generateConstValidate(buf, fieldName, goType, binType, cexpr); err != nil {
+				return fmt.Errorf("field %s: %w", fieldName, err)
+			}
+		}
 	}
 	buf.WriteString("\treturn n, nil\n")
 	buf.WriteString("}\n\n")
 
+	return nil
+}
+
+// parseCgConstBytes decodes a byte-sequence const hex blob (e.g. 0x504b0304).
+func parseCgConstBytes(s string) ([]byte, error) {
+	t := strings.ReplaceAll(strings.TrimSpace(s), "_", "")
+	if !strings.HasPrefix(t, "0x") && !strings.HasPrefix(t, "0X") {
+		return nil, fmt.Errorf("byte-sequence const must be a hex blob like 0x504b0304, got %q", s)
+	}
+	h := t[2:]
+	if len(h) == 0 || len(h)%2 != 0 {
+		return nil, fmt.Errorf("byte-sequence const %q must have an even number of hex digits", s)
+	}
+	out := make([]byte, len(h)/2)
+	if _, err := hex.Decode(out, []byte(h)); err != nil {
+		return nil, fmt.Errorf("invalid hex in const %q: %w", s, err)
+	}
+	return out, nil
+}
+
+// isFixedArrayType reports whether goType is a fixed-size array ([N]T) rather
+// than a slice ([]T).
+func isFixedArrayType(goType string) bool {
+	return len(goType) > 1 && goType[0] == '[' && goType[1] != ']'
+}
+
+// goByteSliceLiteral formats bytes as a Go []byte{...} literal.
+func goByteSliceLiteral(b []byte) string {
+	parts := make([]string, len(b))
+	for i, x := range b {
+		parts[i] = fmt.Sprintf("0x%02x", x)
+	}
+	return "[]byte{" + strings.Join(parts, ", ") + "}"
+}
+
+// isCgBytesConst reports whether a const target is a raw byte sequence (vs an
+// integer/bitmap scalar).
+func isCgBytesConst(goType, binType string) bool {
+	return binType == "string" || goType == "string" || isByteSequence(goType)
+}
+
+// generateConstWrite emits a fixed value on encode. Integer targets reuse the
+// scalar writer (honoring endian); byte-sequence targets write a fixed []byte.
+func (g *Generator) generateConstWrite(buf *bytes.Buffer, goType, binType string, parsedTag parsedFieldTag, fields map[string]cgFieldInfo, cexpr string) error {
+	if isCgBytesConst(goType, binType) {
+		b, err := parseCgConstBytes(cexpr)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(buf, "\tm, err = w.Write(%s)\n", goByteSliceLiteral(b))
+		buf.WriteString("\tn += m\n\tif err != nil {\n\t\treturn n, err\n\t}\n")
+		return nil
+	}
+	return g.generateFieldWrite(buf, "("+cexpr+")", goType, binType, parsedTag, fields)
+}
+
+// generateConstValidate emits a post-read check that the field equals its const.
+func (g *Generator) generateConstValidate(buf *bytes.Buffer, fieldName, goType, binType, cexpr string) error {
+	accessor := "s." + fieldName
+	if isCgBytesConst(goType, binType) {
+		b, err := parseCgConstBytes(cexpr)
+		if err != nil {
+			return err
+		}
+		got := accessor
+		switch {
+		case goType == "string":
+			got = "[]byte(" + accessor + ")"
+		case strings.HasPrefix(goType, "["):
+			got = accessor + "[:]"
+		}
+		fmt.Fprintf(buf, "\tif !bytes.Equal(%s, %s) {\n", got, goByteSliceLiteral(b))
+		fmt.Fprintf(buf, "\t\treturn n, fmt.Errorf(\"field %s: const mismatch: %%w\", binarystruct.ErrValidationError)\n\t}\n", fieldName)
+		return nil
+	}
+	fmt.Fprintf(buf, "\tif %s != (%s) {\n", accessor, cexpr)
+	fmt.Fprintf(buf, "\t\treturn n, fmt.Errorf(\"field %s: const mismatch: %%w\", binarystruct.ErrValidationError)\n\t}\n", fieldName)
 	return nil
 }
 
@@ -776,6 +872,20 @@ func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binT
 			buf.WriteString("\t}\n")
 			return
 		}
+	}
+
+	// Fixed [N]T array: read in place; make() is only valid for slices.
+	if isFixedArrayType(goType) {
+		if binType == "byte" || binType == "uint8" {
+			fmt.Fprintf(buf, "\tm, err = io.ReadFull(r, s.%s[:])\n", fieldName)
+			buf.WriteString("\tn += m\n\tif err != nil {\n\t\treturn n, err\n\t}\n")
+			return
+		}
+		elemType := goType[strings.IndexByte(goType, ']')+1:]
+		fmt.Fprintf(buf, "\tfor i := 0; i < len(s.%s); i++ {\n", fieldName)
+		g.generateFieldRead(buf, fmt.Sprintf("s.%s[i]", fieldName), elemType, binType, parsedTag, typeName, fmt.Sprintf("%s[i]", fieldName))
+		buf.WriteString("\t}\n")
+		return
 	}
 
 	// Slice initialization

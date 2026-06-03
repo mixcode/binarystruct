@@ -132,6 +132,30 @@ func (ms *Marshaller) unsafeWriteStruct(w io.Writer, order ByteOrder, strc refle
 			continue
 		}
 
+		// const: emit a fixed value (emit-only), routed through the reflection
+		// writer with the constant, like valueof.
+		if fMeta.hasConst {
+			var syn reflect.Value
+			if fMeta.constIsBytes {
+				syn = synthBytesValue(strc.Field(fMeta.index), fMeta.constBytes)
+			} else {
+				syn = synthIntValue(strc.Field(fMeta.index), int(fMeta.constInt))
+			}
+			naturalType, option, errF := ms.resolveFieldEncoding(syn, fMeta, writeEval)
+			if errF != nil {
+				err = wErr(fMeta.index, errF)
+				return
+			}
+			var m int
+			m, err = ms.writeMain(w, order, syn, naturalType, option, strc, fMeta.index)
+			if err != nil {
+				err = wErr(fMeta.index, err)
+				return
+			}
+			n += m
+			continue
+		}
+
 		fieldPtr := unsafe.Add(base, fMeta.offset)
 		currType := typ.Field(fMeta.index).Type
 		// dereference pointers/interfaces

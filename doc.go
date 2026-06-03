@@ -62,6 +62,7 @@ Example:
   - range=min..max: Performs range validation check on integers and floats.
   - match=pattern: Performs regex match validation check on string fields.
   - valueof=Expr: (encode-only) Auto-computes an integer field's serialized value from other fields via bytelen()/count() and arithmetic. Emit-only: the Go field is not modified. See "Computed Field Values" below.
+  - const=Value: (encode+decode) Emits a fixed value on encode and validates it on decode (magic numbers/signatures). Integer target uses an integer expression (endian-sensitive); byte-sequence target ([N]byte/string(N)) uses a natural-order hex blob. See "Fixed and Magic Values" below.
 
 ## Array and Size Expressions
 
@@ -89,6 +90,17 @@ The valueof option computes an integer field's serialized value from other field
 valueof expressions may use the functions bytelen(F) (total encoded byte length of any field F) and count(F) (element count of an array or slice field F; not valid for strings — use bytelen for a string's byte length), combined with +, -, *, / and parentheses. valueof is evaluated only when encoding; on decode the field is read normally. It is emit-only: the computed value is written to the stream but the Go field is not modified (encoding stays a pure read). To obtain the computed values in Go, perform a Marshal/Unmarshal round trip.
 
 valueof only derives field lengths and counts. Other derived values, such as CRC checksums, compressed sizes, or offsets, are not computed for you and must be assigned normally.
+
+# Fixed and Magic Values
+
+The const option pins a field to a fixed value: it is emitted on encode (the Go field's value is ignored) and validated on decode, returning an ErrValidationError on mismatch. It is the natural way to express format signatures and version markers:
+
+	type ZIPLocalHeader struct {
+		Signature uint32  `binary:"uint32,const=0x04034b50,endian=little"` // 'PK\x03\x04'
+		Magic     [8]byte `binary:"[8]byte,const=0x89504e470d0a1a0a"`       // byte-sequence form
+	}
+
+An integer const (const=0x04034b50) takes a constant integer expression and is written through the field's byte order, so its bytes depend on endianness; add an explicit endian=little|big so a signature's bytes are deterministic. A byte-sequence const on a [N]byte or string(N) field takes a natural-order hex blob (each byte is two hex digits) and is endianness-independent — PK\x03\x04 is simply const=0x504b0304. const targets must be an integer/bitmap or a raw byte sequence, cannot be combined with valueof, and (for the byte form) require a fixed size matching the constant's length.
 
 # Interface & Polymorphic Handling
 

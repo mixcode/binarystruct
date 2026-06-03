@@ -54,6 +54,7 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 * **Fine-Grained Layout Controls**: Control data alignment using explicit types like `byte`, `word`, `dword`, `qword`, and zero-filled padding bytes via the `pad(size)` tag.
 * **Dynamic Size Expressions**: Calculate array lengths and string buffer sizes dynamically based on other struct fields, supporting arithmetic operations (`+`, `-`, `*`, `/`) and parentheses (e.g., `[PayloadSize - (HeaderLength * 2)]byte`).
 * **Computed Length/Count Fields**: Fill a length or count field automatically at encode time with `valueof=bytelen(F)` / `valueof=count(F)`, so you never hand-maintain a `NameLen` that must equal `len(Name)`. See [Computed Field Values](#computed-field-values-valueof).
+* **Fixed / Magic Values**: Pin signatures and version fields with `const=` — emitted on encode and validated on decode (integer magics like `const=0x04034b50` or byte-sequence magics like `const=0x89504e470d0a1a0a`). See [Fixed / Magic Values](#fixed--magic-values-const).
 * **Interface & Polymorphic Handling**: Automatically deserializes into pre-assigned interface fields, or uses custom serializers to dynamically allocate types based on previously decoded header values.
 * **High-Performance Runtime Interpreter**: Uses dynamic layout compilation and a cached metadata interpreter. Unsafe Mode (default) bypasses reflection using `unsafe.Pointer` and zero-allocation slice streaming, yielding giant performance gain compared with safe mode using Go reflection.
 * **Static Code Generation**: Includes a `binarystruct-codegen` tool that generates optimized, reflection-free `MarshalBinary` / `UnmarshalBinary` methods from struct tags. Achieves up to **6.7x speedup** over safe-mode reflection with near-zero allocations. Supports `go:generate` integration. See [`binarystruct-codegen/README.md`](binarystruct-codegen/README.md).
@@ -101,6 +102,53 @@ A `valueof` value is a full [expression](STRUCT_TAGS.md#5-expressions) (arithmet
 * **`count(F)`** — element count of an array or slice field `F` (not valid for strings; use `bytelen` for a string's byte length).
 
 `valueof` is **encode-only and emit-only**: the computed value is written to the stream, but your Go struct field is never modified. To read the computed values back into Go, do a `Marshal`/`Unmarshal` round trip. It derives only lengths and counts — other values such as CRC checksums, compressed sizes, or offsets are not computed for you. See the [Struct Tag Reference](STRUCT_TAGS.md#8-computed-field-values-valueof) for full details.
+
+### Recipe: variable-length records
+
+The most common real-world layout — a header carrying the byte-lengths (or element counts) of the variable data that follows — is a length field with `valueof=` paired with a `[len]` size expression on its target. Each pair stays in sync automatically: `valueof` fills the length on encode, the size expression consumes it on decode.
+
+```go
+type Record struct {
+	Magic      uint32 `binary:"uint32"`                        // you set this
+	NameLen    uint16 `binary:"uint16,valueof=bytelen(Name)"`  // auto = encoded length of Name
+	PayloadLen uint32 `binary:"uint32,valueof=bytelen(Payload)"`
+	ItemCount  uint16 `binary:"uint16,valueof=count(Items)"`   // auto = number of Items
+
+	Name    []byte   `binary:"[NameLen]byte"`     // sized from NameLen on decode
+	Payload []byte   `binary:"[PayloadLen]byte"`  // sized from PayloadLen
+	Items   []uint32 `binary:"[ItemCount]uint32"` // sized from ItemCount
+}
+
+// Encode: set only the data fields; the length/count fields are computed.
+rec := Record{Magic: 0x5A45, Name: []byte("file.txt"), Payload: data, Items: ids}
+blob, _ := binarystruct.Marshal(&rec, binarystruct.LittleEndian)
+```
+
+On encode you populate only `Name`, `Payload`, and `Items`; `NameLen`/`PayloadLen`/`ItemCount` are written from the actual data. On decode the size expressions read each field back at exactly the right length. (Because `valueof` is emit-only, `rec.NameLen` is still `0` in memory after `Marshal` — round-trip through `Unmarshal` if you need the struct populated.)
+
+---
+
+## Fixed / Magic Values (`const`)
+
+The `const` option pins a field to a fixed value — **emitted on encode** (your Go field is ignored) and **validated on decode** (a mismatch returns an `ErrValidationError`). It is the natural way to express format signatures, version markers, and reserved fields:
+
+```go
+type ZIPLocalHeader struct {
+	Signature uint32  `binary:"uint32,const=0x04034b50,endian=little"` // 'PK\x03\x04'
+	Version   uint16  `binary:"uint16,const=20,endian=little"`
+}
+
+type PNGHeader struct {
+	Magic [8]byte `binary:"[8]byte,const=0x89504e470d0a1a0a"` // \x89PNG\r\n\x1a\n
+}
+```
+
+There are two target shapes:
+
+* **Integer / bitmap** (`const=0x04034b50`): a constant integer expression. It is written through the byte order, so its bytes depend on endianness — **add an explicit `endian=little|big`** to make a signature deterministic. Limited to values below 2⁶³; use the byte-sequence form for larger or multi-byte magics.
+* **Byte sequence** `[N]byte` / `string(N)` (`const=0x89504e470d0a1a0a`): a hex blob written in natural byte order, so it is **endianness-independent** — `PK\x03\x04` is simply `const=0x504b0304`. The field's fixed size must match the constant's length.
+
+`const` cannot be combined with `valueof`, the byte form cannot use `encoding=`, and both shapes are supported by the static code generator. See the [Struct Tag Reference](STRUCT_TAGS.md#9-fixed--magic-values-const) for details.
 
 ---
 

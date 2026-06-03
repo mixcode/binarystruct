@@ -31,6 +31,7 @@ This document contains rules, syntax constraints, and patterns to help LLM agent
 * `range=min..max`: Enforces range check validation on integers and float values (e.g. `range=1..100`, open ranges `range=0..` or `range=..100`).
 * `match=pattern`: Enforces regex match validation on string values (e.g. `match=^[A-Z0-9]+$`).
 * `valueof=Expr`: (encode-only) Auto-computes an integer field's serialized value from other fields, using arithmetic plus the functions `bytelen(F)` (encoded byte length of any field F) and `count(F)` (element count of an array/slice field F). Emit-only — the Go field is NOT modified. See Section 7.
+* `const=Value`: (encode + decode) Emits a fixed value on encode (ignoring the Go field) and validates it on decode (`ErrValidationError` on mismatch) — ideal for magic numbers/signatures. Integer target: `const=0x04034b50` (an integer expression; **endian-sensitive** — see §8). Byte-sequence target `[N]byte`/`string(N)`: `const=0x89504e470d0a1a0a` (hex blob, natural byte order, endian-independent). See Section 8.
 
 ---
 
@@ -196,6 +197,23 @@ A `valueof` value is a full expression (operators, constants, field references; 
 
 Combine with `+ - * /`, parentheses, and field references: `valueof=bytelen(Payload)+2`, `valueof=count(Items)`, `valueof=bytelen(A)+bytelen(B)`.
 
+### Recipe: variable-length records (the most common pattern)
+A header field holding the length/count of variable data that follows it = a `valueof=` length field paired with a `[len]` size expression on its target. `valueof` fills the length on encode; the size expression consumes it on decode. Set only the data fields — never the length fields:
+
+```go
+type Record struct {
+	Magic      uint32 `binary:"uint32"`                         // you set this
+	NameLen    uint16 `binary:"uint16,valueof=bytelen(Name)"`   // auto = encoded length of Name
+	PayloadLen uint32 `binary:"uint32,valueof=bytelen(Payload)"`
+	ItemCount  uint16 `binary:"uint16,valueof=count(Items)"`    // auto = number of Items
+	Name    []byte   `binary:"[NameLen]byte"`     // decode: sized from NameLen
+	Payload []byte   `binary:"[PayloadLen]byte"`
+	Items   []uint32 `binary:"[ItemCount]uint32"`
+}
+// Encode: populate Name/Payload/Items only; the length+count fields are computed.
+// (Emit-only: rec.NameLen is still 0 in memory after Marshal — round-trip via Unmarshal to populate.)
+```
+
 **Scope:** `valueof` derives only field lengths/counts via `bytelen`/`count`. Other derived values (CRC checksums, compressed sizes, offsets) are NOT auto-computed — set them normally.
 
 ### Rules
@@ -203,5 +221,34 @@ Combine with `+ - * /`, parentheses, and field references: `valueof=bytelen(Payl
 * **Emit-only (no write-back), by design.** The computed value is written to the stream but your Go struct field is left unchanged — this keeps encoding a pure, side-effect-free read (safe for concurrent marshalling). **To obtain the computed values in Go, do a `Marshal`/`Unmarshal` (or `Write`/`Read`) round trip.** A write-back mode will not be added.
 * **Integer/bitmap fields only**; other field types are a compile-time error. `bytelen`/`count` are valid only inside `valueof`.
 * **Codegen support**: `count(F)` and `bytelen(F)` of byte slices/arrays and non-encoded strings are supported by the static code generator; `bytelen` of nested structs or text-encoded strings is not yet — use the runtime interpreter for those.
+
+---
+
+## 8. Fixed / Magic Values (`const`)
+
+The `const` option pins a field to a fixed value: it is **emitted on encode** (the Go field's value is ignored) and **validated on decode** (a mismatch returns a `DecodeError` wrapping `ErrValidationError`). It is the right tool for format signatures, version bytes, and reserved fields.
+
+```go
+type ZIPLocalHeader struct {
+	Signature uint32  `binary:"uint32,const=0x04034b50,endian=little"` // integer magic
+	Version   uint16  `binary:"uint16,const=20,endian=little"`
+}
+
+type PNGHeader struct {
+	Magic [8]byte `binary:"[8]byte,const=0x89504e470d0a1a0a"` // byte-sequence magic
+}
+```
+
+### Two target shapes
+* **Integer / bitmap** (`const=0x04034b50`): the value is a constant integer **expression** (decimal, hex `0x`, octal `0o`, binary `0b`, `+ - * /`, parens). Written as an integer, so its on-wire bytes follow the byte order. Limited to values that fit a signed 64-bit int (`< 2^63`); for larger or multi-byte magics use the byte-sequence form.
+* **Byte sequence** `[N]byte` / `[]byte` / `string(N)` (`const=0x89504e470d0a1a0a`): a **hex blob** — the bytes in natural order (each pair of hex digits is one byte; `_` separators allowed). Written verbatim, so it is **endian-independent**. The field must have a fixed size equal to the constant's byte length.
+
+### Endianness tip (important for integer magics)
+An **integer** `const` is serialized through the active byte order, so the same `const=0x04034b50` emits `50 4b 03 04` under little-endian but `04 03 4b 50` under big-endian. Pin it with an explicit `endian=little|big` on the field so the signature's bytes are deterministic regardless of the marshaller's order. A **byte-sequence** `const` is written in natural order and is unaffected by byte order — no `endian=` needed (in fact `PK\x03\x04` is simply `const=0x504b0304`, which is clearer than the byte-swapped integer `0x04034b50`).
+
+### Rules
+* **Emit-only on encode** (like `valueof`): the Go field is not modified; set it or leave it zero, the const is written either way. On decode the field is populated from the stream and then checked.
+* **Targets**: integer/bitmap or a raw byte sequence only; other types are a compile-time error. Cannot be combined with `valueof`. The byte form cannot be combined with `encoding=` (raw bytes only) and requires a fixed size (`[N]byte` or `string(N)`).
+* **Codegen**: both shapes are supported by the static code generator.
 
 

@@ -38,6 +38,7 @@ Tag options modify the behavior of binary types. They are appended after the typ
 | **`range`** | `range=min..max` | Numeric types | Validates deserialized value is within `[min, max]`. Returns error on violation. |
 | **`match`** | `match=pattern` | String types | Validates deserialized string matches the regex pattern. Returns error on violation. |
 | **`valueof`** | `valueof=Expr` | Integer/bitmap types | **Encode-only.** Computes the field's serialized value from an expression (may use `bytelen()`/`count()`). Emit-only: the Go field is not modified. See [Computed Field Assignment](#computed-field-assignment-valueof-bytelen-count). |
+| **`const`** | `const=Value` | Integer/bitmap or raw byte sequence | **Encode + decode.** Emits a fixed value (emit-only; field ignored) and validates it on decode (`ErrValidationError` on mismatch). Integer = constant int expression (endian-sensitive); byte sequence = natural-order hex blob. See [Fixed / Magic Values](#fixed--magic-values-const). |
 
 ### Computed Field Assignment: `valueof`, `bytelen()`, `count()`
 
@@ -80,6 +81,21 @@ Examples: `valueof=bytelen(Name)`, `valueof=bytelen(Payload)+2`, `valueof=count(
 | :--- | :--- |
 | **Runtime** (`marshal.go`, `unsafe_io.go`) | Before writing the field, if `valueofExpr` is set, evaluate it with the context-carrying value evaluator (Marshaller + byte order + struct metadata) and write the resulting integer in place of the field value. The unsafe path routes `valueof` fields through the reflection writer (rare fields; negligible cost). |
 | **Codegen** (`generator.go`) | Emit the value computation inline before the integer write. `count(F)` → `len(s.F)`; `bytelen(F)` → `len(s.F)` when `F` is a byte slice/array or a non-encoded `string`. `bytelen` of a nested struct or text-encoded string is **not** supported by codegen — `translateValueof` returns a generation-time error; use the runtime interpreter for those structs. |
+
+### Fixed / Magic Values: `const`
+
+The `const` option pins a field to a fixed value: **emitted on encode** (the Go field is ignored, like `valueof`) and **validated on decode** (mismatch → `DecodeError` wrapping `ErrValidationError`). It serves format signatures, version markers, and reserved fields.
+
+**Two target shapes.**
+* **Integer/bitmap** (`const=0x04034b50`): a constant integer expression (the same arithmetic evaluator as size expressions, restricted to literals/operators — no field refs or functions). Stored as `constInt int64`; emitted as an integer, so the bytes follow the field's byte order — pair with `endian=` for a deterministic signature. Restricted to values `< 2^63`.
+* **Byte sequence** (`[N]byte` / `[]byte` / `string(N)`, `const=0x89504e47…`): a hex blob decoded to `constBytes []byte` in natural order (endian-independent). The field's fixed size must equal `len(constBytes)`.
+
+**Validation (at `getStructMetadata`, via `resolveConst`):** target is integer/bitmap or a raw byte sequence; `const` is not combined with `valueof`; the byte form is not combined with `encoding=` and has a fixed size matching the constant's length; the integer expression and hex blob parse cleanly.
+
+| Path | Mapping |
+| :--- | :--- |
+| **Runtime** (`marshal.go`, `unsafe_io.go`) | On encode, substitute the field value with the constant (`synthIntValue`/`synthBytesValue`) and write normally — the unsafe path routes through the reflection writer like `valueof`. On decode, `validateField` → `validateConst` compares the read value (integer equality or `bytes.Equal`) and returns `ErrValidationError` on mismatch. |
+| **Codegen** (`generator.go`) | Encode: integer → write the constant expression via the scalar writer (honors endian); byte sequence → `w.Write([]byte{…})`. Decode: read the field, then emit `if v != EXPR` (integer) or `if !bytes.Equal(v, []byte{…})` (bytes) returning `ErrValidationError`. Both shapes supported. |
 
 ---
 

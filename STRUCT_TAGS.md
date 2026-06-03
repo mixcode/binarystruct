@@ -95,6 +95,10 @@ Enforces regular expression matching on string fields during deserialization.
 Auto-computes this integer field's serialized value from other fields when marshalling, removing manual length/count bookkeeping. The field's own Go value is ignored on encode and is **not** modified (emit-only). Supports the `bytelen()` and `count()` functions. See [Computed Field Values](#8-computed-field-values-valueof).
 * **Usage**: `NameLen uint16 `binary:"uint16,valueof=bytelen(Name)"``
 
+### `const=Value` (encode + decode)
+Pins a field to a fixed value — emitted on encode (the Go field is ignored) and validated on decode (`ErrValidationError` on mismatch). Ideal for magic numbers and signatures. Integer targets take an integer expression and are **endian-sensitive**; byte-sequence targets (`[N]byte`/`string(N)`) take a natural-order hex blob. See [Fixed / Magic Values](#9-fixed--magic-values-const).
+* **Usage**: `Sig uint32 `binary:"uint32,const=0x04034b50,endian=little"`` or `Magic [8]byte `binary:"[8]byte,const=0x89504e470d0a1a0a"``
+
 ---
 
 ## 4. Array and Buffer Size Notation
@@ -259,3 +263,38 @@ Examples: `valueof=bytelen(Name)`, `valueof=bytelen(Payload)+2`, `valueof=count(
 * **Scope.** `valueof` derives only lengths and counts of fields (via `bytelen`/`count`). Other derived values — CRC checksums, compressed sizes, offsets, etc. — are not computed for you and must be assigned normally.
 
 > **Codegen note:** the static code generator supports `count(F)`, and `bytelen(F)` of byte slices/arrays and non-encoded strings. `bytelen` of nested structs or text-encoded strings is not yet supported by codegen; use the runtime interpreter for those structs.
+
+---
+
+## 9. Fixed / Magic Values: `const`
+
+The `const` option pins a field to a fixed value. It is **emitted on encode** (the Go field's value is ignored, like `valueof`) and **validated on decode** (a mismatch returns a `DecodeError` wrapping `ErrValidationError`). This is the natural way to express format signatures, version markers, and reserved fields without hand-writing "set this constant / check this constant" code.
+
+```go
+type ZIPLocalHeader struct {
+	Signature uint32 `binary:"uint32,const=0x04034b50,endian=little"` // 'PK\x03\x04'
+	Version   uint16 `binary:"uint16,const=20,endian=little"`
+	// ... rest of header
+}
+
+type PNGHeader struct {
+	Magic [8]byte `binary:"[8]byte,const=0x89504e470d0a1a0a"` // \x89PNG\r\n\x1a\n
+}
+```
+
+### Two target shapes
+
+| Target | Const syntax | Encoding |
+| :--- | :--- | :--- |
+| **Integer / bitmap** (`int8`…`uint64`, `byte`/`word`/`dword`/`qword`) | A constant integer **expression** — decimal, hex `0x1F`, octal `0o17`, binary `0b1010`, `+ - * /`, parens. | Written as an integer, **honoring the field's byte order** (see the endianness note). Must fit a signed 64-bit int (`< 2^63`). |
+| **Byte sequence** (`[N]byte`, `[]byte`, `string(N)`) | A **hex blob** `0xAABBCC…` — the bytes in natural order; each byte is two hex digits, `_` separators allowed. | Written **verbatim** in natural order — endianness-independent. The field's fixed size must equal the constant's byte length. |
+
+### Endianness note (integer consts)
+
+An integer `const` is serialized through the active byte order, so `const=0x04034b50` emits `50 4b 03 04` under little-endian but `04 03 4b 50` under big-endian. **Add an explicit `endian=little|big` to the field** to make the signature's bytes deterministic regardless of the marshaller's order. A byte-sequence `const` is written in natural order and needs no `endian=` — indeed `PK\x03\x04` as a byte blob is simply `const=0x504b0304`, which reads more clearly than the byte-swapped integer `0x04034b50`.
+
+### Rules
+* **Emit-only on encode.** The Go field is not modified; whatever you leave in it is ignored and the constant is written. On decode the field is read from the stream and then validated against the constant.
+* **Target types.** Integer/bitmap or a raw byte sequence only; any other type is a compile-time error. The byte form cannot be combined with `encoding=` (raw bytes only) and requires a fixed size (`[N]byte` or `string(N)`).
+* **Not combinable with `valueof`** (the two both override the field's emitted value).
+* **Codegen.** Both shapes are supported by the static code generator.

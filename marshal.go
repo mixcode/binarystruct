@@ -422,6 +422,15 @@ func (ms *Marshaller) writeStruct(w io.Writer, order ByteOrder, strc reflect.Val
 			fieldVal = synthIntValue(fieldVal, computed)
 		}
 
+		// const: emit the fixed value, ignoring the struct field (emit-only).
+		if fMeta.hasConst {
+			if fMeta.constIsBytes {
+				fieldVal = synthBytesValue(fieldVal, fMeta.constBytes)
+			} else {
+				fieldVal = synthIntValue(fieldVal, int(fMeta.constInt))
+			}
+		}
+
 		var m int
 		m, err = ms.writeMain(w, order, fieldVal, naturalType, option, strc, fMeta.index)
 		if err != nil {
@@ -638,6 +647,30 @@ func synthIntValue(orig reflect.Value, v int) reflect.Value {
 		}
 	}
 	return reflect.ValueOf(v)
+}
+
+// synthBytesValue returns a value of orig's type holding the given bytes, used
+// to emit a byte-sequence const without mutating the source field. orig may be
+// a string, a byte slice, or a fixed byte array; len(b) is guaranteed to match
+// a fixed array's length by const metadata validation.
+func synthBytesValue(orig reflect.Value, b []byte) reflect.Value {
+	if orig.IsValid() {
+		switch orig.Kind() {
+		case reflect.String:
+			nv := reflect.New(orig.Type()).Elem()
+			nv.SetString(string(b))
+			return nv
+		case reflect.Slice:
+			nv := reflect.MakeSlice(orig.Type(), len(b), len(b))
+			reflect.Copy(nv, reflect.ValueOf(b))
+			return nv
+		case reflect.Array:
+			nv := reflect.New(orig.Type()).Elem()
+			reflect.Copy(nv, reflect.ValueOf(b))
+			return nv
+		}
+	}
+	return reflect.ValueOf(b)
 }
 
 // derefValue follows pointers and interfaces to the underlying value.

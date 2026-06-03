@@ -3,6 +3,7 @@
 package binarystruct
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
@@ -44,6 +45,11 @@ type structFieldMetadata struct {
 	hasMatch      bool
 	matchPattern  string
 	matchRegexp   *regexp.Regexp
+	hasConst      bool
+	constExpr     string // raw const= text, kept for codegen and error messages
+	constIsBytes  bool   // target is a byte sequence (vs an integer/bitmap)
+	constInt      int64  // integer target: the constant value to emit/validate
+	constBytes    []byte // byte-sequence target: the constant bytes to emit/validate
 }
 
 type structMetadata struct {
@@ -326,6 +332,131 @@ func evaluateTagValue(strc reflect.Value, stmt string) (value int, err error) {
 	return value, nil
 }
 
+// evalConstIntExpr evaluates a constant integer expression (literals in
+// decimal/hex/octal/binary, the operators + - * /, and parentheses). Field
+// references and functions are rejected, so the result depends only on the
+// expression text. Used by range bounds so they accept the same numeric syntax
+// as size expressions (e.g. range=0x04034b50..0x04034b50).
+func evalConstIntExpr(stmt string) (int, error) {
+	tokens, err := tokenize(stmt)
+	if err != nil {
+		return 0, err
+	}
+	p := &tagParser{tokens: tokens} // resolveIdent/callFunc nil: constants only
+	value, err := p.parseExpr()
+	if err != nil {
+		return 0, err
+	}
+	if p.peek().typ != tokEOF {
+		return 0, fmt.Errorf("unexpected token at end of expression: %s", p.peek().val)
+	}
+	return value, nil
+}
+
+// parseRangeBound parses a single range bound. It first tries a constant
+// integer expression (so hex/octal/binary literals and arithmetic work); if
+// that does not apply (e.g. a floating-point bound such as 1.5 or 1e3), it
+// falls back to a plain float parse. Range values are stored as float64, so
+// integer bounds beyond 2^53 lose precision — out of scope for range, which is
+// why exact magic-number matching uses const= rather than range=N..N.
+func parseRangeBound(s string) (float64, error) {
+	if v, err := evalConstIntExpr(s); err == nil {
+		return float64(v), nil
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, err
+	}
+	return f, nil
+}
+
+// parseConstHexBytes decodes a byte-sequence const value, which must be a hex
+// blob such as 0x504b0304 (the bytes in natural order, endianness-independent).
+// Underscores are allowed as digit separators.
+func parseConstHexBytes(s string) ([]byte, error) {
+	t := strings.ReplaceAll(strings.TrimSpace(s), "_", "")
+	if !strings.HasPrefix(t, "0x") && !strings.HasPrefix(t, "0X") {
+		return nil, fmt.Errorf("byte-sequence const must be a hex blob like 0x504b0304, got %q", s)
+	}
+	h := t[2:]
+	if len(h) == 0 || len(h)%2 != 0 {
+		return nil, fmt.Errorf("byte-sequence const %q must have an even number of hex digits", s)
+	}
+	b := make([]byte, len(h)/2)
+	if _, err := hex.Decode(b, []byte(h)); err != nil {
+		return nil, fmt.Errorf("invalid hex in const %q: %w", s, err)
+	}
+	return b, nil
+}
+
+// resolveConst validates a const= option and precomputes the value to emit and
+// validate. The target is either an integer/bitmap field (the const is an
+// integer expression, written honoring the field's byte order) or a raw
+// byte-sequence field [N]byte / string(N) (the const is a fixed-length hex blob
+// written in natural order). goType is the field's Go type, used to read a fixed
+// array length when the tag omits an explicit size.
+func resolveConst(meta *structFieldMetadata, goType reflect.Type) error {
+	et := meta.naturalType
+	if meta.encodeType != Any && meta.encodeType != iInvalid {
+		et = meta.encodeType
+	}
+	isBytes := et == String || (meta.isArray && (et == Byte || et == Uint8 || et == Int8))
+
+	if !isBytes {
+		if meta.isArray {
+			return fmt.Errorf("field %s: const on an array requires a byte element type ([N]byte)", meta.name)
+		}
+		switch et.iKind() {
+		case intKind, uintKind, bitmapKind:
+		default:
+			return fmt.Errorf("field %s: const requires an integer/bitmap or raw byte-sequence field, got %s", meta.name, et)
+		}
+		v, err := evalConstIntExpr(meta.constExpr)
+		if err != nil {
+			return fmt.Errorf("field %s: invalid const value %q: %w", meta.name, meta.constExpr, err)
+		}
+		meta.constIsBytes = false
+		meta.constInt = int64(v)
+		return nil
+	}
+
+	// Byte-sequence target.
+	if meta.encoding != "" {
+		return fmt.Errorf("field %s: const cannot be combined with encoding= (raw bytes only)", meta.name)
+	}
+	b, err := parseConstHexBytes(meta.constExpr)
+	if err != nil {
+		return fmt.Errorf("field %s: %w", meta.name, err)
+	}
+	// Determine the field's fixed byte length.
+	n := -1
+	switch {
+	case meta.isArray && meta.arrayLenExpr != "":
+		ln, errLen := evalConstIntExpr(meta.arrayLenExpr)
+		if errLen != nil {
+			return fmt.Errorf("field %s: const requires a constant array length", meta.name)
+		}
+		n = ln
+	case !meta.isArray && meta.bufLenExpr != "":
+		ln, errLen := evalConstIntExpr(meta.bufLenExpr)
+		if errLen != nil {
+			return fmt.Errorf("field %s: const requires a constant string size", meta.name)
+		}
+		n = ln
+	case goType.Kind() == reflect.Array:
+		n = goType.Len()
+	}
+	if n < 0 {
+		return fmt.Errorf("field %s: const on a byte-sequence field requires a fixed size ([N]byte or string(N)) matching the %d-byte constant", meta.name, len(b))
+	}
+	if n != len(b) {
+		return fmt.Errorf("field %s: const has %d bytes but the field size is %d", meta.name, len(b), n)
+	}
+	meta.constIsBytes = true
+	meta.constBytes = b
+	return nil
+}
+
 // fieldValueResolver returns a resolver that reads a sibling field's integer
 // value from strc, for use by arithmetic and decode-side size expressions.
 func fieldValueResolver(strc reflect.Value) func(string) (int, error) {
@@ -605,6 +736,13 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 				} else {
 					return nil, fmt.Errorf("missing value for valueof tag on field %s", field.Name)
 				}
+			case "const":
+				if len(t) > 1 {
+					meta.hasConst = true
+					meta.constExpr = strings.Join(t[1:], "=")
+				} else {
+					return nil, fmt.Errorf("missing value for const tag on field %s", field.Name)
+				}
 			case "range":
 				if len(t) > 1 {
 					meta.hasRange = true
@@ -615,7 +753,7 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 					minStr := strings.TrimSpace(bounds[0])
 					maxStr := strings.TrimSpace(bounds[1])
 					if minStr != "" {
-						minVal, errParse := strconv.ParseFloat(minStr, 64)
+						minVal, errParse := parseRangeBound(minStr)
 						if errParse != nil {
 							return nil, fmt.Errorf("invalid range min value on field %s: %w", field.Name, errParse)
 						}
@@ -623,7 +761,7 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 						meta.hasRangeMin = true
 					}
 					if maxStr != "" {
-						maxVal, errParse := strconv.ParseFloat(maxStr, 64)
+						maxVal, errParse := parseRangeBound(maxStr)
 						if errParse != nil {
 							return nil, fmt.Errorf("invalid range max value on field %s: %w", field.Name, errParse)
 						}
@@ -728,6 +866,18 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 					}
 				}
 				valueofRefs[field.Name] = refs
+			}
+
+			// Validate and resolve const: emit-on-encode + validate-on-decode
+			// of a fixed value. Target is an integer/bitmap or a raw byte
+			// sequence ([N]byte / string(N)); the byte form uses a hex blob.
+			if meta.hasConst {
+				if meta.valueofExpr != "" {
+					return nil, fmt.Errorf("field %s: const cannot be combined with valueof", field.Name)
+				}
+				if err := resolveConst(&meta, field.Type); err != nil {
+					return nil, err
+				}
 			}
 		}
 

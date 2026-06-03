@@ -300,3 +300,107 @@ func TestGeneratedValueof(t *testing.T) {
 		t.Errorf("generated valueof tests failed: %v", err)
 	}
 }
+
+func TestCodegen_Const(t *testing.T) {
+	tmpDir, err := ioutil.TempDir(".", "tmp-binarystruct-codegen-const-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	codegenBin := filepath.Join(tmpDir, "binarystruct-codegen")
+	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./binarystruct-codegen")
+	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build codegen tool: %v\n%s", err, buildOut)
+	}
+
+	// Both const shapes: an integer magic and a byte-sequence magic.
+	structFile := filepath.Join(tmpDir, "types.go")
+	structContent := `package tmp_codegen_const_test
+
+type Packet struct {
+	Sig   uint32  ` + "`" + `binary:"uint32,const=0x04034b50"` + "`" + `
+	Magic [4]byte ` + "`" + `binary:"[4]byte,const=0x504b0304"` + "`" + `
+	N     uint8   ` + "`" + `binary:"uint8"` + "`" + `
+}
+`
+	if err := ioutil.WriteFile(structFile, []byte(structContent), 0644); err != nil {
+		t.Fatalf("failed to write test struct file: %v", err)
+	}
+
+	genCmd := exec.Command(codegenBin, "-type", "Packet", tmpDir)
+	var genStderr bytes.Buffer
+	genCmd.Stderr = &genStderr
+	if err := genCmd.Run(); err != nil {
+		t.Fatalf("codegen run failed: %v\nStderr: %s", err, genStderr.String())
+	}
+
+	testFile := filepath.Join(tmpDir, "types_test.go")
+	testContent := `package tmp_codegen_const_test
+
+import (
+	"bytes"
+	"errors"
+	"testing"
+
+	"github.com/mixcode/binarystruct"
+)
+
+func TestGeneratedConst(t *testing.T) {
+	// Seed Sig/Magic WRONG to prove const overrides them on encode.
+	s := Packet{Sig: 0xdeadbeef, Magic: [4]byte{1, 2, 3, 4}, N: 7}
+	blob, err := s.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary failed: %v", err)
+	}
+	// BigEndian: Sig=04 03 4b 50, Magic (natural order)=50 4b 03 04, N=07
+	want := []byte{0x04, 0x03, 0x4b, 0x50, 0x50, 0x4b, 0x03, 0x04, 0x07}
+	if !bytes.Equal(blob, want) {
+		t.Fatalf("blob = % x\nwant  = % x", blob, want)
+	}
+
+	var ok Packet
+	if err := ok.UnmarshalBinary(blob); err != nil {
+		t.Fatalf("UnmarshalBinary good failed: %v", err)
+	}
+	if ok.Sig != 0x04034b50 || ok.Magic != [4]byte{0x50, 0x4b, 0x03, 0x04} || ok.N != 7 {
+		t.Fatalf("round-trip mismatch: %+v", ok)
+	}
+
+	// Corrupt the integer magic -> validation error.
+	badSig := append([]byte{}, want...)
+	badSig[0] = 0xff
+	var b1 Packet
+	if err := b1.UnmarshalBinary(badSig); !errors.Is(err, binarystruct.ErrValidationError) {
+		t.Fatalf("bad Sig: want ErrValidationError, got %v", err)
+	}
+
+	// Corrupt the byte-sequence magic -> validation error.
+	badMagic := append([]byte{}, want...)
+	badMagic[5] = 0xff
+	var b2 Packet
+	if err := b2.UnmarshalBinary(badMagic); !errors.Is(err, binarystruct.ErrValidationError) {
+		t.Fatalf("bad Magic: want ErrValidationError, got %v", err)
+	}
+}
+`
+	if err := ioutil.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	testArgs := []string{"test", "./" + tmpDir}
+	if testing.Verbose() {
+		testArgs = append(testArgs, "-v")
+	}
+	testCmd := exec.Command("go", testArgs...)
+	testOutput, err := testCmd.CombinedOutput()
+	if testing.Verbose() {
+		t.Log(string(testOutput))
+	}
+	if err != nil {
+		if !testing.Verbose() {
+			t.Log(string(testOutput))
+		}
+		t.Errorf("generated const tests failed: %v", err)
+	}
+}

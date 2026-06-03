@@ -56,6 +56,7 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 * **きめ細かなレイアウト制御**: `byte`, `word`, `dword`, `qword` などの明示的なデータ型や、`pad(size)` によるゼロ埋めパディングを柔軟に設定できます。
 * **動的なサイズ計算式**: 配列の長さや文字列バッファサイズを、四則演算（`+`, `-`, `*`, `/`）と括弧 `()` を用いて他の構造体フィールドの値から動的に決定できます（例: `[PayloadSize - (HeaderLength * 2)]byte`）。
 * **長さ・要素数フィールドの自動計算**: `valueof=bytelen(F)` / `valueof=count(F)` を使うと、エンコード時に長さや要素数のフィールドを自動的に埋められます。`len(Name)` と一致させ続けなければならない `NameLen` を手動管理する必要がなくなります。詳細は[計算フィールド値](#計算フィールド値valueof)を参照してください。
+* **固定値・マジックナンバー**: `const=` でシグネチャやバージョンフィールドを固定できます。エンコード時に書き込み、デコード時に検証します（整数マジック `const=0x04034b50` やバイト列マジック `const=0x89504e470d0a1a0a`）。詳細は[固定値・マジックナンバー](#固定値マジックナンバーconst)を参照してください。
 * **ポリモーフィズムとインターフェース処理**: 事前に割り当てられたインターフェースへの直感的な復元、またはカスタムシリアライザにより、デコード済みのヘッダー情報を基にした実行時の動的型割り当てに対応します。
 * **多言語テキストエンコーディング**: `AddTextEncoding` で文字コード（例: `Shift-JIS`, `UTF-16`）をあらかじめ登録しておくことで、文字列フィールドに対して文字コード変換に対応し、フォールバック用のデフォルトエンコードを設定できます。
 * **フィールド単位のエンディアン制御**: フィールドごとにエンディアン（`big`, `little`, `inverse`（反転））を指定でき、ネストされた構造体へも再帰的に伝播します。
@@ -102,6 +103,53 @@ type Record struct {
 * **`count(F)`** — 配列またはスライスフィールド `F` の要素数（文字列には使用不可。文字列のバイト長には `bytelen` を使用）。
 
 `valueof` は**エンコード専用かつ emit-only** です。計算値はストリームに書き込まれますが、Go の構造体フィールドは一切変更されません。計算値を Go 側に取り込むには `Marshal`/`Unmarshal` のラウンドトリップを行ってください。自動計算されるのは長さと要素数のみで、CRC チェックサム・圧縮後サイズ・オフセットなどの値は計算されません。詳細は[構造体タグリファレンス](STRUCT_TAGS_ja.md#8-計算フィールド値valueof)を参照してください。
+
+### レシピ: 可変長レコード
+
+実際のバイナリ形式で最もよく現れるレイアウト — 後続の可変長データのバイト長（や要素数）をヘッダーが保持する形 — は、`valueof=` を付けた長さフィールドと、その対象フィールドに付けた `[len]` サイズ式のペアで表現します。各ペアは自動的に同期します。エンコード時は `valueof` が長さを埋め、デコード時はサイズ式がそれを読み取ります。
+
+```go
+type Record struct {
+	Magic      uint32 `binary:"uint32"`                        // 自分で設定する
+	NameLen    uint16 `binary:"uint16,valueof=bytelen(Name)"`  // 自動 = Name のエンコード後バイト長
+	PayloadLen uint32 `binary:"uint32,valueof=bytelen(Payload)"`
+	ItemCount  uint16 `binary:"uint16,valueof=count(Items)"`   // 自動 = Items の要素数
+
+	Name    []byte   `binary:"[NameLen]byte"`     // デコード時に NameLen からサイズが決まる
+	Payload []byte   `binary:"[PayloadLen]byte"`  // PayloadLen からサイズが決まる
+	Items   []uint32 `binary:"[ItemCount]uint32"` // ItemCount からサイズが決まる
+}
+
+// エンコード: データフィールドだけを設定すれば、長さ・要素数フィールドは自動計算される。
+rec := Record{Magic: 0x5A45, Name: []byte("file.txt"), Payload: data, Items: ids}
+blob, _ := binarystruct.Marshal(&rec, binarystruct.LittleEndian)
+```
+
+エンコード時に設定するのは `Name`・`Payload`・`Items` だけで、`NameLen`・`PayloadLen`・`ItemCount` は実データから書き込まれます。デコード時はサイズ式が各フィールドを正確な長さで読み戻します。（`valueof` は emit-only のため、`Marshal` 後もメモリ上の `rec.NameLen` は `0` のままです。構造体に値を反映したい場合は `Unmarshal` でラウンドトリップしてください。）
+
+---
+
+## 固定値・マジックナンバー（`const`）
+
+`const` オプションはフィールドを固定値に固定します。**エンコード時に書き込み**（Go のフィールド値は無視）、**デコード時に検証**します（不一致なら `ErrValidationError`）。フォーマットのシグネチャ、バージョンマーカー、予約フィールドを表現する自然な方法です。
+
+```go
+type ZIPLocalHeader struct {
+	Signature uint32  `binary:"uint32,const=0x04034b50,endian=little"` // 'PK\x03\x04'
+	Version   uint16  `binary:"uint16,const=20,endian=little"`
+}
+
+type PNGHeader struct {
+	Magic [8]byte `binary:"[8]byte,const=0x89504e470d0a1a0a"` // \x89PNG\r\n\x1a\n
+}
+```
+
+対象は 2 つの形があります。
+
+* **整数・ビットマップ**（`const=0x04034b50`）: 定数の整数式。バイト順に従って書き込まれるためバイト列はエンディアンに依存します。シグネチャを決定的にするには**明示的に `endian=little|big`** を付けてください。2⁶³ 未満の値に限ります。より大きい値や複数バイトのマジックにはバイト列形式を使ってください。
+* **バイト列** `[N]byte` / `string(N)`（`const=0x89504e470d0a1a0a`）: 自然なバイト順で書き込まれる 16 進ブロブで、**エンディアンに依存しません**。`PK\x03\x04` は単に `const=0x504b0304` です。フィールドの固定サイズは定数の長さと一致する必要があります。
+
+`const` は `valueof` と併用できず、バイト列形式は `encoding=` と併用できません。両方の形式とも静的コードジェネレータでサポートされます。詳細は[構造体タグリファレンス](STRUCT_TAGS_ja.md#9-固定値マジックナンバーconst)を参照してください。
 
 ---
 

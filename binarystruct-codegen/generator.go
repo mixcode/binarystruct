@@ -113,6 +113,105 @@ func translateExpression(expr string) string {
 	})
 }
 
+type cgFieldInfo struct {
+	goType      string
+	encoding    string
+	hasValueof  bool
+	valueofExpr string
+}
+
+var (
+	cgValueofFuncRe = regexp.MustCompile(`s\.(bytelen|count)\(s\.([a-zA-Z_][a-zA-Z0-9_]*)\)`)
+	cgIdentRe       = regexp.MustCompile(`s\.([a-zA-Z_][a-zA-Z0-9_]*)`)
+)
+
+// isByteSequence reports whether goType is a byte-like slice or array, whose
+// element count equals its encoded byte length.
+func isByteSequence(goType string) bool {
+	elem := goType
+	if strings.HasPrefix(elem, "[") {
+		if i := strings.IndexByte(elem, ']'); i >= 0 {
+			elem = elem[i+1:]
+		}
+	}
+	return elem == "byte" || elem == "uint8" || elem == "int8"
+}
+
+// translateValueof converts a valueof expression into a Go integer expression.
+// count(F) and bytelen(F) of byte sequences / raw strings become len(s.F);
+// arithmetic and parentheses pass through. Cases that cannot be computed inline
+// (bytelen of nested structs or text-encoded strings, or a reference to another
+// valueof field) return a generation-time error rather than emitting wrong code.
+func (g *Generator) translateValueof(expr string, fields map[string]cgFieldInfo) (string, error) {
+	prefixed := translateExpression(expr) // e.g. s.bytelen(s.Name)+2
+	var ferr error
+	out := cgValueofFuncRe.ReplaceAllStringFunc(prefixed, func(m string) string {
+		sub := cgValueofFuncRe.FindStringSubmatch(m)
+		fn, arg := sub[1], sub[2]
+		fi, ok := fields[arg]
+		if !ok {
+			ferr = fmt.Errorf("valueof references unknown field %q", arg)
+			return m
+		}
+		switch fn {
+		case "count":
+			// count() is element count, valid only for slices/arrays.
+			if strings.HasPrefix(fi.goType, "[") {
+				return fmt.Sprintf("len(s.%s)", arg)
+			}
+			ferr = fmt.Errorf("count(%s) requires a slice or array field (got %q); use bytelen for a string's byte length", arg, fi.goType)
+			return m
+		case "bytelen":
+			if isByteSequence(fi.goType) || (fi.goType == "string" && fi.encoding == "") {
+				return fmt.Sprintf("len(s.%s)", arg)
+			}
+			ferr = fmt.Errorf("codegen does not support bytelen(%s) of type %q (e.g. nested struct or text-encoded string); use the runtime interpreter for this struct", arg, fi.goType)
+			return m
+		}
+		return m
+	})
+	if ferr != nil {
+		return "", ferr
+	}
+	// A bare reference to another valueof field cannot be resolved in generated
+	// code (it would read the field's pre-encode value, diverging from runtime).
+	for _, sm := range cgIdentRe.FindAllStringSubmatch(out, -1) {
+		if fi, ok := fields[sm[1]]; ok && fi.hasValueof {
+			return "", fmt.Errorf("codegen does not support a valueof expression referencing another valueof field (%q); use the runtime interpreter", sm[1])
+		}
+	}
+	return out, nil
+}
+
+// translateEncodeExpr translates a decode-side size expression for use on the
+// ENCODE path: any referenced valueof field is replaced by its computed
+// expression (so e.g. [NameLen]byte writes len(s.Name) bytes rather than the
+// stale s.NameLen). Non-valueof references become s.Field as usual.
+func (g *Generator) translateEncodeExpr(expr string, fields map[string]cgFieldInfo) (string, error) {
+	if expr == "" {
+		return "", nil
+	}
+	prefixed := translateExpression(expr)
+	var ferr error
+	out := cgIdentRe.ReplaceAllStringFunc(prefixed, func(m string) string {
+		name := cgIdentRe.FindStringSubmatch(m)[1]
+		fi, ok := fields[name]
+		if ok && fi.hasValueof {
+			sub, err := g.translateValueof(fi.valueofExpr, fields)
+			if err != nil {
+				ferr = err
+				return m
+			}
+			return "(" + sub + ")"
+		}
+		return m
+	})
+	if ferr != nil {
+		return "", ferr
+	}
+	return out, nil
+}
+
 func (g *Generator) Generate(outPath string) error {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, g.Dir, func(fi os.FileInfo) bool {
@@ -280,6 +379,22 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	buf.WriteString("\tvar tmp [8]byte\n")
 	buf.WriteString("\tvar m int\n")
 
+	// Field info for resolving valueof's bytelen()/count() at generation time.
+	fieldInfo := make(map[string]cgFieldInfo)
+	for _, field := range st.Fields.List {
+		if len(field.Names) == 0 {
+			continue
+		}
+		pt := parseFieldTag(field.Tag)
+		vexpr, hasV := pt.options["valueof"]
+		fieldInfo[field.Names[0].Name] = cgFieldInfo{
+			goType:      getGoTypeName(field.Type),
+			encoding:    pt.options["encoding"],
+			hasValueof:  hasV,
+			valueofExpr: vexpr,
+		}
+	}
+
 	for _, field := range st.Fields.List {
 		if len(field.Names) == 0 {
 			continue
@@ -302,10 +417,27 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 
 		binType := getEffectiveBinaryType(parsedTag.binaryType, goType)
 
+		// valueof: write a value computed from other fields instead of the
+		// field's own (emit-only). Validated as an integer scalar upstream.
+		if vexpr, ok := parsedTag.options["valueof"]; ok && vexpr != "" {
+			valExpr, vErr := g.translateValueof(vexpr, fieldInfo)
+			if vErr != nil {
+				return fmt.Errorf("field %s: %w", fieldName, vErr)
+			}
+			if err := g.generateFieldWrite(buf, "("+valExpr+")", goType, binType, parsedTag, fieldInfo); err != nil {
+				return fmt.Errorf("field %s: %w", fieldName, err)
+			}
+			continue
+		}
+
 		if parsedTag.isArray {
-			g.generateArrayWrite(buf, fieldName, goType, binType, parsedTag)
+			if err := g.generateArrayWrite(buf, fieldName, goType, binType, parsedTag, fieldInfo); err != nil {
+				return fmt.Errorf("field %s: %w", fieldName, err)
+			}
 		} else {
-			g.generateFieldWrite(buf, "s."+fieldName, goType, binType, parsedTag)
+			if err := g.generateFieldWrite(buf, "s."+fieldName, goType, binType, parsedTag, fieldInfo); err != nil {
+				return fmt.Errorf("field %s: %w", fieldName, err)
+			}
 		}
 	}
 	buf.WriteString("\treturn n, nil\n")
@@ -368,7 +500,7 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	return nil
 }
 
-func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binType string, parsedTag parsedFieldTag) {
+func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binType string, parsedTag parsedFieldTag, fields map[string]cgFieldInfo) error {
 	// Dereference pointer if necessary
 	isPtr := strings.HasPrefix(goType, "*")
 	accessor := target
@@ -386,7 +518,7 @@ func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binTyp
 		if isPtr {
 			buf.WriteString("\t}\n")
 		}
-		return
+		return nil
 	}
 
 	switch binType {
@@ -409,7 +541,10 @@ func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binTyp
 		fmt.Fprintf(buf, "\torder.PutUint64(tmp[:8], math.Float64bits(float64(%s)))\n", accessor)
 		buf.WriteString("\tm, err = w.Write(tmp[:8])\n\tn += m\n\tif err != nil {\n\t\treturn n, err\n\t}\n")
 	case "pad":
-		sizeExpr := translateExpression(parsedTag.bufLenExpr)
+		sizeExpr, err := g.translateEncodeExpr(parsedTag.bufLenExpr, fields)
+		if err != nil {
+			return err
+		}
 		if sizeExpr == "" {
 			sizeExpr = "1"
 		}
@@ -434,7 +569,10 @@ func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binTyp
 		}
 		// Pad or truncate string to buffer size
 		if parsedTag.bufLenExpr != "" {
-			bufSize := translateExpression(parsedTag.bufLenExpr)
+			bufSize, err := g.translateEncodeExpr(parsedTag.bufLenExpr, fields)
+			if err != nil {
+				return err
+			}
 			fmt.Fprintf(buf, "\t\tbufLen := int(%s)\n", bufSize)
 			buf.WriteString("\t\twriteBytes := make([]byte, bufLen)\n")
 			buf.WriteString("\t\tcopy(writeBytes, strBytes)\n")
@@ -459,6 +597,7 @@ func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binTyp
 	if isPtr {
 		buf.WriteString("\t}\n")
 	}
+	return nil
 }
 
 func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType string, parsedTag parsedFieldTag, typeName, fieldName string) {
@@ -579,8 +718,13 @@ func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType
 	}
 }
 
-func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag) {
-	sizeExpr := translateExpression(parsedTag.arrayLenExpr)
+func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag, fields map[string]cgFieldInfo) error {
+	// Encode path: resolve valueof-referenced length fields to their computed
+	// values so e.g. [NameLen]byte writes len(s.Name) bytes, not stale s.NameLen.
+	sizeExpr, err := g.translateEncodeExpr(parsedTag.arrayLenExpr, fields)
+	if err != nil {
+		return err
+	}
 	if sizeExpr == "" {
 		sizeExpr = fmt.Sprintf("len(s.%s)", fieldName)
 	}
@@ -592,7 +736,7 @@ func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, bin
 			fmt.Fprintf(buf, "\t\tcopy(strBytes, s.%s)\n", fieldName)
 			buf.WriteString("\t\tm, err = w.Write(strBytes)\n")
 			buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
-			return
+			return nil
 		}
 	}
 
@@ -601,13 +745,16 @@ func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, bin
 		fmt.Fprintf(buf, "\t{\n\t\twriteLen := int(%s)\n", sizeExpr)
 		fmt.Fprintf(buf, "\t\tm, err = w.Write(s.%s[:writeLen])\n", fieldName)
 		buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
-		return
+		return nil
 	}
 
 	fmt.Fprintf(buf, "\t{\n\t\tlimit := int(%s)\n", sizeExpr)
 	buf.WriteString("\t\tfor i := 0; i < limit; i++ {\n")
-	g.generateFieldWrite(buf, fmt.Sprintf("s.%s[i]", fieldName), strings.TrimPrefix(goType, "[]"), binType, parsedTag)
+	if err := g.generateFieldWrite(buf, fmt.Sprintf("s.%s[i]", fieldName), strings.TrimPrefix(goType, "[]"), binType, parsedTag, fields); err != nil {
+		return err
+	}
 	buf.WriteString("\t\t}\n\t}\n")
+	return nil
 }
 
 func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag, typeName string) {

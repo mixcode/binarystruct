@@ -210,3 +210,93 @@ type TestStruct struct {
 		t.Errorf("unexpected Code field: %+v", fields[1])
 	}
 }
+
+func TestCodegen_Valueof(t *testing.T) {
+	tmpDir, err := ioutil.TempDir(".", "tmp-binarystruct-codegen-valueof-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	codegenBin := filepath.Join(tmpDir, "binarystruct-codegen")
+	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./binarystruct-codegen")
+	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build codegen tool: %v\n%s", err, buildOut)
+	}
+
+	// A ZIP-like header: NameLen/Count are computed from Name/Items via valueof.
+	structFile := filepath.Join(tmpDir, "types.go")
+	structContent := `package tmp_codegen_valueof_test
+
+type Packet struct {
+	NameLen uint16 ` + "`" + `binary:"uint16,valueof=bytelen(Name)"` + "`" + `
+	Count   uint8  ` + "`" + `binary:"uint8,valueof=count(Items)+1"` + "`" + `
+	Name    []byte ` + "`" + `binary:"[NameLen]byte"` + "`" + `
+	Items   []byte ` + "`" + `binary:"[Count-1]byte"` + "`" + `
+}
+`
+	if err := ioutil.WriteFile(structFile, []byte(structContent), 0644); err != nil {
+		t.Fatalf("failed to write test struct file: %v", err)
+	}
+
+	genCmd := exec.Command(codegenBin, "-type", "Packet", tmpDir)
+	var genStderr bytes.Buffer
+	genCmd.Stderr = &genStderr
+	if err := genCmd.Run(); err != nil {
+		t.Fatalf("codegen run failed: %v\nStderr: %s", err, genStderr.String())
+	}
+
+	testFile := filepath.Join(tmpDir, "types_test.go")
+	testContent := `package tmp_codegen_valueof_test
+
+import (
+	"bytes"
+	"testing"
+)
+
+func TestGeneratedValueof(t *testing.T) {
+	// NameLen and Count are seeded WRONG to prove valueof overrides them.
+	s := Packet{NameLen: 999, Count: 0, Name: []byte("hello.txt"), Items: []byte{1, 2, 3}}
+	blob, err := s.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary failed: %v", err)
+	}
+	// BigEndian: NameLen=9 (00 09), Count=4 (04), "hello.txt", 1 2 3
+	want := append([]byte{0x00, 0x09, 0x04}, append([]byte("hello.txt"), 1, 2, 3)...)
+	if !bytes.Equal(blob, want) {
+		t.Fatalf("blob = % x\nwant  = % x", blob, want)
+	}
+	// emit-only: source struct unchanged
+	if s.NameLen != 999 || s.Count != 0 {
+		t.Errorf("source mutated: NameLen=%d Count=%d", s.NameLen, s.Count)
+	}
+
+	var s2 Packet
+	if err := s2.UnmarshalBinary(blob); err != nil {
+		t.Fatalf("UnmarshalBinary failed: %v", err)
+	}
+	if s2.NameLen != 9 || s2.Count != 4 || string(s2.Name) != "hello.txt" || !bytes.Equal(s2.Items, []byte{1, 2, 3}) {
+		t.Errorf("round-trip mismatch: %+v", s2)
+	}
+}
+`
+	if err := ioutil.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	testArgs := []string{"test", "./" + tmpDir}
+	if testing.Verbose() {
+		testArgs = append(testArgs, "-v")
+	}
+	testCmd := exec.Command("go", testArgs...)
+	testOutput, err := testCmd.CombinedOutput()
+	if testing.Verbose() {
+		t.Log(string(testOutput))
+	}
+	if err != nil {
+		if !testing.Verbose() {
+			t.Log(string(testOutput))
+		}
+		t.Errorf("generated valueof tests failed: %v", err)
+	}
+}

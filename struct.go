@@ -25,6 +25,7 @@ type structFieldMetadata struct {
 	isArray       bool
 	arrayLenExpr  string
 	bufLenExpr    string
+	valueofExpr   string
 	encoding      string
 	endian        endianOverride
 	serializer    string
@@ -47,6 +48,16 @@ type structFieldMetadata struct {
 
 type structMetadata struct {
 	fields []structFieldMetadata
+}
+
+// fieldByName returns the metadata for the field with the given Go name.
+func (m *structMetadata) fieldByName(name string) (structFieldMetadata, bool) {
+	for _, f := range m.fields {
+		if f.name == name {
+			return f, true
+		}
+	}
+	return structFieldMetadata{}, false
 }
 
 var (
@@ -150,6 +161,14 @@ type tagParser struct {
 	tokens []token
 	pos    int
 	strc   reflect.Value
+
+	// resolveIdent resolves a bare field reference (e.g. "PayloadSize").
+	// When nil, bare field references are rejected.
+	resolveIdent func(name string) (int, error)
+	// callFunc resolves a function call such as bytelen(Name) or count(Items).
+	// When nil, function calls are rejected (the case for decode-side size
+	// expressions, where functions are not permitted).
+	callFunc func(funcName, argName string) (int, error)
 }
 
 func (p *tagParser) peek() token {
@@ -261,19 +280,25 @@ func (p *tagParser) parseFactor() (int, error) {
 	}
 	if t.typ == tokIdent {
 		p.consume()
-		if p.strc.Kind() != reflect.Struct {
-			return 0, fmt.Errorf("cannot reference field %s of non-struct", t.val)
+		// function call: IDENT '(' IDENT ')'
+		if p.peek().typ == tokLParen {
+			p.consume() // '('
+			arg := p.consume()
+			if arg.typ != tokIdent {
+				return 0, fmt.Errorf("function %s() expects a field name argument", t.val)
+			}
+			if p.consume().typ != tokRParen {
+				return 0, fmt.Errorf("missing closing parenthesis in %s(%s", t.val, arg.val)
+			}
+			if p.callFunc == nil {
+				return 0, fmt.Errorf("function %s() is not allowed here (functions are valid only in valueof)", t.val)
+			}
+			return p.callFunc(t.val, arg.val)
 		}
-		typ := p.strc.Type()
-		f, ok := typ.FieldByName(t.val)
-		if !ok {
-			return 0, fmt.Errorf("no field named %s", t.val)
+		if p.resolveIdent == nil {
+			return 0, fmt.Errorf("field reference %s is not allowed here", t.val)
 		}
-		v := p.strc.FieldByIndex(f.Index)
-		if !v.Type().ConvertibleTo(i64type) {
-			return 0, fmt.Errorf("field %s is not convertible to integer", t.val)
-		}
-		return int(v.Convert(i64type).Int()), nil
+		return p.resolveIdent(t.val)
 	}
 	return 0, fmt.Errorf("unexpected token %s", t.val)
 }
@@ -285,8 +310,11 @@ func evaluateTagValue(strc reflect.Value, stmt string) (value int, err error) {
 		return 0, err
 	}
 	p := &tagParser{
-		tokens: tokens,
-		strc:   strc,
+		tokens:       tokens,
+		strc:         strc,
+		resolveIdent: fieldValueResolver(strc),
+		// callFunc stays nil: bytelen()/count() are not permitted in
+		// arithmetic decode-side expressions ([arrayLen] and buf_len).
 	}
 	value, err = p.parseExpr()
 	if err != nil {
@@ -296,6 +324,60 @@ func evaluateTagValue(strc reflect.Value, stmt string) (value int, err error) {
 		return 0, fmt.Errorf("unexpected token at end of expression: %s", p.peek().val)
 	}
 	return value, nil
+}
+
+// fieldValueResolver returns a resolver that reads a sibling field's integer
+// value from strc, for use by arithmetic and decode-side size expressions.
+func fieldValueResolver(strc reflect.Value) func(string) (int, error) {
+	return func(name string) (int, error) {
+		if strc.Kind() != reflect.Struct {
+			return 0, fmt.Errorf("cannot reference field %s of non-struct", name)
+		}
+		typ := strc.Type()
+		f, ok := typ.FieldByName(name)
+		if !ok {
+			return 0, fmt.Errorf("no field named %s", name)
+		}
+		v := strc.FieldByIndex(f.Index)
+		if !v.Type().ConvertibleTo(i64type) {
+			return 0, fmt.Errorf("field %s is not convertible to integer", name)
+		}
+		return int(v.Convert(i64type).Int()), nil
+	}
+}
+
+type exprFuncCall struct {
+	name string // "bytelen" or "count"
+	arg  string // referenced field name
+}
+
+// exprReferences parses expr WITHOUT evaluating it, returning the field names
+// it references and the function calls it makes. Used at metadata-build time to
+// validate valueof expressions and to reject functions in decode expressions.
+func exprReferences(expr string) (refs []string, funcs []exprFuncCall, err error) {
+	tokens, err := tokenize(expr)
+	if err != nil {
+		return nil, nil, err
+	}
+	p := &tagParser{
+		tokens: tokens,
+		resolveIdent: func(name string) (int, error) {
+			refs = append(refs, name)
+			return 0, nil
+		},
+		callFunc: func(fn, arg string) (int, error) {
+			funcs = append(funcs, exprFuncCall{name: fn, arg: arg})
+			refs = append(refs, arg)
+			return 0, nil
+		},
+	}
+	if _, err = p.parseExpr(); err != nil {
+		return nil, nil, err
+	}
+	if p.peek().typ != tokEOF {
+		return nil, nil, fmt.Errorf("unexpected token at end of expression: %s", p.peek().val)
+	}
+	return refs, funcs, nil
 }
 
 // parse tag string directly
@@ -389,6 +471,9 @@ func parseTagString(tagStr string, strc reflect.Value, naturalType eType, natura
 				err = fmt.Errorf("missing value for serializer tag")
 				return
 			}
+		case "valueof":
+			err = fmt.Errorf("valueof is only supported on struct fields, not single values")
+			return
 
 		default:
 			err = fmt.Errorf("unknown tag %s", t[0])
@@ -408,6 +493,10 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 
 	nField := structType.NumField()
 	fields := make([]structFieldMetadata, 0, nField)
+
+	// fieldName -> field names referenced by its valueof expression,
+	// collected for reference-cycle detection after all fields are parsed.
+	valueofRefs := make(map[string][]string)
 
 	for i := 0; i < nField; i++ {
 		field := structType.Field(i)
@@ -510,6 +599,12 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 				if len(t) > 1 {
 					meta.omittableExpr = t[1]
 				}
+			case "valueof":
+				if len(t) > 1 {
+					meta.valueofExpr = strings.Join(t[1:], "=")
+				} else {
+					return nil, fmt.Errorf("missing value for valueof tag on field %s", field.Name)
+				}
 			case "range":
 				if len(t) > 1 {
 					meta.hasRange = true
@@ -581,9 +676,93 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 			if meta.serializer != "" {
 				meta.option.serializer = meta.serializer
 			}
+
+			// Decode-side size expressions must be arithmetic only: reject
+			// bytelen()/count() in [arrayLen] and buf_len.
+			for _, e := range []string{meta.arrayLenExpr, meta.bufLenExpr} {
+				if e == "" {
+					continue
+				}
+				if _, fns, errRef := exprReferences(e); errRef == nil && len(fns) > 0 {
+					return nil, fmt.Errorf("field %s: functions (bytelen/count) are not allowed in array/buffer length expressions", field.Name)
+				}
+			}
+
+			// Validate valueof: integer target, valid functions, existing
+			// referenced fields. Record references for cycle detection.
+			if meta.valueofExpr != "" {
+				if meta.isArray {
+					return nil, fmt.Errorf("field %s: valueof is not allowed on array/slice fields", field.Name)
+				}
+				switch meta.naturalType.iKind() {
+				case intKind, uintKind, bitmapKind:
+				default:
+					return nil, fmt.Errorf("field %s: valueof requires an integer/bitmap field type, got %s", field.Name, meta.naturalType)
+				}
+				refs, fns, errRef := exprReferences(meta.valueofExpr)
+				if errRef != nil {
+					return nil, fmt.Errorf("field %s: invalid valueof expression: %w", field.Name, errRef)
+				}
+				for _, fn := range fns {
+					if fn.name != "bytelen" && fn.name != "count" {
+						return nil, fmt.Errorf("field %s: unknown function %s() in valueof (use bytelen or count)", field.Name, fn.name)
+					}
+					// count() is element count, valid only for slices/arrays.
+					// Strings have no unambiguous element count under text
+					// encodings — use bytelen for a string's byte length.
+					if fn.name == "count" {
+						if sf, ok := structType.FieldByName(fn.arg); ok {
+							ft := sf.Type
+							for ft.Kind() == reflect.Ptr {
+								ft = ft.Elem()
+							}
+							if ft.Kind() != reflect.Slice && ft.Kind() != reflect.Array {
+								return nil, fmt.Errorf("field %s: count(%s) requires a slice or array field (use bytelen for a string's byte length)", field.Name, fn.arg)
+							}
+						}
+					}
+				}
+				for _, r := range refs {
+					if _, ok := structType.FieldByName(r); !ok {
+						return nil, fmt.Errorf("field %s: valueof references unknown field %s", field.Name, r)
+					}
+				}
+				valueofRefs[field.Name] = refs
+			}
 		}
 
 		fields = append(fields, meta)
+	}
+
+	// Reject reference cycles among valueof fields (e.g. A's valueof references
+	// B and B's valueof references A), which would make encode-time evaluation
+	// non-terminating.
+	if len(valueofRefs) > 0 {
+		valueofSet := make(map[string]bool, len(valueofRefs))
+		for name := range valueofRefs {
+			valueofSet[name] = true
+		}
+		var visit func(name string, path map[string]bool) error
+		visit = func(name string, path map[string]bool) error {
+			if path[name] {
+				return fmt.Errorf("valueof reference cycle detected at field %s", name)
+			}
+			path[name] = true
+			for _, r := range valueofRefs[name] {
+				if valueofSet[r] {
+					if err := visit(r, path); err != nil {
+						return err
+					}
+				}
+			}
+			delete(path, name)
+			return nil
+		}
+		for name := range valueofRefs {
+			if err := visit(name, map[string]bool{}); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	meta := &structMetadata{fields: fields}

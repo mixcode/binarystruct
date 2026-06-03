@@ -8,6 +8,8 @@ For example, an integer value in raw binary structure may be stored as a word or
 
 This package simplifies these typecasting burdens by automatically handling conversion of struct fields using field tags.
 
+AI agents: read https://raw.githubusercontent.com/mixcode/binarystruct/main/llms-full.txt first (see "For AI Agents and Code Assistants" at the end of this document).
+
 # A Quick Example
 
 Assume we have a binary data structure with a magic header and three integers, byte, word, dword each.
@@ -59,19 +61,34 @@ Example:
   - omittable=Expr: Skips the field if byte size limits are reached.
   - range=min..max: Performs range validation check on integers and floats.
   - match=pattern: Performs regex match validation check on string fields.
+  - valueof=Expr: (encode-only) Auto-computes an integer field's serialized value from other fields via bytelen()/count() and arithmetic. Emit-only: the Go field is not modified. See "Computed Field Values" below.
 
 ## Array and Size Expressions
 
-  - [len]TYPE: Specifies an array of the given length.
-  - TYPE(buf_len): Limits/pads string or padding buffer size.
+  - [len]TYPE: Specifies an array whose length is the expression len.
+  - TYPE(buf_len): Limits/pads a string or padding buffer to the expression buf_len.
 
-Both array length [len] and buffer size (buf_len) can use arithmetic expressions (+, -, *, /, and parentheses) referencing other struct fields:
+Wherever a tag takes a size or computed value — [len], (buf_len), omittable=Expr, and valueof=Expr — it accepts an expression, not just a literal. Operands are integer literals (decimal, hex 0x1F, octal 0o17, binary 0b1010, with optional _ digit separators) and references to other struct fields; operators are +, -, *, /, and parentheses. Decode-side expressions ([len], (buf_len), omittable) may reference only fields defined before the target; valueof may reference any field. The bytelen()/count() functions are available only inside valueof (see "Computed Field Values").
 
 	type Packet struct {
 		HeaderSize  int    `binary:"uint8"`
 		PayloadSize int    `binary:"uint16"`
 		Payload     []byte `binary:"[PayloadSize - HeaderSize]byte"`
+		Tail        []byte `binary:"[0x10]byte"` // fixed 16-byte field via a hex constant
 	}
+
+# Computed Field Values
+
+The valueof option computes an integer field's serialized value from other fields at encode time, so a length field need not be filled in by hand:
+
+	type Record struct {
+		NameLen uint16 `binary:"uint16,valueof=bytelen(Name)"` // encode: written as len(Name)
+		Name    []byte `binary:"[NameLen]byte"`                 // decode: sized from NameLen
+	}
+
+valueof expressions may use the functions bytelen(F) (total encoded byte length of any field F) and count(F) (element count of an array or slice field F; not valid for strings — use bytelen for a string's byte length), combined with +, -, *, / and parentheses. valueof is evaluated only when encoding; on decode the field is read normally. It is emit-only: the computed value is written to the stream but the Go field is not modified (encoding stays a pure read). To obtain the computed values in Go, perform a Marshal/Unmarshal round trip.
+
+valueof only derives field lengths and counts. Other derived values, such as CRC checksums, compressed sizes, or offsets, are not computed for you and must be assigned normally.
 
 # Interface & Polymorphic Handling
 
@@ -169,5 +186,24 @@ To achieve peak performance in production, compile your struct layouts into stat
 	binarystruct-codegen -type Packet,Header
 
 For more information, see the README.md file in the binarystruct-codegen package directory.
+
+# For AI Agents and Code Assistants
+
+A comprehensive integration guide written for LLM-based coding agents is
+available in the repository as llms-full.txt (indexed by llms.txt):
+
+	https://raw.githubusercontent.com/mixcode/binarystruct/main/llms-full.txt
+
+It covers the tag cheat sheet, dynamic sizing, custom serializers, text
+encodings, validation, and common pitfalls. Agents generating code against this
+package should read that guide first.
+
+Argument order (a common trap): the byte-order argument is not in the same
+position in every function. Stream functions take the stream first, like
+encoding/binary — Write(w, order, v), Read(r, order, v), Unmarshal(data, order,
+v) — while Marshal takes the value first, like encoding/json — Marshal(v,
+order). The unifying rule: the buffer/stream argument comes first, then order,
+then the value; Marshal has no stream argument, so the value leads. Verify the
+exact signatures rather than assuming Marshal and Write share an argument order.
 */
 package binarystruct

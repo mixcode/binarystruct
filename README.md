@@ -53,6 +53,7 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 * **Declarative Validation**: Validate deserialized values inline with `range=min..max` for numeric bounds checks and `match=pattern` for regex string validation, returning errors on violation.
 * **Fine-Grained Layout Controls**: Control data alignment using explicit types like `byte`, `word`, `dword`, `qword`, and zero-filled padding bytes via the `pad(size)` tag.
 * **Dynamic Size Expressions**: Calculate array lengths and string buffer sizes dynamically based on other struct fields, supporting arithmetic operations (`+`, `-`, `*`, `/`) and parentheses (e.g., `[PayloadSize - (HeaderLength * 2)]byte`).
+* **Computed Length/Count Fields**: Fill a length or count field automatically at encode time with `valueof=bytelen(F)` / `valueof=count(F)`, so you never hand-maintain a `NameLen` that must equal `len(Name)`. See [Computed Field Values](#computed-field-values-valueof).
 * **Interface & Polymorphic Handling**: Automatically deserializes into pre-assigned interface fields, or uses custom serializers to dynamically allocate types based on previously decoded header values.
 * **High-Performance Runtime Interpreter**: Uses dynamic layout compilation and a cached metadata interpreter. Unsafe Mode (default) bypasses reflection using `unsafe.Pointer` and zero-allocation slice streaming, yielding giant performance gain compared with safe mode using Go reflection.
 * **Static Code Generation**: Includes a `binarystruct-codegen` tool that generates optimized, reflection-free `MarshalBinary` / `UnmarshalBinary` methods from struct tags. Achieves up to **6.7x speedup** over safe-mode reflection with near-zero allocations. Supports `go:generate` integration. See [`binarystruct-codegen/README.md`](binarystruct-codegen/README.md).
@@ -68,7 +69,7 @@ This package supports multiple build modes to balance performance, platform safe
 
 | Mode / Build Tags | Description | Performance Profile |
 | :--- | :--- | :--- |
-| **Default Mode** (Unsafe) | Bypasses reflection using direct memory operations with `unsafe.Pointer` interpreter and layout-compatible fast-paths. | **Maximum Speed** (up to 214x faster, 99.9% fewer allocations). |
+| **Default Mode** (Unsafe) | Bypasses reflection using direct memory operations with `unsafe.Pointer` interpreter and layout-compatible fast-paths. | Faster than safe mode with fewer allocations (see [benchmark table](#performance-comparison)). |
 | **Safe Mode** (`-tags safe_binarystruct`) | Falls back to pure reflection-based Go. Required on restricted platforms. | Standard Go reflection overhead. |
 | **SIMD Mode** (`GOEXPERIMENT=simd -tags experiment_simd`) | Uses experimental Go 1.26 `simd/archsimd` to vectorize endian byte-swapping on AMD64 with CPU feature checks. | Maximum vectorized throughput for large arrays/slices. |
 
@@ -80,6 +81,26 @@ If you deploy to sandboxed environments that restrict memory address access or b
 go build -tags safe_binarystruct ./...
 go test -tags safe_binarystruct ./...
 ```
+
+---
+
+## Computed Field Values (`valueof`)
+
+Length and count fields usually have to mirror another field by hand — a filename-length field that must always equal `len(Name)`, for example. The `valueof` option computes such a field's serialized value at **encode time**, so you only maintain the data field:
+
+```go
+type Record struct {
+	NameLen uint16 `binary:"uint16,valueof=bytelen(Name)"` // encode: written as the byte length of Name
+	Name    []byte `binary:"[NameLen]byte"`                 // decode: sized from NameLen
+}
+```
+
+A `valueof` value is a full [expression](STRUCT_TAGS.md#5-expressions) (arithmetic, constants, field references) extended with two functions:
+
+* **`bytelen(F)`** — total encoded byte length of any field `F` (honors text encodings, length prefixes, arrays, and nested structs, not just `len()`).
+* **`count(F)`** — element count of an array or slice field `F` (not valid for strings; use `bytelen` for a string's byte length).
+
+`valueof` is **encode-only and emit-only**: the computed value is written to the stream, but your Go struct field is never modified. To read the computed values back into Go, do a `Marshal`/`Unmarshal` round trip. It derives only lengths and counts — other values such as CRC checksums, compressed sizes, or offsets are not computed for you. See the [Struct Tag Reference](STRUCT_TAGS.md#8-computed-field-values-valueof) for full details.
 
 ---
 

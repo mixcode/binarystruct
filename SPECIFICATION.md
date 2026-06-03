@@ -37,6 +37,49 @@ Tag options modify the behavior of binary types. They are appended after the typ
 | **`omittable`** | `omittable` or `omittable=Expr` | Any | Allows truncated streams: if EOF is reached at this field's start, decoding stops without error. |
 | **`range`** | `range=min..max` | Numeric types | Validates deserialized value is within `[min, max]`. Returns error on violation. |
 | **`match`** | `match=pattern` | String types | Validates deserialized string matches the regex pattern. Returns error on violation. |
+| **`valueof`** | `valueof=Expr` | Integer/bitmap types | **Encode-only.** Computes the field's serialized value from an expression (may use `bytelen()`/`count()`). Emit-only: the Go field is not modified. See [Computed Field Assignment](#computed-field-assignment-valueof-bytelen-count). |
+
+### Computed Field Assignment: `valueof`, `bytelen()`, `count()`
+
+The `valueof` option auto-computes an integer field's **serialized** value from other fields during encoding, removing manual length/count bookkeeping (e.g. a filename-length field that must equal `len(Name)`).
+
+**Direction — encode-only.** `valueof` is evaluated by `Marshal`/`Write` only. On decode it is **ignored**: the field is read from the stream as a normal integer. A `valueof` length field is therefore paired with a decode-side size expression on its target field, the two being inverses:
+
+```go
+NameLen uint16 `binary:"uint16,valueof=bytelen(Name)"` // encode: written as len(Name)
+Name    []byte `binary:"[NameLen]byte"`               // decode: sized from NameLen
+```
+
+**Emit-only (no write-back).** The computed value is written to the byte stream; the Go struct field is **not** modified, and any value the caller placed in it is ignored on encode. This keeps encoding side-effect-free and the output stream strictly forward-only — the value is derived by measuring referenced fields into a scratch buffer, never by seeking back to patch the stream.
+
+> **Design decision (permanent): write-back will never be implemented.** A "write-back" mode that stored computed values back into the Go struct was considered and **deliberately rejected**, for reasons that outweigh the small amount of code it would take:
+> 1. **Encoding must stay a pure read.** Emit-only `Marshal`/`Write` never mutate their input, so the same value (or a shared pointee) can be marshalled concurrently without a data race. Write-back would turn encoding into a mutation and silently introduce that race — an unacceptable regression for a serialization library.
+> 2. **No pointer-vs-value contract surprise.** Reflective write-back only works when the caller passed an addressable (pointer) argument; a plain value could not be updated. Emit-only behaves identically regardless of how the argument was passed.
+> 3. **One behavior across all three paths.** Safe, unsafe, and codegen paths stay byte-identical with no per-path settability edge cases to keep in sync.
+>
+> **If you need the struct populated with the computed values, perform a `Marshal`/`Unmarshal` (or `Write`/`Read`) round trip:** marshal the struct to bytes, then unmarshal those bytes back into a struct of the same type. On decode the length/count fields are read from the stream normally, so the resulting struct carries the true serialized values.
+
+**Applies to:** integer and bitmap target types (`int8`…`int64`, `uint8`…`uint64`, `byte`/`word`/`dword`/`qword`). `valueof` on any other field type is a compile-time (metadata) error.
+
+**Expression grammar.** `valueof` reuses the standard arithmetic evaluator (integer literals incl. `0x`/`0o`/`0b`, `+ - * /`, parentheses, and field references) and extends it with **single-argument functions**:
+
+| Function | Result |
+| :--- | :--- |
+| **`bytelen(F)`** | Total **encoded byte size** of field `F` (exact: honors text encodings, length prefixes, arrays, and nested structs). Valid for any field. |
+| **`count(F)`** | **Element count** (`len(F)`) of an array or slice field `F`. Not valid for strings (no unambiguous element count under text encodings) — use `bytelen` for a string's byte length. |
+
+Examples: `valueof=bytelen(Name)`, `valueof=bytelen(Payload)+2`, `valueof=count(Items)`, `valueof=bytelen(A)+bytelen(B)`. (Functions take exactly one field-name argument in this version; multi-argument forms are reserved.)
+
+**Reference scope (forward references permitted).** Because the entire Go value is available at encode time, a `valueof` expression may reference **any** field in the struct, including fields declared *after* it. This is the deliberate counterpart to decode-side `[arrayLen]`/`buf_len` expressions, which remain **arithmetic-only** and may reference only **preceding** fields. Function tokens (`bytelen`/`count`) are rejected outside `valueof`.
+
+**`bytelen()` evaluation.** Size is obtained by encoding `F` with the active Marshaller into a scratch buffer and counting the bytes — guaranteeing it equals what is actually written. (Raw `len()` is **not** used for strings, since text encodings such as Shift-JIS change the byte width.) Implementations may fast-path trivially-sized targets — byte slices, fixed-width scalars, and fixed arrays of scalars — with `len`/byte-width arithmetic to avoid a second encode.
+
+**Validation (at `getStructMetadata`):** the target is an integer/bitmap kind; the function name is `bytelen` or `count`; the argument names an existing field; a `count` argument is a slice or array field; reference cycles among `valueof` fields are rejected.
+
+| Path | Mapping |
+| :--- | :--- |
+| **Runtime** (`marshal.go`, `unsafe_io.go`) | Before writing the field, if `valueofExpr` is set, evaluate it with the context-carrying value evaluator (Marshaller + byte order + struct metadata) and write the resulting integer in place of the field value. The unsafe path routes `valueof` fields through the reflection writer (rare fields; negligible cost). |
+| **Codegen** (`generator.go`) | Emit the value computation inline before the integer write. `count(F)` → `len(s.F)`; `bytelen(F)` → `len(s.F)` when `F` is a byte slice/array or a non-encoded `string`. `bytelen` of a nested struct or text-encoded string is **not** supported by codegen — `translateValueof` returns a generation-time error; use the runtime interpreter for those structs. |
 
 ---
 
@@ -80,6 +123,9 @@ When a struct is passed to `Write`/`Read`, the runtime checks for these interfac
 3. **Regex Precompilation (`match=pattern`)**:
    * **Runtime**: Compiles regex once during `getStructMetadata()` via `regexp.Compile()` and stores it in the metadata cache.
    * **Codegen**: Declares a global package-level variable `var regex_Struct_Field = regexp.MustCompile(pattern)` to precompile at package load.
+4. **Computed Assignment (`valueof`) & Expression Functions**:
+   * **Runtime**: `valueof` fields are resolved at encode time only, via a context-carrying evaluator able to compute `bytelen()`/`count()`; the result is written without mutating the struct (emit-only). `bytelen()` measures into a scratch buffer, so the output stream stays forward-only. Functions are `valueof`-only; decode expressions remain arithmetic-only and may reference preceding fields only.
+   * **Codegen**: Emits the value computation inline before the field write — `len(s.F)` for `count` and for `bytelen` of byte slices/arrays and non-encoded strings. `bytelen` of a nested struct or text-encoded string is rejected at generation time (use the runtime interpreter). No write-back is generated.
 
 ---
 
@@ -106,4 +152,4 @@ When introducing a new binary type, tag option, or modifier, you **must** check 
   If the option accesses dynamic instances (like text encodings or custom serializers), ensure it is wired through both the standard interface and context-aware interfaces (`MarshallerContextWriter` / `MarshallerContextReader`).
 
 - [ ] **Step 7: Testing**
-  Write unit tests verifying correct behavior in both safe and unsafe interpreter modes, and add a test structure verifying the same behavior in the static codegen integration suite ([codegen_integration_test.go](file:///home/jichoi/goproj/mixcode/binarystruct/codegen_integration_test.go)).
+  Write unit tests verifying correct behavior in both safe and unsafe interpreter modes, and add a test structure verifying the same behavior in the static codegen integration suite ([codegen_integration_test.go](codegen_integration_test.go)).

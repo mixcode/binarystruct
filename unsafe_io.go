@@ -85,6 +85,9 @@ func (ms *Marshaller) unsafeWriteStruct(w io.Writer, order ByteOrder, strc refle
 		f := typ.Field(i)
 		return fmt.Errorf("field <%s>: %w", f.Name, e)
 	}
+	// Write-path size-expression evaluator: resolves referenced valueof fields
+	// to their computed values rather than their ignored Go field values.
+	writeEval := ms.encodeExprEval(order, strc, meta)
 
 	for _, fMeta := range meta.fields {
 		if fMeta.ignore || fMeta.unexported {
@@ -102,6 +105,31 @@ func (ms *Marshaller) unsafeWriteStruct(w io.Writer, order ByteOrder, strc refle
 			if errEval == nil && n >= limit {
 				break
 			}
+		}
+
+		// valueof: integer field whose serialized value is computed from other
+		// fields (emit-only). Route through the reflection writer with the
+		// computed value instead of the stale in-memory value.
+		if fMeta.valueofExpr != "" {
+			computed, errV := ms.evalValueof(order, strc, meta, fMeta.valueofExpr)
+			if errV != nil {
+				err = wErr(fMeta.index, errV)
+				return
+			}
+			syn := synthIntValue(strc.Field(fMeta.index), computed)
+			naturalType, option, errF := ms.resolveFieldEncoding(syn, fMeta, writeEval)
+			if errF != nil {
+				err = wErr(fMeta.index, errF)
+				return
+			}
+			var m int
+			m, err = ms.writeMain(w, order, syn, naturalType, option, strc, fMeta.index)
+			if err != nil {
+				err = wErr(fMeta.index, err)
+				return
+			}
+			n += m
+			continue
 		}
 
 		fieldPtr := unsafe.Add(base, fMeta.offset)
@@ -142,14 +170,14 @@ func (ms *Marshaller) unsafeWriteStruct(w io.Writer, order ByteOrder, strc refle
 				if fMeta.isArray {
 					option.isArray = true
 					if fMeta.arrayLenExpr != "" {
-						option.arrayLen, err = evaluateTagValue(strc, fMeta.arrayLenExpr)
+						option.arrayLen, err = writeEval(fMeta.arrayLenExpr)
 						if err != nil {
 							return n, wErr(fMeta.index, err)
 						}
 					}
 				}
 				if fMeta.bufLenExpr != "" {
-					option.bufLen, err = evaluateTagValue(strc, fMeta.bufLenExpr)
+					option.bufLen, err = writeEval(fMeta.bufLenExpr)
 					if err != nil {
 						return n, wErr(fMeta.index, err)
 					}
@@ -198,7 +226,7 @@ func (ms *Marshaller) unsafeWriteStruct(w io.Writer, order ByteOrder, strc refle
 			naturalType := fMeta.naturalType
 			option := fMeta.option
 			if fMeta.arrayLenExpr != "" {
-				option.arrayLen, err = evaluateTagValue(strc, fMeta.arrayLenExpr)
+				option.arrayLen, err = writeEval(fMeta.arrayLenExpr)
 				if err != nil {
 					return n, wErr(fMeta.index, err)
 				}
@@ -207,7 +235,7 @@ func (ms *Marshaller) unsafeWriteStruct(w io.Writer, order ByteOrder, strc refle
 				option.arrayLen = sh.Len
 			}
 			if fMeta.bufLenExpr != "" {
-				option.bufLen, err = evaluateTagValue(strc, fMeta.bufLenExpr)
+				option.bufLen, err = writeEval(fMeta.bufLenExpr)
 				if err != nil {
 					return n, wErr(fMeta.index, err)
 				}
@@ -238,7 +266,7 @@ func (ms *Marshaller) unsafeWriteStruct(w io.Writer, order ByteOrder, strc refle
 			naturalType := fMeta.naturalType
 			option := fMeta.option
 			if fMeta.bufLenExpr != "" {
-				option.bufLen, err = evaluateTagValue(strc, fMeta.bufLenExpr)
+				option.bufLen, err = writeEval(fMeta.bufLenExpr)
 				if err != nil {
 					return n, wErr(fMeta.index, err)
 				}
@@ -255,7 +283,7 @@ func (ms *Marshaller) unsafeWriteStruct(w io.Writer, order ByteOrder, strc refle
 		if fMeta.encodeType == Pad {
 			l := 1
 			if fMeta.bufLenExpr != "" {
-				l, err = evaluateTagValue(strc, fMeta.bufLenExpr)
+				l, err = writeEval(fMeta.bufLenExpr)
 				if err != nil {
 					return n, wErr(fMeta.index, err)
 				}

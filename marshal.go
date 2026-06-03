@@ -377,6 +377,7 @@ func (ms *Marshaller) writeStruct(w io.Writer, order ByteOrder, strc reflect.Val
 		f := typ.Field(i)
 		return fmt.Errorf("field <%s>: %w", f.Name, e)
 	}
+	writeEval := ms.encodeExprEval(order, strc, meta)
 	for _, fMeta := range meta.fields {
 		if fMeta.ignore {
 			continue
@@ -404,58 +405,21 @@ func (ms *Marshaller) writeStruct(w io.Writer, order ByteOrder, strc reflect.Val
 			}
 		}
 
-		var naturalType eType
-		var option typeOption
-		if fieldVal.IsValid() {
-			naturalType, option = getNaturalType(fieldVal)
+		naturalType, option, errF := ms.resolveFieldEncoding(fieldVal, fMeta, writeEval)
+		if errF != nil {
+			err = wErr(fMeta.index, errF)
+			return
 		}
 
-		if fMeta.hasTag {
-			if naturalType == iInvalid && (fMeta.encodeType != Pad && fMeta.encodeType != Ignore) {
-				if fMeta.fieldErr != nil {
-					err = wErr(fMeta.index, fMeta.fieldErr)
-				} else {
-					err = wErr(fMeta.index, fmt.Errorf("the field %s is not encodable", fMeta.name))
-				}
+		// valueof: replace the field's value with one computed from other
+		// fields (emit-only; the source struct is never modified).
+		if fMeta.valueofExpr != "" {
+			computed, errV := ms.evalValueof(order, strc, meta, fMeta.valueofExpr)
+			if errV != nil {
+				err = wErr(fMeta.index, errV)
 				return
 			}
-			if fMeta.encodeType != Any {
-				naturalType = fMeta.encodeType
-			}
-			if fMeta.isArray {
-				option.isArray = true
-				if fMeta.arrayLenExpr != "" {
-					option.arrayLen, err = evaluateTagValue(strc, fMeta.arrayLenExpr)
-					if err != nil {
-						err = wErr(fMeta.index, err)
-						return
-					}
-					if option.arrayLen < 0 {
-						err = wErr(fMeta.index, errNegativeSize)
-						return
-					}
-				}
-			}
-			if fMeta.bufLenExpr != "" {
-				option.bufLen, err = evaluateTagValue(strc, fMeta.bufLenExpr)
-				if err != nil {
-					err = wErr(fMeta.index, err)
-					return
-				}
-				if option.bufLen < 0 {
-					err = wErr(fMeta.index, errNegativeSize)
-					return
-				}
-			}
-			if fMeta.encoding != "" {
-				option.encoding = fMeta.encoding
-			}
-			if fMeta.endian != endianNone {
-				option.endian = fMeta.endian
-			}
-			if fMeta.serializer != "" {
-				option.serializer = fMeta.serializer
-			}
+			fieldVal = synthIntValue(fieldVal, computed)
 		}
 
 		var m int
@@ -467,6 +431,224 @@ func (ms *Marshaller) writeStruct(w io.Writer, order ByteOrder, strc reflect.Val
 		n += m
 	}
 	return
+}
+
+// resolveFieldEncoding determines the binary encode type and options for a
+// struct field from its metadata. Decode-side size expressions are evaluated
+// through the supplied evalExpr strategy (which differs between the write path
+// and bytelen() measurement). Errors are returned unwrapped for the caller to
+// annotate. It does not apply valueof, which overrides the field's value rather
+// than its type. Shared by the safe and unsafe encode paths and by measurement.
+func (ms *Marshaller) resolveFieldEncoding(fieldVal reflect.Value, fMeta structFieldMetadata, evalExpr func(string) (int, error)) (naturalType eType, option typeOption, err error) {
+	if fieldVal.IsValid() {
+		naturalType, option = getNaturalType(fieldVal)
+	}
+	if !fMeta.hasTag {
+		return
+	}
+	if naturalType == iInvalid && fMeta.encodeType != Pad && fMeta.encodeType != Ignore {
+		if fMeta.fieldErr != nil {
+			return naturalType, option, fMeta.fieldErr
+		}
+		return naturalType, option, fmt.Errorf("the field %s is not encodable", fMeta.name)
+	}
+	if fMeta.encodeType != Any {
+		naturalType = fMeta.encodeType
+	}
+	if fMeta.isArray {
+		option.isArray = true
+		if fMeta.arrayLenExpr != "" {
+			option.arrayLen, err = evalExpr(fMeta.arrayLenExpr)
+			if err != nil {
+				return
+			}
+			if option.arrayLen < 0 {
+				return naturalType, option, errNegativeSize
+			}
+		}
+	}
+	if fMeta.bufLenExpr != "" {
+		option.bufLen, err = evalExpr(fMeta.bufLenExpr)
+		if err != nil {
+			return
+		}
+		if option.bufLen < 0 {
+			return naturalType, option, errNegativeSize
+		}
+	}
+	if fMeta.encoding != "" {
+		option.encoding = fMeta.encoding
+	}
+	if fMeta.endian != endianNone {
+		option.endian = fMeta.endian
+	}
+	if fMeta.serializer != "" {
+		option.serializer = fMeta.serializer
+	}
+	return
+}
+
+// encodeExprEval returns the write-path size-expression evaluator: it resolves
+// referenced valueof fields to their computed values (not their ignored Go
+// field values), so a target's size expression (e.g. [NameLen]byte) agrees with
+// the valueof-computed length actually written to the stream.
+func (ms *Marshaller) encodeExprEval(order ByteOrder, strc reflect.Value, meta *structMetadata) func(string) (int, error) {
+	return func(expr string) (int, error) {
+		return ms.evalEncodeExpr(order, strc, meta, expr)
+	}
+}
+
+// evalEncodeExpr evaluates a size expression at ENCODE time, resolving any
+// referenced valueof field to its computed value. Functions are not permitted
+// in size expressions.
+func (ms *Marshaller) evalEncodeExpr(order ByteOrder, strc reflect.Value, meta *structMetadata, expr string) (int, error) {
+	tokens, err := tokenize(expr)
+	if err != nil {
+		return 0, err
+	}
+	base := fieldValueResolver(strc)
+	p := &tagParser{
+		tokens: tokens,
+		strc:   strc,
+		resolveIdent: func(name string) (int, error) {
+			if fm, ok := meta.fieldByName(name); ok && fm.valueofExpr != "" {
+				return ms.evalValueof(order, strc, meta, fm.valueofExpr)
+			}
+			return base(name)
+		},
+	}
+	v, err := p.parseExpr()
+	if err != nil {
+		return 0, err
+	}
+	if p.peek().typ != tokEOF {
+		return 0, fmt.Errorf("unexpected token at end of expression: %s", p.peek().val)
+	}
+	return v, nil
+}
+
+// evalValueof evaluates a valueof expression at encode time, resolving
+// bytelen()/count() against the live struct value.
+func (ms *Marshaller) evalValueof(order ByteOrder, strc reflect.Value, meta *structMetadata, expr string) (int, error) {
+	tokens, err := tokenize(expr)
+	if err != nil {
+		return 0, err
+	}
+	p := &tagParser{
+		tokens:       tokens,
+		strc:         strc,
+		resolveIdent: fieldValueResolver(strc),
+		callFunc: func(fn, arg string) (int, error) {
+			return ms.evalValueofFunc(order, strc, meta, fn, arg)
+		},
+	}
+	v, err := p.parseExpr()
+	if err != nil {
+		return 0, err
+	}
+	if p.peek().typ != tokEOF {
+		return 0, fmt.Errorf("unexpected token at end of valueof expression: %s", p.peek().val)
+	}
+	return v, nil
+}
+
+// evalValueofFunc computes bytelen(field) or count(field).
+func (ms *Marshaller) evalValueofFunc(order ByteOrder, strc reflect.Value, meta *structMetadata, fn, arg string) (int, error) {
+	fMeta, ok := meta.fieldByName(arg)
+	if !ok {
+		return 0, fmt.Errorf("valueof: no field named %s", arg)
+	}
+	fieldVal := strc.Field(fMeta.index)
+
+	switch fn {
+	case "count":
+		v := derefValue(fieldVal)
+		switch v.Kind() {
+		case reflect.Slice, reflect.Array:
+			return v.Len(), nil
+		default:
+			return 0, fmt.Errorf("count(%s): field is not a slice or array (use bytelen for a string's byte length)", arg)
+		}
+	case "bytelen":
+		return ms.fieldEncodedSize(order, strc, fieldVal, fMeta)
+	default:
+		return 0, fmt.Errorf("unknown function %s", fn)
+	}
+}
+
+// fieldEncodedSize returns the number of bytes the field would occupy when
+// encoded. It measures by encoding into a scratch buffer using the same logic
+// as the real write, so it is exact for text-encoded strings and nested
+// structs. (A fast path for fixed-width fields is a possible future
+// optimization; correctness is preferred here over avoiding the second encode.)
+func (ms *Marshaller) fieldEncodedSize(order ByteOrder, strc, fieldVal reflect.Value, fMeta structFieldMetadata) (int, error) {
+	// Measurement strategy: honor constant sizes (e.g. string(16), [4]byte) but
+	// use the value's own length for field-referencing expressions. This makes
+	// bytelen() measure the field's actual content and avoids infinite recursion
+	// when a length field's valueof references the very slice/string it sizes
+	// (the canonical [NameLen]byte / valueof=bytelen(Name) pair).
+	naturalEval := func(expr string) (int, error) {
+		refs, _, e := exprReferences(expr)
+		if e != nil {
+			return 0, e
+		}
+		if len(refs) == 0 {
+			return evaluateTagValue(reflect.Value{}, expr) // constant size
+		}
+		v := derefValue(fieldVal)
+		switch v.Kind() {
+		case reflect.Slice, reflect.Array, reflect.Map:
+			// writeMain treats arrayLen==0 as "no elements", so the natural
+			// element count must be supplied explicitly.
+			return v.Len(), nil
+		case reflect.String:
+			// bufLen==0 makes writeString emit the full encoded form with no
+			// padding, which is the exact encoded byte length (correct even for
+			// multibyte text encodings like Shift-JIS).
+			return 0, nil
+		}
+		return 0, nil
+	}
+	naturalType, option, err := ms.resolveFieldEncoding(fieldVal, fMeta, naturalEval)
+	if err != nil {
+		return 0, err
+	}
+	var buf bytes.Buffer
+	n, err := ms.writeMain(&buf, order, fieldVal, naturalType, option, strc, fMeta.index)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// synthIntValue builds a reflect.Value holding v, typed like orig when orig is
+// an integer kind, otherwise a plain int (which the scalar writer converts to
+// the field's encode type).
+func synthIntValue(orig reflect.Value, v int) reflect.Value {
+	if orig.IsValid() {
+		switch orig.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			nv := reflect.New(orig.Type()).Elem()
+			nv.SetInt(int64(v))
+			return nv
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			nv := reflect.New(orig.Type()).Elem()
+			nv.SetUint(uint64(v))
+			return nv
+		}
+	}
+	return reflect.ValueOf(v)
+}
+
+// derefValue follows pointers and interfaces to the underlying value.
+func derefValue(v reflect.Value) reflect.Value {
+	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			break
+		}
+		v = v.Elem()
+	}
+	return v
 }
 
 // EncodeText encodes a string with installed encoding.

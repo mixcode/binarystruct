@@ -91,38 +91,55 @@ Enforces regular expression matching on string fields during deserialization.
 * The regex pattern is precompiled once during struct analysis for optimal performance.
 * If a string does not match the pattern, the decoding fails with `ErrValidationError` wrapped inside a `DecodeError`.
 
+### `valueof=Expr` (encode-only)
+Auto-computes this integer field's serialized value from other fields when marshalling, removing manual length/count bookkeeping. The field's own Go value is ignored on encode and is **not** modified (emit-only). Supports the `bytelen()` and `count()` functions. See [Computed Field Values](#8-computed-field-values-valueof).
+* **Usage**: `NameLen uint16 `binary:"uint16,valueof=bytelen(Name)"``
+
 ---
 
 ## 4. Array and Buffer Size Notation
 
+Both the array length and the string/padding buffer size are **expressions** (see [§5 Expressions](#5-expressions)), not just literal constants.
+
 ### Array Length Prefix: `[len]TYPE`
-Specifies that a field is an array of size `len`.
+Specifies that a field is an array whose length is given by the expression `len`.
 * **Usage**: `Data []int `binary:"[10]int16"``
 * If a fixed-size Go array (e.g. `[4]string`) is used, the tag's array length can be omitted: `binary:"[]string(10)"`.
 
 ### String Buffer Size Postfix: `TYPE(buf_len)`
-Limits or pads the string buffer to exactly `buf_len` bytes.
+Limits or pads the string buffer to exactly `buf_len` bytes, where `buf_len` is an expression.
 * **Usage**: `Name string `binary:"string(16)"`` (if shorter than 16 bytes, it will be zero-padded; if longer, it will be truncated).
 
 ---
 
-## 5. Dynamic Expressions
+## 5. Expressions
 
-Both array length `[len]` and string buffer size `(buf_len)` can use **dynamic expressions** referencing other struct fields instead of literal constants.
+Wherever a tag takes a size or a computed value — array length `[len]`, string/padding buffer size `(buf_len)`, `omittable=Expr`, and `valueof=Expr` — it accepts an **expression**, not only a literal.
 
-* **Supported Operators**: `+`, `-`, `*`, `/`, and parentheses `()`.
-* **Field References**: Evaluated dynamically based on the current value of the referenced fields.
+### Operands
+* **Integer literals** in decimal, hex (`0x1F`), octal (`0o17`), or binary (`0b1010`); `_` digit separators are allowed (e.g. `1_024`).
+* **Field references** — the name of another field in the same struct, evaluated from its current value.
 
-### Example
+### Operators
+`+`, `-`, `*`, `/`, and parentheses `()`.
+
+### Field-reference scope
+* **Decode-side expressions** (`[len]`, `(buf_len)`) and `omittable` may reference only fields defined **before** the target field, because they are evaluated as the stream is read in order.
+* **`valueof`** (encode-only) may reference **any** field, since the whole value is available when encoding.
+
+### Examples
 ```go
 type Packet struct {
 	HeaderLength int    `binary:"uint8"`
 	PayloadSize  int    `binary:"uint16"`
-	
-	// Buffer size is dynamically calculated using other fields
+
+	// Length computed from other fields and a constant
 	Payload      []byte `binary:"[PayloadSize - (HeaderLength * 2)]byte"`
+	Tail         []byte `binary:"[0x10]byte"` // fixed 16-byte field via a hex constant
 }
 ```
+
+> Within `valueof` only, expressions may additionally call the built-in functions `bytelen(F)` and `count(F)` (see [§8](#8-computed-field-values-valueof)). These functions are **not** available in decode-side `[len]` / `(buf_len)` / `omittable` expressions.
 
 ---
 
@@ -209,3 +226,36 @@ type Packet struct {
 	Extra2    *uint32 `binary:"uint32,omittable=TotalSize"`
 }
 ```
+
+---
+
+## 8. Computed Field Values: `valueof`
+
+The `valueof` option auto-computes an integer field's serialized value from other fields during **encoding only**. It pairs naturally with a decode-side size expression so that a length field and the field it sizes stay in sync without manual bookkeeping:
+
+```go
+type Record struct {
+	NameLen uint16 `binary:"uint16,valueof=bytelen(Name)"` // encode: set to len(Name)
+	Name    []byte `binary:"[NameLen]byte"`                 // decode: sized from NameLen
+}
+```
+
+### Functions
+A `valueof` value is a full [expression](#5-expressions) (operators, constants, field references) **extended** with two built-in functions — available only inside `valueof` — each taking a single field-name argument:
+
+| Function | Result |
+| :--- | :--- |
+| **`bytelen(F)`** | Total encoded byte length of field `F` (honors text encodings, length prefixes, arrays, and nested structs). Valid for any field. |
+| **`count(F)`** | Element count (`len(F)`) of an **array or slice** field. Not valid for strings — use `bytelen` for a string's byte length. |
+
+Examples: `valueof=bytelen(Name)`, `valueof=bytelen(Payload)+2`, `valueof=count(Items)`, `valueof=bytelen(A)+bytelen(B)`.
+
+### Rules
+* **Encode-only.** On decode the field is read normally; pair it with a decode-side size expression (e.g. `[NameLen]byte`) to size the target field.
+* **Emit-only (no write-back).** The computed value is written to the stream; your struct field is left untouched. To populate the computed values in Go, perform a `Marshal`/`Unmarshal` (or `Write`/`Read`) round trip.
+* **Integer/bitmap fields only.** Using `valueof` on any other field type is a compile-time error.
+* **Forward references allowed.** Unlike decode-side size expressions (which may reference only *preceding* fields), a `valueof` expression may reference any field, since the entire value is available at encode time.
+* `bytelen`/`count` are valid only inside `valueof`, not in `[len]` / `(buf_len)` size expressions.
+* **Scope.** `valueof` derives only lengths and counts of fields (via `bytelen`/`count`). Other derived values — CRC checksums, compressed sizes, offsets, etc. — are not computed for you and must be assigned normally.
+
+> **Codegen note:** the static code generator supports `count(F)`, and `bytelen(F)` of byte slices/arrays and non-encoded strings. `bytelen` of nested structs or text-encoded strings is not yet supported by codegen; use the runtime interpreter for those structs.

@@ -30,6 +30,7 @@ This document contains rules, syntax constraints, and patterns to help LLM agent
 * `omittable[=Expression]`: Marks a trailing field as optional (suppresses `io.EOF` errors at start of field or skips based on struct byte-offset check).
 * `range=min..max`: Enforces range check validation on integers and float values (e.g. `range=1..100`, open ranges `range=0..` or `range=..100`).
 * `match=pattern`: Enforces regex match validation on string values (e.g. `match=^[A-Z0-9]+$`).
+* `valueof=Expr`: (encode-only) Auto-computes an integer field's serialized value from other fields, using arithmetic plus the functions `bytelen(F)` (encoded byte length of any field F) and `count(F)` (element count of an array/slice field F). Emit-only — the Go field is NOT modified. See Section 7.
 
 ---
 
@@ -65,8 +66,22 @@ When unmarshalling into an interface field, you must choose one of two patterns:
   go test -tags safe_binarystruct ./...
   ```
 
-### D. Dynamic Size Expressions
-* Size expressions like `[PayloadSize - 2]byte` can only reference fields defined **before** the target field in the struct definition.
+### D. Expressions (sizes and computed values)
+Wherever a tag takes a size or computed value — `[len]`, `(buf_len)`, `omittable=`, and `valueof=` — it accepts an expression, not just a literal:
+* **Operands**: integer literals (decimal, hex `0x1F`, octal `0o17`, binary `0b1010`; `_` digit separators allowed) and references to other struct fields.
+* **Operators**: `+`, `-`, `*`, `/`, and parentheses.
+* **Reference scope**: decode-side expressions (`[len]`, `(buf_len)`, `omittable`) may reference only fields defined **before** the target. The encode-only `valueof` (Section 7) may reference any field, because the whole Go value is available when encoding.
+* **Functions** `bytelen(F)` / `count(F)` are available **only** inside `valueof` (Section 7), never in decode-side expressions.
+
+### E. Function Argument Order (common trap)
+The package mixes two standard-library conventions, so the `order` argument is NOT always in the same position:
+* **Stream functions put the stream first** (like `encoding/binary`): `Write(w, order, v)`, `Read(r, order, v)`, `Unmarshal(data, order, v)`.
+* **`Marshal` puts the value first** (like `encoding/json`): `Marshal(v, order)`.
+
+Unifying rule: *buffer/stream argument first, then `order`, then the value; `Marshal` has no stream argument, so the value leads.* Do not assume `Marshal` and `Write` share an argument order — verify signatures rather than copying from one to the other.
+
+### F. Concurrency
+The package-level `Marshal`/`Unmarshal`/`Write`/`Read` are safe for concurrent use (each call allocates its own `Marshaller`), and independent `Marshaller` instances may run concurrently (the only shared global is a `sync.Map` metadata cache). Do **not** share a single `*Marshaller` across goroutines: it lazily populates an internal encoder cache (and `AddTextEncoding` mutates it) without locking — use one instance per goroutine, or the package-level functions.
 
 ---
 
@@ -160,5 +175,33 @@ type Packet struct {
 	Data  []byte `binary:"[16]byte"`
 }
 ```
+
+---
+
+## 7. Computed Field Values (`valueof`)
+
+The `valueof` option auto-computes an integer field's serialized value from other fields at **encode time only**, removing manual length/count bookkeeping. Pair it with a decode-side size expression so the two directions stay in sync:
+
+```go
+type Record struct {
+	NameLen uint16 `binary:"uint16,valueof=bytelen(Name)"` // encode: written as len(Name)
+	Name    []byte `binary:"[NameLen]byte"`                 // decode: sized from NameLen
+}
+```
+
+### Functions (single field-name argument each)
+A `valueof` value is a full expression (operators, constants, field references; see Section 2.D) **extended** with two functions, available only inside `valueof`:
+* **`bytelen(F)`**: total encoded byte length of field `F` (honors text encodings such as Shift-JIS, length prefixes, arrays, and nested structs — not just `len()`). Valid for any field.
+* **`count(F)`**: element count (`len(F)`) of an array or slice field `F`. NOT valid for strings — use `bytelen` for a string's byte length.
+
+Combine with `+ - * /`, parentheses, and field references: `valueof=bytelen(Payload)+2`, `valueof=count(Items)`, `valueof=bytelen(A)+bytelen(B)`.
+
+**Scope:** `valueof` derives only field lengths/counts via `bytelen`/`count`. Other derived values (CRC checksums, compressed sizes, offsets) are NOT auto-computed — set them normally.
+
+### Rules
+* **Encode-only.** On decode the field is read normally; size the target with a decode-side `[len]` expression.
+* **Emit-only (no write-back), by design.** The computed value is written to the stream but your Go struct field is left unchanged — this keeps encoding a pure, side-effect-free read (safe for concurrent marshalling). **To obtain the computed values in Go, do a `Marshal`/`Unmarshal` (or `Write`/`Read`) round trip.** A write-back mode will not be added.
+* **Integer/bitmap fields only**; other field types are a compile-time error. `bytelen`/`count` are valid only inside `valueof`.
+* **Codegen support**: `count(F)` and `bytelen(F)` of byte slices/arrays and non-encoded strings are supported by the static code generator; `bytelen` of nested structs or text-encoded strings is not yet — use the runtime interpreter for those.
 
 

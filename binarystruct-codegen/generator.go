@@ -23,6 +23,11 @@ type Generator struct {
 	Dir          string
 	Types        []string
 	IncludeTests bool
+
+	// structs holds every struct type parsed from the target package, keyed by
+	// name. Populated by Generate; used to recognize nested-struct fields when
+	// translating bytelen() (case 5).
+	structs map[string]*ast.StructType
 }
 
 type parsedFieldTag struct {
@@ -119,6 +124,16 @@ type cgFieldInfo struct {
 	encoding    string
 	hasValueof  bool
 	valueofExpr string
+
+	// Layout metadata used to compute bytelen() of this field at generation time
+	// (cases 2/3/5). binType is the effective binary type; arrayLenExpr/bufLenExpr
+	// are the [N] and (N) tag sub-expressions; isStruct is true when the field's
+	// (deref/element) Go type is a struct defined in the same package.
+	binType      string
+	isArray      bool
+	arrayLenExpr string
+	bufLenExpr   string
+	isStruct     bool
 }
 
 var (
@@ -138,15 +153,67 @@ func isByteSequence(goType string) bool {
 	return elem == "byte" || elem == "uint8" || elem == "int8"
 }
 
+// stripToElemType removes pointer, slice and fixed-array prefixes from a Go type
+// name, yielding the underlying element type (e.g. "[]*Header" -> "Header").
+func stripToElemType(goType string) string {
+	for {
+		switch {
+		case strings.HasPrefix(goType, "*"):
+			goType = goType[1:]
+		case strings.HasPrefix(goType, "[]"):
+			goType = goType[2:]
+		case strings.HasPrefix(goType, "["):
+			if i := strings.IndexByte(goType, ']'); i >= 0 {
+				goType = goType[i+1:]
+				continue
+			}
+			return goType
+		default:
+			return goType
+		}
+	}
+}
+
+// isStructType reports whether goType (after stripping pointer/slice/array
+// prefixes) names a struct defined in the target package.
+func (g *Generator) isStructType(goType string) bool {
+	_, ok := g.structs[stripToElemType(goType)]
+	return ok
+}
+
+// scalarWidth returns the fixed encoded byte width of a scalar binary type, and
+// whether binType is such a fixed-width scalar. Used to compute bytelen() of
+// scalar and scalar-array fields statically (case 2).
+func scalarWidth(binType string) (int, bool) {
+	switch binType {
+	case "int8", "uint8", "byte":
+		return 1, true
+	case "int16", "uint16", "word":
+		return 2, true
+	case "int32", "uint32", "dword", "float32":
+		return 4, true
+	case "int64", "uint64", "qword", "float64":
+		return 8, true
+	}
+	return 0, false
+}
+
 // translateValueof converts a valueof expression into a Go integer expression.
-// count(F) and bytelen(F) of byte sequences / raw strings become len(s.F);
-// arithmetic and parentheses pass through. Cases that cannot be computed inline
-// (bytelen of nested structs or text-encoded strings, or a reference to another
-// valueof field) return a generation-time error rather than emitting wrong code.
-func (g *Generator) translateValueof(expr string, fields map[string]cgFieldInfo) (string, error) {
+// It returns any hoisted pre-statements (measurement blocks emitted before the
+// length field) alongside the expression itself; the caller must write `pre`
+// immediately before the field write. count() and bytelen() of byte sequences /
+// raw strings become len(s.F); fixed-width scalars and scalar arrays become
+// width*count; fixed strings string(N) become N; a plain nested struct is
+// measured at runtime via a hoisted binarystruct.Write(io.Discard, ...). Cases
+// that cannot be computed byte-exactly from static type info (text-encoded
+// variable strings, slice/array of structs, a reference to another valueof
+// field) return a generation-time error rather than emitting wrong code.
+func (g *Generator) translateValueof(expr string, fields map[string]cgFieldInfo) (pre string, out string, err error) {
 	prefixed := translateExpression(expr) // e.g. s.bytelen(s.Name)+2
 	var ferr error
-	out := cgValueofFuncRe.ReplaceAllStringFunc(prefixed, func(m string) string {
+	var preBuf bytes.Buffer
+	measured := make(map[string]bool) // dedup hoisted measurements by field name
+	out = cgValueofFuncRe.ReplaceAllStringFunc(prefixed, func(m string) string {
 		sub := cgValueofFuncRe.FindStringSubmatch(m)
 		fn, arg := sub[1], sub[2]
 		fi, ok := fields[arg]
@@ -163,25 +230,118 @@ func (g *Generator) translateValueof(expr string, fields map[string]cgFieldInfo)
 			ferr = fmt.Errorf("count(%s) requires a slice or array field (got %q); use bytelen for a string's byte length", arg, fi.goType)
 			return m
 		case "bytelen":
-			if isByteSequence(fi.goType) || (fi.goType == "string" && fi.encoding == "") {
-				return fmt.Sprintf("len(s.%s)", arg)
+			repl, p, e := g.bytelenExpr(arg, fi, fields, measured)
+			if e != nil {
+				ferr = e
+				return m
 			}
-			ferr = fmt.Errorf("codegen does not support bytelen(%s) of type %q (e.g. nested struct or text-encoded string); use the runtime interpreter for this struct", arg, fi.goType)
-			return m
+			preBuf.WriteString(p)
+			return repl
 		}
 		return m
 	})
 	if ferr != nil {
-		return "", ferr
+		return "", "", ferr
 	}
 	// A bare reference to another valueof field cannot be resolved in generated
 	// code (it would read the field's pre-encode value, diverging from runtime).
 	for _, sm := range cgIdentRe.FindAllStringSubmatch(out, -1) {
 		if fi, ok := fields[sm[1]]; ok && fi.hasValueof {
-			return "", fmt.Errorf("codegen does not support a valueof expression referencing another valueof field (%q); use the runtime interpreter", sm[1])
+			return "", "", fmt.Errorf("codegen does not support a valueof expression referencing another valueof field (%q); use the runtime interpreter", sm[1])
 		}
 	}
-	return out, nil
+	return preBuf.String(), out, nil
+}
+
+// bytelenExpr computes the Go expression (and any hoisted pre-statements) for the
+// encoded byte length of field `arg`. See translateValueof for the supported
+// cases. `measured` deduplicates runtime measurement temps when a field's
+// bytelen() appears more than once in a single expression.
+func (g *Generator) bytelenExpr(arg string, fi cgFieldInfo, fields map[string]cgFieldInfo, measured map[string]bool) (expr, pre string, err error) {
+	// case 1: byte sequences -> element count equals byte count.
+	if isByteSequence(fi.goType) {
+		return fmt.Sprintf("len(s.%s)", arg), "", nil
+	}
+
+	// string forms.
+	if fi.goType == "string" {
+		// case 3: fixed-width buffer string(N) is N bytes regardless of encoding.
+		if fi.binType == "string" && fi.bufLenExpr != "" {
+			bufSize, e := g.translateEncodeExpr(fi.bufLenExpr, fields)
+			if e != nil {
+				return "", "", e
+			}
+			return "int(" + bufSize + ")", "", nil
+		}
+		// case 1: raw, unbounded, unencoded string -> byte length is len().
+		if fi.binType == "string" && fi.encoding == "" {
+			return fmt.Sprintf("len(s.%s)", arg), "", nil
+		}
+		// case 4: unbounded text-encoded string -> measure with the same ms-guarded
+		// EncodeText the write path uses, so the count matches byte-for-byte (raw
+		// bytes when ms is nil, the encoded form otherwise).
+		if fi.binType == "string" && fi.encoding != "" {
+			tmp := "bl" + arg
+			if measured[arg] {
+				return tmp, "", nil
+			}
+			measured[arg] = true
+			inner := tmp + "Bytes"
+			pre = fmt.Sprintf("\tvar %s int\n\t{\n\t\t%s := []byte(s.%s)\n\t\tif ms != nil {\n\t\t\t%s, err = ms.EncodeText(%s, %q)\n\t\t\tif err != nil {\n\t\t\t\treturn n, err\n\t\t\t}\n\t\t}\n\t\t%s = len(%s)\n\t}\n", tmp, inner, arg, inner, inner, fi.encoding, tmp, inner)
+			return tmp, pre, nil
+		}
+		// Prefixed/terminated string variants (bstring/zstring/...) referenced by
+		// bytelen() are not yet byte-exactly computable in generated code.
+		return "", "", fmt.Errorf("codegen does not yet support bytelen(%s) of a prefixed/terminated string; use the runtime interpreter for this struct", arg)
+	}
+
+	// case 5: a nested struct -> measure at runtime using the identical call(s)
+	// the write path uses, guaranteeing a byte-exact result.
+	if fi.isStruct {
+		if strings.HasPrefix(fi.goType, "*") {
+			return "", "", fmt.Errorf("codegen does not support bytelen(%s) of a pointer-to-struct field; use the runtime interpreter for this struct", arg)
+		}
+		tmp := "bl" + arg
+		if measured[arg] {
+			return tmp, "", nil
+		}
+		measured[arg] = true
+		if fi.isArray {
+			// A tag-counted array of structs ([N]Elem). Mirror the encode loop:
+			// same element count and the same per-element binarystruct.Write.
+			sizeExpr, e := g.translateEncodeExpr(fi.arrayLenExpr, fields)
+			if e != nil {
+				return "", "", e
+			}
+			if sizeExpr == "" {
+				sizeExpr = fmt.Sprintf("len(s.%s)", arg)
+			}
+			pre = fmt.Sprintf("\tvar %s int\n\t{\n\t\tlimit := int(%s)\n\t\tfor i := 0; i < limit; i++ {\n\t\t\tvar mm int\n\t\t\tmm, err = binarystruct.Write(io.Discard, order, &s.%s[i])\n\t\t\tif err != nil {\n\t\t\t\treturn n, err\n\t\t\t}\n\t\t\t%s += mm\n\t\t}\n\t}\n", tmp, sizeExpr, arg, tmp)
+			return tmp, pre, nil
+		}
+		// A single struct value, or a Go-native slice/array of structs written as
+		// a whole value: the write path encodes it with one binarystruct.Write.
+		pre = fmt.Sprintf("\tvar %s int\n\t%s, err = binarystruct.Write(io.Discard, order, &s.%s)\n\tif err != nil {\n\t\treturn n, err\n\t}\n", tmp, tmp, arg)
+		return tmp, pre, nil
+	}
+
+	// case 2: fixed-width scalar or scalar array/slice -> width * count.
+	if w, ok := scalarWidth(fi.binType); ok {
+		if fi.isArray {
+			sizeExpr, e := g.translateEncodeExpr(fi.arrayLenExpr, fields)
+			if e != nil {
+				return "", "", e
+			}
+			if sizeExpr == "" {
+				sizeExpr = fmt.Sprintf("len(s.%s)", arg)
+			}
+			return fmt.Sprintf("((%s) * %d)", sizeExpr, w), "", nil
+		}
+		// single scalar field has a constant width.
+		return strconv.Itoa(w), "", nil
+	}
+
+	return "", "", fmt.Errorf("codegen does not support bytelen(%s) of type %q (e.g. struct slice/array); use the runtime interpreter for this struct", arg, fi.goType)
 }
 
 // translateEncodeExpr translates a decode-side size expression for use on the
@@ -198,9 +358,15 @@ func (g *Generator) translateEncodeExpr(expr string, fields map[string]cgFieldIn
 		name := cgIdentRe.FindStringSubmatch(m)[1]
 		fi, ok := fields[name]
 		if ok && fi.hasValueof {
-			sub, err := g.translateValueof(fi.valueofExpr, fields)
+			pre, sub, err := g.translateValueof(fi.valueofExpr, fields)
 			if err != nil {
 				ferr = err
+				return m
+			}
+			// A size expression is spliced inline; it cannot host the hoisted
+			// measurement statements a struct-valued bytelen() would require.
+			if pre != "" {
+				ferr = fmt.Errorf("codegen cannot inline a size expression that references valueof %q (its bytelen() needs a runtime measurement); use the runtime interpreter for this struct", name)
 				return m
 			}
 			return "(" + sub + ")"
@@ -255,6 +421,7 @@ func (g *Generator) Generate(outPath string) error {
 			return true
 		})
 	}
+	g.structs = structs
 
 	var buf bytes.Buffer
 	buf.WriteString("// Code generated by binarystruct-codegen. DO NOT EDIT.\n\n")
@@ -391,11 +558,17 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 		}
 		pt := parseFieldTag(field.Tag)
 		vexpr, hasV := pt.options["valueof"]
+		goType := getGoTypeName(field.Type)
 		fieldInfo[field.Names[0].Name] = cgFieldInfo{
-			goType:      getGoTypeName(field.Type),
-			encoding:    pt.options["encoding"],
-			hasValueof:  hasV,
-			valueofExpr: vexpr,
+			goType:       goType,
+			encoding:     pt.options["encoding"],
+			hasValueof:   hasV,
+			valueofExpr:  vexpr,
+			binType:      getEffectiveBinaryType(pt.binaryType, goType),
+			isArray:      pt.isArray,
+			arrayLenExpr: pt.arrayLenExpr,
+			bufLenExpr:   pt.bufLenExpr,
+			isStruct:     g.isStructType(goType),
 		}
 	}
 
@@ -424,10 +597,11 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 		// valueof: write a value computed from other fields instead of the
 		// field's own (emit-only). Validated as an integer scalar upstream.
 		if vexpr, ok := parsedTag.options["valueof"]; ok && vexpr != "" {
-			valExpr, vErr := g.translateValueof(vexpr, fieldInfo)
+			pre, valExpr, vErr := g.translateValueof(vexpr, fieldInfo)
 			if vErr != nil {
 				return fmt.Errorf("field %s: %w", fieldName, vErr)
 			}
+			buf.WriteString(pre)
 			if err := g.generateFieldWrite(buf, "("+valExpr+")", goType, binType, parsedTag, fieldInfo); err != nil {
 				return fmt.Errorf("field %s: %w", fieldName, err)
 			}

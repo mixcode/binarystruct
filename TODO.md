@@ -13,7 +13,10 @@
 - [x] **JSON Layout Export & Failure Offset**: Added JSON layout serialization format for layout metadata and enhanced `DecodeError` to report the exact failure byte-offset and field name.
 - [x] **Declarative Validation**: Implemented `range=min..max` and `match=pattern` validation constraints within `binary` tags, performing safe & unsafe checks during unmarshal.
 - [x] **Static Code Generation (Codegen)**: Added a standalone nested module compiler CLI tool (`binarystruct-codegen`) that generates optimized static Go serialization and deserialization code, fully eliminating runtime reflection and layout interpretation.
+- [x] **Codegen `bytelen()` for non-trivial fields**: Codegen now resolves `valueof=bytelen(F)` for fixed-width scalars and scalar arrays (`width*count`), fixed `string(N)` buffers (the buffer width — also fixes a latent bug that previously emitted `len`), variable text-encoded strings (an `ms`-guarded `EncodeText` measurement mirroring the encode path), and nested structs / arrays of structs (a hoisted byte-exact runtime `binarystruct.Write(io.Discard, ...)` measurement). Previously these errored out and forced the whole struct back onto the runtime interpreter. See `codegen_bytelen_test.go`.
 
 
 ## Pending / Future Ideas
 - [ ] **Multidimensional arrays (Low priority)**: Support tags like `[4][2][2]int8` for nested Go slices/arrays.
+- [ ] **Codegen: unused `tmp`/`m` locals (latent bug)**: A generated struct method whose body touches neither `tmp` nor `m` (e.g. a struct whose only field is an unbounded plain/text `string`, which uses `io.ReadAll` / a direct `w.Write`) fails to compile with "declared and not used". The `var tmp [8]byte` / `var m int` declarations should be emitted only when the body references them.
+- [ ] **Codegen `bytelen()` remaining gaps (Low priority)**: prefixed/terminated string variants (`bstring`/`zstring`/…) and pointer-to-struct fields referenced by `bytelen()` still error; extend the measurement to cover them if a real case appears.

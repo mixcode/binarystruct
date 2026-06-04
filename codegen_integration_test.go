@@ -13,6 +13,7 @@ import (
 )
 
 func TestCodegen_Integration(t *testing.T) {
+	t.Parallel()
 	// 1. Create a temp directory inside workspace
 	tmpDir, err := ioutil.TempDir(".", "tmp-binarystruct-codegen-test")
 	if err != nil {
@@ -21,11 +22,7 @@ func TestCodegen_Integration(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Build the codegen binary
-	codegenBin := filepath.Join(tmpDir, "binarystruct-codegen")
-	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./binarystruct-codegen")
-	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to build codegen tool: %v\n%s", err, buildOut)
-	}
+	codegenBin := sharedCodegenBin
 
 	// 2. Write the test struct file
 	structFile := filepath.Join(tmpDir, "types.go")
@@ -130,6 +127,7 @@ func TestGeneratedMethods(t *testing.T) {
 }
 
 func TestCodegen_JSONOutput(t *testing.T) {
+	t.Parallel()
 	relTmpDir, err := ioutil.TempDir(".", "tmp-binarystruct-codegen-json-test")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -141,11 +139,7 @@ func TestCodegen_JSONOutput(t *testing.T) {
 		t.Fatalf("failed to get absolute path: %v", err)
 	}
 
-	codegenBin := filepath.Join(tmpDir, "binarystruct-codegen")
-	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./binarystruct-codegen")
-	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to build codegen tool: %v\n%s", err, buildOut)
-	}
+	codegenBin := sharedCodegenBin
 
 	structFile := filepath.Join(tmpDir, "types.go")
 	structContent := `package tmp_codegen_test
@@ -212,17 +206,14 @@ type TestStruct struct {
 }
 
 func TestCodegen_Valueof(t *testing.T) {
+	t.Parallel()
 	tmpDir, err := ioutil.TempDir(".", "tmp-binarystruct-codegen-valueof-test")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	codegenBin := filepath.Join(tmpDir, "binarystruct-codegen")
-	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./binarystruct-codegen")
-	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to build codegen tool: %v\n%s", err, buildOut)
-	}
+	codegenBin := sharedCodegenBin
 
 	// A ZIP-like header: NameLen/Count are computed from Name/Items via valueof.
 	structFile := filepath.Join(tmpDir, "types.go")
@@ -302,17 +293,14 @@ func TestGeneratedValueof(t *testing.T) {
 }
 
 func TestCodegen_Const(t *testing.T) {
+	t.Parallel()
 	tmpDir, err := ioutil.TempDir(".", "tmp-binarystruct-codegen-const-test")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	codegenBin := filepath.Join(tmpDir, "binarystruct-codegen")
-	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./binarystruct-codegen")
-	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to build codegen tool: %v\n%s", err, buildOut)
-	}
+	codegenBin := sharedCodegenBin
 
 	// Both const shapes: an integer magic and a byte-sequence magic.
 	structFile := filepath.Join(tmpDir, "types.go")

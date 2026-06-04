@@ -17,6 +17,7 @@ import (
 // yet support therefore fail here (red) until they are implemented.
 func genBytelenCase(t *testing.T, pkg, typesSrc, typeList, testSrc string) {
 	t.Helper()
+	t.Parallel()
 
 	tmpDir, err := ioutil.TempDir(".", "tmp-bs-bytelen-")
 	if err != nil {
@@ -24,11 +25,7 @@ func genBytelenCase(t *testing.T, pkg, typesSrc, typeList, testSrc string) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	codegenBin := filepath.Join(tmpDir, "binarystruct-codegen")
-	buildCmd := exec.Command("go", "build", "-o", codegenBin, "./binarystruct-codegen")
-	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to build codegen tool: %v\n%s", err, buildOut)
-	}
+	codegenBin := sharedCodegenBin
 
 	if err := ioutil.WriteFile(filepath.Join(tmpDir, "types.go"), []byte("package "+pkg+"\n\n"+typesSrc), 0644); err != nil {
 		t.Fatalf("failed to write types.go: %v", err)

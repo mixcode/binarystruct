@@ -281,7 +281,146 @@ func TestFixedString(t *testing.T) {
 	genBytelenCase(t, "tmp_bytelen_fixedstr", types, "Msg", test)
 }
 
-// --- Deferred cases (intentionally RED until implemented) ----------------
+// Prefixed/terminated strings: bytelen() = prefix/terminator width + content.
+func TestCodegenBytelen_PrefixedTerminatedStrings(t *testing.T) {
+	types := `type Msg struct {
+	LB uint16 ` + "`" + `binary:"uint16,valueof=bytelen(B)"` + "`" + `
+	LW uint16 ` + "`" + `binary:"uint16,valueof=bytelen(W)"` + "`" + `
+	LZ uint16 ` + "`" + `binary:"uint16,valueof=bytelen(Z)"` + "`" + `
+	B  string ` + "`" + `binary:"bstring"` + "`" + `
+	W  string ` + "`" + `binary:"wstring"` + "`" + `
+	Z  string ` + "`" + `binary:"zstring"` + "`" + `
+}
+`
+	test := `import (
+	"bytes"
+	"testing"
+
+	"github.com/mixcode/binarystruct"
+)
+
+func TestPrefixTerm(t *testing.T) {
+	s := Msg{B: "hello", W: "hi", Z: "yo"}
+	blob, err := s.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+	rt, err := binarystruct.Marshal(s, binarystruct.BigEndian)
+	if err != nil {
+		t.Fatalf("runtime Marshal: %v", err)
+	}
+	if !bytes.Equal(blob, rt) {
+		t.Fatalf("codegen != runtime:\n codegen = % x\n runtime = % x", blob, rt)
+	}
+	var s2 Msg
+	if err := s2.UnmarshalBinary(blob); err != nil {
+		t.Fatalf("UnmarshalBinary: %v", err)
+	}
+	// bstring: 1+5=6; wstring: 2+2=4; zstring: 2+1=3.
+	if s2.LB != 6 || s2.LW != 4 || s2.LZ != 3 {
+		t.Fatalf("lengths: LB=%d LW=%d LZ=%d, want 6/4/3", s2.LB, s2.LW, s2.LZ)
+	}
+	if s2.B != "hello" || s2.W != "hi" || s2.Z != "yo" {
+		t.Fatalf("round-trip mismatch: %+v", s2)
+	}
+}
+`
+	genBytelenCase(t, "tmp_bytelen_prefixterm", types, "Msg", test)
+}
+
+// Prefixed + text-encoded string: bytelen() = prefix width + encoded content,
+// measured through the Marshaller's custom encoding.
+func TestCodegenBytelen_PrefixedEncodedString(t *testing.T) {
+	types := `type Msg struct {
+	LB uint16 ` + "`" + `binary:"uint16,valueof=bytelen(B)"` + "`" + `
+	B  string ` + "`" + `binary:"bstring,encoding=sjis"` + "`" + `
+}
+`
+	test := `import (
+	"bytes"
+	"testing"
+
+	"github.com/mixcode/binarystruct"
+	"golang.org/x/text/encoding/japanese"
+)
+
+func TestPrefixEncoded(t *testing.T) {
+	var ms binarystruct.Marshaller
+	ms.AddTextEncoding("sjis", japanese.ShiftJIS)
+
+	s := Msg{B: "ああ"} // 6 bytes UTF-8, 4 bytes Shift-JIS
+	var buf bytes.Buffer
+	if _, err := s.WriteBinaryWithMarshaller(&ms, &buf, binarystruct.BigEndian); err != nil {
+		t.Fatalf("WriteBinaryWithMarshaller: %v", err)
+	}
+	blob := buf.Bytes()
+	rt, err := ms.Marshal(&s, binarystruct.BigEndian)
+	if err != nil {
+		t.Fatalf("runtime Marshal: %v", err)
+	}
+	if !bytes.Equal(blob, rt) {
+		t.Fatalf("codegen != runtime:\n codegen = % x\n runtime = % x", blob, rt)
+	}
+	// LB = bstring prefix(1) + Shift-JIS content(4) = 5.
+	if blob[0] != 0x00 || blob[1] != 0x05 {
+		t.Fatalf("LB = % x, want 00 05", blob[:2])
+	}
+}
+`
+	genBytelenCase(t, "tmp_bytelen_prefixenc", types, "Msg", test)
+}
+
+// Pointer-to-struct: bytelen() measures the pointee, and a nil pointer is 0.
+func TestCodegenBytelen_PointerStruct(t *testing.T) {
+	types := `type Header struct {
+	A uint16 ` + "`" + `binary:"uint16"` + "`" + `
+	B uint8  ` + "`" + `binary:"uint8"` + "`" + `
+}
+
+type Msg struct {
+	BodyLen uint16  ` + "`" + `binary:"uint16,valueof=bytelen(Body)"` + "`" + `
+	Body    *Header ` + "`" + `binary:"any"` + "`" + `
+}
+`
+	test := `import (
+	"bytes"
+	"testing"
+
+	"github.com/mixcode/binarystruct"
+)
+
+func TestPointerStruct(t *testing.T) {
+	s := Msg{Body: &Header{A: 0x0102, B: 0x03}}
+	blob, err := s.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+	// bytelen(Body) = 2 + 1 = 3.
+	want := []byte{0x00, 0x03, 0x01, 0x02, 0x03}
+	if !bytes.Equal(blob, want) {
+		t.Fatalf("blob = % x\nwant  = % x", blob, want)
+	}
+	rt, err := binarystruct.Marshal(s, binarystruct.BigEndian)
+	if err != nil {
+		t.Fatalf("runtime Marshal: %v", err)
+	}
+	if !bytes.Equal(blob, rt) {
+		t.Fatalf("codegen != runtime:\n codegen = % x\n runtime = % x", blob, rt)
+	}
+
+	// A nil pointer contributes zero bytes.
+	ns := Msg{Body: nil}
+	nblob, err := ns.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary(nil): %v", err)
+	}
+	if !bytes.Equal(nblob, []byte{0x00, 0x00}) {
+		t.Fatalf("nil blob = % x, want 00 00", nblob)
+	}
+}
+`
+	genBytelenCase(t, "tmp_bytelen_ptrstruct", types, "Msg,Header", test)
+}
 
 // Case 4: bytelen() of a variable-length text-encoded string. The generated
 // measurement mirrors the encode path's ms-guarded EncodeText, so the length is

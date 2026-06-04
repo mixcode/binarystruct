@@ -198,6 +198,32 @@ func scalarWidth(binType string) (int, bool) {
 	return 0, false
 }
 
+// stringPrefixWidth returns the byte width of a length-prefixed string's prefix
+// (0 for non-prefixed forms), matching the encode path in generateFieldWrite.
+func stringPrefixWidth(binType string) int {
+	switch binType {
+	case "bstring":
+		return 1
+	case "wstring":
+		return 2
+	case "dwstring":
+		return 4
+	}
+	return 0
+}
+
+// stringTermWidth returns the byte width of a null-terminated string's
+// terminator (0 for non-terminated forms).
+func stringTermWidth(binType string) int {
+	switch binType {
+	case "zstring":
+		return 1
+	case "z16string":
+		return 2
+	}
+	return 0
+}
+
 // translateValueof converts a valueof expression into a Go integer expression.
 // It returns any hoisted pre-statements (measurement blocks emitted before the
 // length field) alongside the expression itself; the caller must write `pre`
@@ -263,49 +289,62 @@ func (g *Generator) bytelenExpr(arg string, fi cgFieldInfo, fields map[string]cg
 		return fmt.Sprintf("len(s.%s)", arg), "", nil
 	}
 
-	// string forms.
+	// string forms (string / bstring / wstring / dwstring / zstring / z16string).
+	// Encoded size = prefix width + content length + terminator width, mirroring
+	// the encode path. Pointer-to-string is not handled here (rare).
 	if fi.goType == "string" {
-		// case 3: fixed-width buffer string(N) is N bytes regardless of encoding.
-		if fi.binType == "string" && fi.bufLenExpr != "" {
+		extra := stringPrefixWidth(fi.binType) + stringTermWidth(fi.binType)
+		addExtra := func(base string) string {
+			if extra == 0 {
+				return base
+			}
+			return fmt.Sprintf("(%s + %d)", base, extra)
+		}
+
+		switch {
+		case fi.bufLenExpr != "":
+			// case 3: buffered string(N) -> content is exactly N bytes (padded or
+			// truncated), regardless of encoding.
 			bufSize, e := g.translateEncodeExpr(fi.bufLenExpr, fields)
 			if e != nil {
 				return "", "", e
 			}
-			return "int(" + bufSize + ")", "", nil
-		}
-		// case 1: raw, unbounded, unencoded string -> byte length is len().
-		if fi.binType == "string" && fi.encoding == "" {
-			return fmt.Sprintf("len(s.%s)", arg), "", nil
-		}
-		// case 4: unbounded text-encoded string -> measure with the same ms-guarded
-		// EncodeText the write path uses, so the count matches byte-for-byte (raw
-		// bytes when ms is nil, the encoded form otherwise).
-		if fi.binType == "string" && fi.encoding != "" {
+			return addExtra("int(" + bufSize + ")"), "", nil
+		case fi.encoding == "":
+			// case 1: raw, unbounded, unencoded content -> len().
+			return addExtra(fmt.Sprintf("len(s.%s)", arg)), "", nil
+		default:
+			// case 4: unbounded text-encoded content -> measure with the same
+			// ms-guarded EncodeText the write path uses (raw when ms is nil).
 			tmp := "bl" + arg
 			if measured[arg] {
-				return tmp, "", nil
+				return addExtra(tmp), "", nil
 			}
 			measured[arg] = true
 			inner := tmp + "Bytes"
 			pre = fmt.Sprintf("\tvar %s int\n\t{\n\t\t%s := []byte(s.%s)\n\t\tif ms != nil {\n\t\t\t%s, err = ms.EncodeText(%s, %q)\n\t\t\tif err != nil {\n\t\t\t\treturn n, err\n\t\t\t}\n\t\t}\n\t\t%s = len(%s)\n\t}\n", tmp, inner, arg, inner, inner, fi.encoding, tmp, inner)
-			return tmp, pre, nil
+			return addExtra(tmp), pre, nil
 		}
-		// Prefixed/terminated string variants (bstring/zstring/...) referenced by
-		// bytelen() are not yet byte-exactly computable in generated code.
-		return "", "", fmt.Errorf("codegen does not yet support bytelen(%s) of a prefixed/terminated string; use the runtime interpreter for this struct", arg)
 	}
 
 	// case 5: a nested struct -> measure at runtime using the identical call(s)
 	// the write path uses, guaranteeing a byte-exact result.
 	if fi.isStruct {
-		if strings.HasPrefix(fi.goType, "*") {
-			return "", "", fmt.Errorf("codegen does not support bytelen(%s) of a pointer-to-struct field; use the runtime interpreter for this struct", arg)
+		isPtr := strings.HasPrefix(fi.goType, "*")
+		if isPtr && fi.isArray {
+			return "", "", fmt.Errorf("codegen does not support bytelen(%s) of a pointer-element struct array; use the runtime interpreter for this struct", arg)
 		}
 		tmp := "bl" + arg
 		if measured[arg] {
 			return tmp, "", nil
 		}
 		measured[arg] = true
+		if isPtr {
+			// A nil pointer encodes to zero bytes; mirror the write's nil guard.
+			// Passing the pointer matches the write's binarystruct.Write(&*ptr).
+			pre = fmt.Sprintf("\tvar %s int\n\tif s.%s != nil {\n\t\t%s, err = binarystruct.Write(io.Discard, order, s.%s)\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n", tmp, arg, tmp, arg)
+			return tmp, pre, nil
+		}
 		if fi.isArray {
 			// A tag-counted array of structs ([N]Elem). Mirror the encode loop:
 			// same element count and the same per-element binarystruct.Write.
@@ -327,6 +366,10 @@ func (g *Generator) bytelenExpr(arg string, fi cgFieldInfo, fields map[string]cg
 
 	// case 2: fixed-width scalar or scalar array/slice -> width * count.
 	if w, ok := scalarWidth(fi.binType); ok {
+		if strings.HasPrefix(fi.goType, "*") {
+			// A pointer scalar may be nil (0 bytes); a constant width would be wrong.
+			return "", "", fmt.Errorf("codegen does not support bytelen(%s) of a pointer scalar field; use the runtime interpreter for this struct", arg)
+		}
 		if fi.isArray {
 			sizeExpr, e := g.translateEncodeExpr(fi.arrayLenExpr, fields)
 			if e != nil {

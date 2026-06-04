@@ -522,6 +522,24 @@ func (g *Generator) Generate(outPath string) error {
 	return ioutil.WriteFile(outPath, formatted, 0644)
 }
 
+var (
+	reUsesTmp = regexp.MustCompile(`\btmp\b`)
+	reUsesM   = regexp.MustCompile(`\bm\b`)
+)
+
+// emitLocalScratch writes the `tmp`/`m` scratch declarations a generated method
+// needs, but only when its body actually references them. A body that uses
+// neither (e.g. a struct whose sole field is an unbounded string, decoded via
+// io.ReadAll) would otherwise fail to compile with "declared and not used".
+func emitLocalScratch(buf *bytes.Buffer, body string) {
+	if reUsesTmp.MatchString(body) {
+		buf.WriteString("\tvar tmp [8]byte\n")
+	}
+	if reUsesM.MatchString(body) {
+		buf.WriteString("\tvar m int\n")
+	}
+}
+
 func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.StructType) error {
 	// Write standard helper functions
 	fmt.Fprintf(buf, "// MarshalBinary implements encoding.BinaryMarshaler.\n")
@@ -547,8 +565,6 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	// 2. WriteBinaryWithMarshaller (Context-aware)
 	fmt.Fprintf(buf, "// WriteBinaryWithMarshaller implements binarystruct.MarshallerContextWriter.\n")
 	fmt.Fprintf(buf, "func (s *%s) WriteBinaryWithMarshaller(ms *binarystruct.Marshaller, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {\n", typeName)
-	buf.WriteString("\tvar tmp [8]byte\n")
-	buf.WriteString("\tvar m int\n")
 
 	// Field info for resolving valueof's bytelen()/count() at generation time.
 	fieldInfo := make(map[string]cgFieldInfo)
@@ -572,60 +588,69 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 		}
 	}
 
-	for _, field := range st.Fields.List {
-		if len(field.Names) == 0 {
-			continue
-		}
-		fieldName := field.Names[0].Name
-		goType := getGoTypeName(field.Type)
-		parsedTag := parseFieldTag(field.Tag)
-
-		if _, ok := parsedTag.options["ignore"]; ok || parsedTag.binaryType == "-" {
-			continue
-		}
-
-		// Handle omittable with expression
-		if omittableExpr, ok := parsedTag.options["omittable"]; ok && omittableExpr != "" {
-			fmt.Fprintf(buf, "\tif n >= int(%s) {\n\t\treturn n, nil\n\t}\n", translateExpression(omittableExpr))
-		} else if ok && strings.HasPrefix(goType, "*") {
-			// EOF-based omission (pointer)
-			fmt.Fprintf(buf, "\tif s.%s == nil {\n\t\treturn n, nil\n\t}\n", fieldName)
-		}
-
-		binType := getEffectiveBinaryType(parsedTag.binaryType, goType)
-
-		// valueof: write a value computed from other fields instead of the
-		// field's own (emit-only). Validated as an integer scalar upstream.
-		if vexpr, ok := parsedTag.options["valueof"]; ok && vexpr != "" {
-			pre, valExpr, vErr := g.translateValueof(vexpr, fieldInfo)
-			if vErr != nil {
-				return fmt.Errorf("field %s: %w", fieldName, vErr)
+	var writeBody bytes.Buffer
+	if err := func() error {
+		buf := &writeBody
+		for _, field := range st.Fields.List {
+			if len(field.Names) == 0 {
+				continue
 			}
-			buf.WriteString(pre)
-			if err := g.generateFieldWrite(buf, "("+valExpr+")", goType, binType, parsedTag, fieldInfo); err != nil {
-				return fmt.Errorf("field %s: %w", fieldName, err)
-			}
-			continue
-		}
+			fieldName := field.Names[0].Name
+			goType := getGoTypeName(field.Type)
+			parsedTag := parseFieldTag(field.Tag)
 
-		// const: emit a fixed value (emit-only), ignoring the struct field.
-		if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
-			if err := g.generateConstWrite(buf, goType, binType, parsedTag, fieldInfo, cexpr); err != nil {
-				return fmt.Errorf("field %s: %w", fieldName, err)
+			if _, ok := parsedTag.options["ignore"]; ok || parsedTag.binaryType == "-" {
+				continue
 			}
-			continue
-		}
 
-		if parsedTag.isArray {
-			if err := g.generateArrayWrite(buf, fieldName, goType, binType, parsedTag, fieldInfo); err != nil {
-				return fmt.Errorf("field %s: %w", fieldName, err)
+			// Handle omittable with expression
+			if omittableExpr, ok := parsedTag.options["omittable"]; ok && omittableExpr != "" {
+				fmt.Fprintf(buf, "\tif n >= int(%s) {\n\t\treturn n, nil\n\t}\n", translateExpression(omittableExpr))
+			} else if ok && strings.HasPrefix(goType, "*") {
+				// EOF-based omission (pointer)
+				fmt.Fprintf(buf, "\tif s.%s == nil {\n\t\treturn n, nil\n\t}\n", fieldName)
 			}
-		} else {
-			if err := g.generateFieldWrite(buf, "s."+fieldName, goType, binType, parsedTag, fieldInfo); err != nil {
-				return fmt.Errorf("field %s: %w", fieldName, err)
+
+			binType := getEffectiveBinaryType(parsedTag.binaryType, goType)
+
+			// valueof: write a value computed from other fields instead of the
+			// field's own (emit-only). Validated as an integer scalar upstream.
+			if vexpr, ok := parsedTag.options["valueof"]; ok && vexpr != "" {
+				pre, valExpr, vErr := g.translateValueof(vexpr, fieldInfo)
+				if vErr != nil {
+					return fmt.Errorf("field %s: %w", fieldName, vErr)
+				}
+				buf.WriteString(pre)
+				if err := g.generateFieldWrite(buf, "("+valExpr+")", goType, binType, parsedTag, fieldInfo); err != nil {
+					return fmt.Errorf("field %s: %w", fieldName, err)
+				}
+				continue
+			}
+
+			// const: emit a fixed value (emit-only), ignoring the struct field.
+			if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
+				if err := g.generateConstWrite(buf, goType, binType, parsedTag, fieldInfo, cexpr); err != nil {
+					return fmt.Errorf("field %s: %w", fieldName, err)
+				}
+				continue
+			}
+
+			if parsedTag.isArray {
+				if err := g.generateArrayWrite(buf, fieldName, goType, binType, parsedTag, fieldInfo); err != nil {
+					return fmt.Errorf("field %s: %w", fieldName, err)
+				}
+			} else {
+				if err := g.generateFieldWrite(buf, "s."+fieldName, goType, binType, parsedTag, fieldInfo); err != nil {
+					return fmt.Errorf("field %s: %w", fieldName, err)
+				}
 			}
 		}
+		return nil
+	}(); err != nil {
+		return err
 	}
+	emitLocalScratch(buf, writeBody.String())
+	buf.Write(writeBody.Bytes())
 	buf.WriteString("\treturn n, nil\n")
 	buf.WriteString("}\n\n")
 
@@ -638,55 +663,62 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	// 4. ReadBinaryWithMarshaller (Context-aware)
 	fmt.Fprintf(buf, "// ReadBinaryWithMarshaller implements binarystruct.MarshallerContextReader.\n")
 	fmt.Fprintf(buf, "func (s *%s) ReadBinaryWithMarshaller(ms *binarystruct.Marshaller, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {\n", typeName)
-	buf.WriteString("\tvar tmp [8]byte\n")
-	buf.WriteString("\tvar m int\n")
 
-	for _, field := range st.Fields.List {
-		if len(field.Names) == 0 {
-			continue
-		}
-		fieldName := field.Names[0].Name
-		goType := getGoTypeName(field.Type)
-		parsedTag := parseFieldTag(field.Tag)
+	var readBody bytes.Buffer
+	if err := func() error {
+		buf := &readBody
+		for _, field := range st.Fields.List {
+			if len(field.Names) == 0 {
+				continue
+			}
+			fieldName := field.Names[0].Name
+			goType := getGoTypeName(field.Type)
+			parsedTag := parseFieldTag(field.Tag)
 
-		if _, ok := parsedTag.options["ignore"]; ok || parsedTag.binaryType == "-" {
-			continue
-		}
+			if _, ok := parsedTag.options["ignore"]; ok || parsedTag.binaryType == "-" {
+				continue
+			}
 
-		binType := getEffectiveBinaryType(parsedTag.binaryType, goType)
+			binType := getEffectiveBinaryType(parsedTag.binaryType, goType)
 
-		// Handle omittable
-		if omittableExpr, ok := parsedTag.options["omittable"]; ok {
-			if omittableExpr != "" {
-				fmt.Fprintf(buf, "\tif n >= int(%s) {\n\t\treturn n, nil\n\t}\n", translateExpression(omittableExpr))
+			// Handle omittable
+			if omittableExpr, ok := parsedTag.options["omittable"]; ok {
+				if omittableExpr != "" {
+					fmt.Fprintf(buf, "\tif n >= int(%s) {\n\t\treturn n, nil\n\t}\n", translateExpression(omittableExpr))
+				} else {
+					// EOF-based omission
+					buf.WriteString("\t// EOF check for omittable\n")
+					buf.WriteString("\t{\n")
+					buf.WriteString("\t\tvar peek [1]byte\n")
+					buf.WriteString("\t\t_, peekErr := io.ReadFull(r, peek[:])\n")
+					buf.WriteString("\t\tif peekErr == io.EOF || peekErr == io.ErrUnexpectedEOF {\n")
+					buf.WriteString("\t\t\treturn n, nil\n")
+					buf.WriteString("\t\t}\n")
+					buf.WriteString("\t\t// Restore the byte\n")
+					buf.WriteString("\t\tr = io.MultiReader(bytes.NewReader(peek[:]), r)\n")
+					buf.WriteString("\t}\n")
+				}
+			}
+
+			if parsedTag.isArray {
+				g.generateArrayRead(buf, fieldName, goType, binType, parsedTag, typeName)
 			} else {
-				// EOF-based omission
-				buf.WriteString("\t// EOF check for omittable\n")
-				buf.WriteString("\t{\n")
-				buf.WriteString("\t\tvar peek [1]byte\n")
-				buf.WriteString("\t\t_, peekErr := io.ReadFull(r, peek[:])\n")
-				buf.WriteString("\t\tif peekErr == io.EOF || peekErr == io.ErrUnexpectedEOF {\n")
-				buf.WriteString("\t\t\treturn n, nil\n")
-				buf.WriteString("\t\t}\n")
-				buf.WriteString("\t\t// Restore the byte\n")
-				buf.WriteString("\t\tr = io.MultiReader(bytes.NewReader(peek[:]), r)\n")
-				buf.WriteString("\t}\n")
+				g.generateFieldRead(buf, "s."+fieldName, goType, binType, parsedTag, typeName, fieldName)
+			}
+
+			// const: validate the field equals its fixed value after reading.
+			if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
+				if err := g.generateConstValidate(buf, fieldName, goType, binType, cexpr); err != nil {
+					return fmt.Errorf("field %s: %w", fieldName, err)
+				}
 			}
 		}
-
-		if parsedTag.isArray {
-			g.generateArrayRead(buf, fieldName, goType, binType, parsedTag, typeName)
-		} else {
-			g.generateFieldRead(buf, "s."+fieldName, goType, binType, parsedTag, typeName, fieldName)
-		}
-
-		// const: validate the field equals its fixed value after reading.
-		if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
-			if err := g.generateConstValidate(buf, fieldName, goType, binType, cexpr); err != nil {
-				return fmt.Errorf("field %s: %w", fieldName, err)
-			}
-		}
+		return nil
+	}(); err != nil {
+		return err
 	}
+	emitLocalScratch(buf, readBody.String())
+	buf.Write(readBody.Bytes())
 	buf.WriteString("\treturn n, nil\n")
 	buf.WriteString("}\n\n")
 

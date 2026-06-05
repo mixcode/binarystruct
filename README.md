@@ -26,28 +26,30 @@ blob := []byte { 0x61, 0x62, 0x63, 0x64,
 	0x00, 0x00, 0x00, 0x03 }
 // [ "abcd", 0x01, 0x0002, 0x00000003 ]
 
-// Go struct, with field types specified in tags
+// Go struct, with field types specified in tags. The blank `_` field declares
+// the format's byte order, so Marshal/Unmarshal need no order argument.
 strc := struct {
-	Header       string `binary:"[4]byte"` // maps to 4 bytes
-	ValueInt8    int    `binary:"int8"`    // maps to single signed byte
-	ValueUint16  int    `binary:"uint16"`  // maps to two bytes
-	ValueDword32 int    `binary:"dword"`   // maps to four bytes
+	_            struct{} `binary:"endian=big"` // this struct is big-endian
+	Header       string   `binary:"[4]byte"`    // maps to 4 bytes
+	ValueInt8    int      `binary:"int8"`        // maps to single signed byte
+	ValueUint16  int      `binary:"uint16"`      // maps to two bytes
+	ValueDword32 int      `binary:"dword"`       // maps to four bytes
 }{}
 
 // Unmarshal binary data into the struct
-readsz, err := binarystruct.Unmarshal(blob, binarystruct.BigEndian, &strc)
+readsz, err := binarystruct.Unmarshal(blob, &strc)
 
 // the structure have proper values now
 fmt.Println(strc)
-// {abcd 1 2 3}
+// {{} abcd 1 2 3}
 
 // Marshal a struct to []byte
-output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
+output, err := binarystruct.Marshal(&strc)
 // output == blob
 
 ```
 
-> **Byte order.** The package-level functions take the order as an argument (e.g. `binarystruct.Marshal(&v, binarystruct.BigEndian)`). For a reusable encoder — or one with custom text encodings or codecs — construct a `Marshaler` once with `binarystruct.NewMarshaler(order)`; its `Marshal`/`Unmarshal`/`Write`/`Read`/`Append`/`Inspect` methods then take **no** order argument. A per-field `endian=` tag overrides the order for that field.
+> **Byte order.** Declare a struct's byte order once with a blank `_ struct{}` field tagged `binary:"endian=big|little"` (or embed a struct that declares one); then `Marshal`/`Unmarshal`/`Write`/`Read`/`Append`/`Inspect` take **no** order argument. A per-field `endian=` tag overrides it for that field. For a value that declares no order (a bare scalar, a third-party struct), supply a fallback with `binarystruct.NewMarshalerOrder(order)`.
 
 ## Features
 
@@ -123,7 +125,7 @@ type Record struct {
 
 // Encode: set only the data fields; the length/count fields are computed.
 rec := Record{Magic: 0x5A45, Name: []byte("file.txt"), Payload: data, Items: ids}
-blob, _ := binarystruct.Marshal(&rec, binarystruct.LittleEndian)
+blob, _ := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Marshal(&rec)
 ```
 
 On encode you populate only `Name`, `Payload`, and `Items`; `NameLen`/`PayloadLen`/`ItemCount` are written from the actual data. On decode the size expressions read each field back at exactly the right length. (Because `valueof` is emit-only, `rec.NameLen` is still `0` in memory after `Marshal` — round-trip through `Unmarshal` if you need the struct populated.)
@@ -169,7 +171,7 @@ type Packet struct {
 pkt := Packet{Magic: "HEAD", Length: 12, Flag: 1, Data: []byte{0xaa, 0xbb}}
 
 // Inspect the struct layout
-layout, _ := binarystruct.Inspect(&pkt, binarystruct.BigEndian)
+layout, _ := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Inspect(&pkt)
 
 // Format and print it
 format := binarystruct.DefaultLayoutFormat
@@ -248,7 +250,7 @@ A deserialization benchmark decoding a realistic 280-byte packet containing rang
 When unmarshalling binary payloads, failures (such as premature EOF) return errors wrapped in a custom `DecodeError` struct. This allows you to inspect the exact byte offset and field name where the failure occurred:
 
 ```go
-_, err := binarystruct.Unmarshal(corruptedData, binarystruct.BigEndian, &pkt)
+_, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Unmarshal(corruptedData, &pkt)
 if err != nil {
 	var decodeErr *binarystruct.DecodeError
 	if errors.As(err, &decodeErr) {

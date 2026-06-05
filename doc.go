@@ -16,17 +16,18 @@ Assume we have a binary data structure with a magic header and three integers, b
 By writing binary data types to field tags in Go struct definition, the values are automatically recognized and converted to proper encoding types.
 
 	strc := struct {
-		Header       string `binary:"[4]byte"` // maps to 4 bytes
-		ValueInt8    int    `binary:"int8"`    // maps to single signed byte
-		ValueUint16  int    `binary:"uint16"`  // maps to two bytes
-		ValueDword32 int    `binary:"dword"`   // maps to four bytes
-	}{"abcd", 1, 2, 3}
+		_            struct{} `binary:"endian=big"` // declares this struct's byte order
+		Header       string   `binary:"[4]byte"`    // maps to 4 bytes
+		ValueInt8    int      `binary:"int8"`       // maps to single signed byte
+		ValueUint16  int      `binary:"uint16"`     // maps to two bytes
+		ValueDword32 int      `binary:"dword"`      // maps to four bytes
+	}{Header: "abcd", ValueInt8: 1, ValueUint16: 2, ValueDword32: 3}
 
-	// Marshal a struct to []byte
-	blob, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
+	// Marshal a struct to []byte (no order argument; the struct declares it)
+	blob, err := binarystruct.Marshal(&strc)
 
 	// Unmarshal binary data back into the struct
-	readsz, err := binarystruct.Unmarshal(blob, binarystruct.BigEndian, &strc)
+	readsz, err := binarystruct.Unmarshal(blob, &strc)
 
 # Struct Tag Reference
 
@@ -55,7 +56,7 @@ Example:
 ## Tag Options
 
   - encoding=NAME: Sets string text encoding (e.g. shift-jis, utf-8).
-  - endian=big|little|inverse: Per-field override of the call's byte order (which is set once by the order argument and propagates to every field). Use only on fields that differ from it (e.g. mixed-endian formats); inverse flips the inherited order. Do not tag every field.
+  - endian=big|little|inverse: Per-field override of the struct's declared byte order (a blank "_ struct{}" field tagged endian= declares the struct's overall order). Use only on fields that differ from it (e.g. mixed-endian formats); inverse flips the inherited order. Do not tag every field.
   - codec=NAME: Applies a registered Codec for custom encoding.
   - omittable: Suppresses EOF errors at this field's start.
   - omittable=Expr: Skips the field if byte size limits are reached.
@@ -119,7 +120,7 @@ If a struct field is of an interface type, the decoder checks if the field has b
 	pkt := Packet{Payload: &data}
 
 	// Unmarshal decodes binary bytes directly into the 'data' variable
-	_, err := binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &pkt)
+	_, err := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Unmarshal(blob, &pkt)
 
 ## Dynamic Allocation using a Custom Codec
 
@@ -144,7 +145,7 @@ For packets containing polymorphic payloads (e.g. TLV or packet headers followed
 		}
 
 		// Decode binary stream into the allocated structure
-		n, err = binarystruct.Read(r, order, payload)
+		n, err = binarystruct.NewMarshalerOrder(order).Read(r, payload)
 		return payload, n, err
 	}
 
@@ -182,7 +183,7 @@ The compiled struct layout metadata can be exported as a formatted JSON document
 
 When unmarshalling fails, errors are returned as a DecodeError pointer which contains the byte Offset and Field path of the failure:
 
-	_, err := binarystruct.Unmarshal(corrupted, order, &pkt)
+	_, err := binarystruct.NewMarshalerOrder(order).Unmarshal(corrupted, &pkt)
 	if err != nil {
 		var decodeErr *binarystruct.DecodeError
 		if errors.As(err, &decodeErr) {
@@ -213,15 +214,15 @@ It covers the tag cheat sheet, dynamic sizing, custom codecs, text
 encodings, validation, and common pitfalls. Agents generating code against this
 package should read that guide first.
 
-Byte order: the order lives on the Marshaler. Construct one with
-NewMarshaler(order) (or set the exported Marshaler.Order field); the Marshal,
-Unmarshal, Write, Read, and Inspect methods take no order argument. A Marshaler
-with no byte order fails loud rather than guessing. The package-level convenience
-functions still take order, and there the position follows the standard library
-each borrows from (a common trap, so verify the signature): stream/buffer first
-like encoding/binary — Write(w, order, v), Read(r, order, v), Unmarshal(data,
-order, v), Append(buf, order, v) — while Marshal takes the value first like
-encoding/json — Marshal(v, order).
+Byte order: a struct declares its byte order with a blank "_ struct{}" field
+tagged binary:"endian=big|little" (or by embedding a struct that declares one),
+so Marshal, Unmarshal, Write, Read, Append, and Inspect take no order argument.
+Order resolution, most specific first: a per-field endian= tag, then the struct's
+declaration, then the Marshaler's Order field (a fallback set via
+NewMarshalerOrder), and otherwise encoding/decoding a multi-byte value fails loud.
+A struct's declaration wins over the Marshaler's fallback. For a value that
+declares no order (a bare scalar, a third-party struct), use
+NewMarshalerOrder(order); NewMarshaler() supplies no fallback.
 
 Implementing the stdlib encoding interfaces: a tagged type can implement
 encoding.BinaryMarshaler/BinaryUnmarshaler/BinaryAppender by delegating to

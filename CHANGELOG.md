@@ -17,25 +17,36 @@ conventions. **This release has breaking changes** — see Changed/Removed.
   code can add its own `type Marshaller = binarystruct.Marshaler` to keep old
   *type references* compiling (the dropped `order` argument and the `Codec` /
   `codec=` renames still require call-site updates).
-- **Byte order moved to construction.** `NewMarshaler(order)` (or the new
-  exported `Marshaler.Order` field) sets the byte order once; the `Marshal`,
-  `Unmarshal`, `Write`, `Read`, and `Inspect` **methods no longer take an
-  `order` argument**. The package-level functions (`binarystruct.Marshal`,
-  `Unmarshal`, `Write`, `Read`, `Append`, `Inspect`) keep their `order`
-  parameter. A `Marshaler` with no byte order now fails loud with a clear error
-  instead of panicking.
+- **Byte order is now declared on the struct, and the API is order-free.** A
+  struct states its byte order with a blank `_ struct{}` field tagged
+  `binary:"endian=big|little"` (or by embedding a struct that declares one); that
+  declaration is authoritative. The package functions and the `Marshaler` methods
+  (`Marshal`, `Unmarshal`, `Write`, `Read`, `Append`, `Inspect`) **no longer take
+  an `order` argument**. Order resolution, most specific first: a per-field
+  `endian=` tag → the struct's declaration → the Marshaler's `Order` field
+  (fallback, set via `NewMarshalerOrder`) → otherwise encoding/decoding a
+  multi-byte value fails loud with a clear error.
+- **Constructors:** `NewMarshaler()` (no fallback order) and
+  `NewMarshalerOrder(order)` (fallback order for values that declare none, e.g.
+  bare scalars or third-party structs). The previous `NewMarshaler(order)` is
+  replaced.
 - **Custom `Serializer` → `Codec`.** The interface methods are renamed
   `Serialize`/`Deserialize` → `Encode`/`Decode`; `AddSerializer`/`RemoveSerializer`/
   `GetSerializer` → `AddCodec`/`RemoveCodec`/`GetCodec`; and the struct tag
   keyword **`serializer=NAME` → `codec=NAME`**.
-- **Codegen requires `-endian big|little`.** The generated no-arg
-  `MarshalBinary`/`UnmarshalBinary`/`AppendBinary` methods implement the
-  order-less stdlib `encoding` interfaces, so the baked byte order must be chosen
-  explicitly; generation errors if `-endian` is omitted (no default).
+- **Codegen `-endian` is now optional.** A struct's own `endian=` declaration
+  supplies (and overrides) the order baked into the generated no-arg
+  `MarshalBinary`/`UnmarshalBinary`/`AppendBinary`; `-endian big|little` is only
+  the fallback for structs that declare none. Generation **errors** if neither
+  the struct nor the flag provides an order (no default). Codegen does not support
+  struct-level `endian=inverse` or order inheritance via embedding (use the
+  runtime interpreter).
 - **Minimum Go version is now 1.24** (for `encoding.BinaryAppender`).
 
 ### Added
-- **`Append`** — `binarystruct.Append(buf, order, v)` and `Marshaler.Append(buf, v)`
+- **Struct-level byte order** via the `_ struct{}` `binary:"endian=…"` sentinel and
+  via value-embedding a declaring struct; conflicting embedded orders are an error.
+- **`Append`** — `binarystruct.Append(buf, v)` and `Marshaler.Append(buf, v)`
   encode a value and append it to a buffer (the `encoding/binary.Append` analog).
 - **Codegen emits `AppendBinary`** implementing `encoding.BinaryAppender` (Go 1.24).
 - An agent-facing example showing a tagged type implement

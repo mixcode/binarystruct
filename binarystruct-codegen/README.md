@@ -19,7 +19,7 @@ binarystruct-codegen -type TypeName[,TypeName2,...] [flags] [directory]
 | Flag | Description |
 | :--- | :--- |
 | `-type` | Comma-separated list of struct type names to generate methods for (**required**). |
-| `-endian` | Byte order baked into the no-arg `MarshalBinary`/`UnmarshalBinary`/`AppendBinary` methods: `big` or `little`. **Required when generating Go code** (the stdlib `encoding` interfaces carry no byte order, so there is no default); not needed with `-json`. |
+| `-endian` | Fallback byte order (`big` or `little`) baked into the no-arg `MarshalBinary`/`UnmarshalBinary`/`AppendBinary` methods. **Optional** when the struct declares its own order (a blank `_ struct{}` field tagged `binary:"endian=…"`, which wins); otherwise required. Generation **errors** if neither the struct nor this flag gives an order. Not needed with `-json`. |
 | `-output` | Output file name (default: `<first_type>_binary.go` or `<first_type>.json` if `-json` is set). |
 | `-json` | Export parsed struct layout metadata to JSON instead of generating Go code. |
 | `-tests` | Include test files (`*_test.go`) when parsing package files. |
@@ -76,10 +76,15 @@ The binarystruct-codegen tool supports the full `binary:"..."` tag syntax includ
 - Tag math expressions (e.g. `string(PayloadSize - 4)`)
 - Validation (`range=min..max`, `match=pattern`)
 - Omittable fields (`omittable`)
-- Endian override (`endian=big|little|inverse`)
+- Struct-level byte order via the blank `_ struct{}` `binary:"endian=big|little"` sentinel (supplies/overrides the baked order)
+- Per-field endian override (`endian=big|little`)
 - Text encoding (`encoding=NAME`)
 - Custom codecs (`custom,codec=NAME`)
 - Nested structs
+
+**Not supported by codegen** (use the runtime interpreter): struct-level
+`endian=inverse`, and byte-order inheritance via embedding. Per-field
+`endian=inverse` is supported.
 
 For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the parent project.
 

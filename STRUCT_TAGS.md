@@ -60,13 +60,31 @@ Configures the text encoding for string conversion.
 * **Usage**: `binary:"string(10),encoding=shift-jis"`
 * Supported encodings include `utf-8`, `shift-jis`, `euc-jp`, `utf-16le`, etc. (registered via `Marshaler.AddTextEncoding`).
 
+### Struct-level byte order: the `_ struct{}` sentinel
+Declare a struct's byte order once with a **blank `_ struct{}` sentinel field**. It
+encodes to **zero bytes** (it is metadata, not a field) and applies the order to the
+whole struct, so `Marshal`/`Unmarshal`/… need no order argument:
+```go
+type Header struct {
+	_     struct{} `binary:"endian=big"` // this format is big-endian
+	Magic uint32   `binary:"uint32"`
+	Size  uint32   `binary:"uint32"`
+}
+```
+* **Embedding** a struct that declares an order propagates it (a reusable base, e.g.
+  `type bigEndian struct{ _ struct{} \`binary:"endian=big"\` }`). Conflicting orders
+  from multiple embedded structs are an error.
+* A value that declares no order (a bare scalar, a third-party struct) takes a
+  fallback from `binarystruct.NewMarshalerOrder(order)`; otherwise encoding a
+  multi-byte value fails with a clear error.
+
 ### `endian=big|little|inverse`
-Overrides the default byte order (endianness) for the field.
+Per-field **override** of the struct's declared byte order.
 * **`big`**: Forces Big Endian.
 * **`little`**: Forces Little Endian.
-* **`inverse`**: Inverts the parent struct's configured byte order.
+* **`inverse`**: Inverts the inherited byte order.
 * **Usage**: `Value uint32 `binary:"uint32,endian=inverse"`` (propagates recursively to nested struct fields).
-* **This tag is an override only.** The byte order is set once by the `order` argument of `Marshal`/`Unmarshal`/`Write`/`Read` and propagates to every field and nested struct automatically. Add `endian=` **only to the fields that differ** from that order (e.g. a mixed-endian format) — do **not** tag every field; a struct whose fields all use the call's byte order needs no `endian=` tags at all.
+* **This tag is an override only.** The struct declares its overall order (the `_` sentinel above); add per-field `endian=` **only to the fields that differ** (e.g. a mixed-endian format) — do **not** tag every field.
 
 ### `codec=NAME`
 Uses a custom registered `Codec` to marshal and unmarshal this field.
@@ -165,7 +183,7 @@ var data int32 = 0
 pkt := Packet{Payload: &data}
 
 // Unmarshal decodes binary bytes directly into the 'data' variable
-_, err := binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &pkt)
+_, err := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Unmarshal(blob, &pkt)
 ```
 
 ### Strategy 2: Dynamic Allocation using a Custom Codec
@@ -193,7 +211,7 @@ func (s *DynamicPayloadCodec) Decode(r io.Reader, parentStruct reflect.Value, fi
 	}
 
 	// Decode binary stream into the allocated structure
-	n, err = binarystruct.Read(r, order, payload)
+	n, err = binarystruct.NewMarshalerOrder(order).Read(r, payload)
 	return payload, n, err
 }
 ```

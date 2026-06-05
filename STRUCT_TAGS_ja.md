@@ -60,13 +60,31 @@ MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
 * **使用例**: `binary:"string(10),encoding=shift-jis"`
 * `utf-8`、`shift-jis`、`euc-jp`、`utf-16le` などに対応（`Marshaler.AddTextEncoding` で登録可能）。
 
+### 構造体レベルのバイトオーダー: `_ struct{}` センチネル
+構造体のバイトオーダーは、空の **`_ struct{}` センチネルフィールド**で一度だけ宣言します。
+これは **0 バイト**にエンコードされ（フィールドではなくメタデータ）、構造体全体にそのバイト
+オーダーを適用するため、`Marshal`/`Unmarshal`/… にバイトオーダー引数は不要になります:
+```go
+type Header struct {
+	_     struct{} `binary:"endian=big"` // このフォーマットはビッグエンディアン
+	Magic uint32   `binary:"uint32"`
+	Size  uint32   `binary:"uint32"`
+}
+```
+* バイトオーダーを宣言した構造体を**埋め込む**と、そのオーダーが伝播します（再利用可能な
+  ベース。例: `type bigEndian struct{ _ struct{} \`binary:"endian=big"\` }`）。複数の埋め込みで
+  オーダーが矛盾する場合はエラーになります。
+* バイトオーダーを宣言しない値（裸のスカラーや外部の構造体）には
+  `binarystruct.NewMarshalerOrder(order)` でフォールバックを指定します。指定がないままマルチ
+  バイト値をエンコードするとエラーになります。
+
 ### `endian=big|little|inverse`
-このフィールドのデフォルトエンディアン（バイトオーダー）を上書きします。
+構造体に宣言されたバイトオーダーに対するフィールド単位の**上書き**です。
 * **`big`**: ビッグエンディアンを強制。
 * **`little`**: リトルエンディアンを強制。
-* **`inverse`**: 親構造体に指定されたバイトオーダーを反転。
+* **`inverse`**: 継承したバイトオーダーを反転。
 * **使用例**: `Value uint32 `binary:"uint32,endian=inverse"``（ネストされた構造体フィールドにも再帰的に伝播します）。
-* **このタグは上書き専用です。** バイトオーダーは `Marshal`/`Unmarshal`/`Write`/`Read` の `order` 引数で一度だけ設定され、すべてのフィールドとネストされた構造体へ自動的に伝播します。`endian=` は、そのバイトオーダーと**異なるフィールドにのみ**付けてください（例: エンディアン混在フォーマット）。すべてのフィールドに付ける必要はありません。フィールドがすべて呼び出し時のバイトオーダーを使う構造体には `endian=` タグは一切不要です。
+* **このタグは上書き専用です。** 構造体は全体のオーダーを（上記の `_` センチネルで）宣言します。フィールド単位の `endian=` は、**異なるフィールドにのみ**付けてください（例: エンディアン混在フォーマット）。すべてのフィールドに付ける必要はありません。
 
 ### `codec=NAME`
 登録済みのカスタム `Codec` を用いて、このフィールドをエンコード/デコードします。
@@ -165,7 +183,7 @@ var data int32 = 0
 pkt := Packet{Payload: &data}
 
 // Unmarshal はバイナリデータを 'data' 変数に直接デコードします
-_, err := binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &pkt)
+_, err := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Unmarshal(blob, &pkt)
 ```
 
 ### 方法 2: カスタムコーデックによる動的割り当て
@@ -193,7 +211,7 @@ func (s *DynamicPayloadCodec) Decode(r io.Reader, parentStruct reflect.Value, fi
 	}
 
 	// 割り当てた構造体にバイナリストリームからデータをデコードする
-	n, err = binarystruct.Read(r, order, payload)
+	n, err = binarystruct.NewMarshalerOrder(order).Read(r, payload)
 	return payload, n, err
 }
 ```

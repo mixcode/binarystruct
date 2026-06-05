@@ -31,7 +31,8 @@ Tag options modify the behavior of binary types. They are appended after the typ
 
 | Option | Syntax | Applies To | Description |
 | :--- | :--- | :--- | :--- |
-| **`endian`** | `endian=big\|little\|inverse` | Integer/float types | Per-field **override** of the call-level `order` argument (which propagates to all fields and nested structs); `inverse` flips the inherited order. Needed only on fields that differ — not on every field. |
+| **`endian`** (struct-level) | `endian=big\|little` on a blank `_ struct{}` field | The whole struct | Declares the struct's byte order (see §2). Propagates to all fields and nested structs; inherited via embedding. The sentinel encodes to 0 bytes. |
+| **`endian`** (per-field) | `endian=big\|little\|inverse` | Integer/float types | Per-field **override** of the struct's declared order; `inverse` flips the inherited order. Needed only on fields that differ — not on every field. |
 | **`encoding`** | `encoding=NAME` | String types | Applies a text encoding (e.g. Shift-JIS) registered in the Marshaler. |
 | **`codec`** | `codec=NAME` | `custom` type | Specifies which registered Codec to delegate to. |
 | **`omittable`** | `omittable` or `omittable=Expr` | Any | Allows truncated streams: if EOF is reached at this field's start, decoding stops without error. |
@@ -101,7 +102,17 @@ The `const` option pins a field to a fixed value: **emitted on encode** (the Go 
 
 ## 2. Dynamic vs. Static Path Architecture
 
-> **Byte order is carried on the `Marshaler`** (`NewMarshaler(order)` or the `Order` field); the `Marshal`/`Unmarshal`/`Write`/`Read`/`Inspect` methods take no `order` argument, while the package-level functions still do. Internally the order is threaded through the recursion as before, so `resolveByteOrder(order, endian)` and all per-field `endian=` semantics are unchanged across the three paths.
+> **Byte order is declared on the struct** — a blank `_ struct{}` field tagged
+> `binary:"endian=…"` (parsed into `structMetadata.endian`), or inherited from a
+> value-embedded struct that declares one (conflicting embedded orders are an
+> error). The `Marshal`/`Unmarshal`/`Write`/`Read`/`Append`/`Inspect` package
+> functions and methods take **no** `order` argument. Resolution, most specific
+> first: per-field `endian=` → the struct's declaration → the `Marshaler.Order`
+> fallback (`NewMarshalerOrder(order)`) → otherwise a multi-byte value fails loud.
+> Each struct entry seeds `order = resolveByteOrder(order, meta.endian)` before the
+> per-field resolution, identically across all three paths (the generated method
+> seeds it too, since the runtime fast-paths into it before seeding). Codegen does
+> not support struct-level `endian=inverse` or order-via-embedding.
 
 ```mermaid
 graph TD

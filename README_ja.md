@@ -26,28 +26,30 @@ blob := []byte { 0x61, 0x62, 0x63, 0x64,
 	0x00, 0x00, 0x00, 0x03 }
 // [ "abcd", 0x01, 0x0002, 0x00000003 ]
 
-// フィールドタグ付きの構造体
+// フィールドタグ付きの構造体。先頭の空フィールド `_` がこの構造体のバイトオーダーを
+// 宣言するため、Marshal/Unmarshal にバイトオーダー引数は不要です。
 strc := struct {
-	Header       string `binary:"[4]byte"` // maps to 4 bytes
-	ValueInt8    int    `binary:"int8"`    // maps to single signed byte
-	ValueUint16  int    `binary:"uint16"`  // maps to two bytes
-	ValueDword32 int    `binary:"dword"`   // maps to four bytes
+	_            struct{} `binary:"endian=big"` // この構造体はビッグエンディアン
+	Header       string   `binary:"[4]byte"`    // maps to 4 bytes
+	ValueInt8    int      `binary:"int8"`        // maps to single signed byte
+	ValueUint16  int      `binary:"uint16"`      // maps to two bytes
+	ValueDword32 int      `binary:"dword"`       // maps to four bytes
 }{}
 
 // バイナリ→構造体変換
-readsz, err := binarystruct.Unmarshal(blob, binarystruct.BigEndian, &strc)
+readsz, err := binarystruct.Unmarshal(blob, &strc)
 
 // 出力テスト
 fmt.Println(strc)
-// {abcd 1 2 3}
+// {{} abcd 1 2 3}
 
 // 構造体→バイナリ
-output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
+output, err := binarystruct.Marshal(&strc)
 // output == blob
 
 ```
 
-> **バイトオーダー**: パッケージレベルの関数はバイトオーダーを引数で受け取ります（例: `binarystruct.Marshal(&v, binarystruct.BigEndian)`）。再利用するエンコーダや、カスタムテキストエンコーディング・コーデックを使う場合は、`binarystruct.NewMarshaler(order)` で `Marshaler` を一度構築してください。その `Marshal`/`Unmarshal`/`Write`/`Read`/`Append`/`Inspect` メソッドはバイトオーダー引数を取りません。フィールド単位の `endian=` タグはそのフィールドのバイトオーダーを上書きします。
+> **バイトオーダー**: 構造体のバイトオーダーは、空フィールド `_ struct{}` に `binary:"endian=big|little"` タグを付けて一度だけ宣言します（またはそれを宣言した構造体を埋め込みます）。すると `Marshal`/`Unmarshal`/`Write`/`Read`/`Append`/`Inspect` はバイトオーダー引数を取りません。フィールド単位の `endian=` タグはそのフィールドのみを上書きします。バイトオーダーを宣言しない値（裸のスカラーや外部の構造体）には `binarystruct.NewMarshalerOrder(order)` でフォールバックを指定してください。
 
 ## 主な機能
 
@@ -124,7 +126,7 @@ type Record struct {
 
 // エンコード: データフィールドだけを設定すれば、長さ・要素数フィールドは自動計算される。
 rec := Record{Magic: 0x5A45, Name: []byte("file.txt"), Payload: data, Items: ids}
-blob, _ := binarystruct.Marshal(&rec, binarystruct.LittleEndian)
+blob, _ := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Marshal(&rec)
 ```
 
 エンコード時に設定するのは `Name`・`Payload`・`Items` だけで、`NameLen`・`PayloadLen`・`ItemCount` は実データから書き込まれます。デコード時はサイズ式が各フィールドを正確な長さで読み戻します。（`valueof` は emit-only のため、`Marshal` 後もメモリ上の `rec.NameLen` は `0` のままです。構造体に値を反映したい場合は `Unmarshal` でラウンドトリップしてください。）
@@ -170,7 +172,7 @@ type Packet struct {
 pkt := Packet{Magic: "HEAD", Length: 12, Flag: 1, Data: []byte{0xaa, 0xbb}}
 
 // 構造体のレイアウトを解析
-layout, _ := binarystruct.Inspect(&pkt, binarystruct.BigEndian)
+layout, _ := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Inspect(&pkt)
 
 // フォーマットを設定して表示
 format := binarystruct.DefaultLayoutFormat
@@ -249,7 +251,7 @@ type Packet struct {
 バイナリデータのデシリアライズ（Unmarshal）中にエラー（予期しないEOFなど）が発生した場合、エラーはカスタム構造体 `DecodeError` にラップされて返されます。これにより、失敗が発生した正確なバイトオフセットとフィールド名を特定できます：
 
 ```go
-_, err := binarystruct.Unmarshal(corruptedData, binarystruct.BigEndian, &pkt)
+_, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Unmarshal(corruptedData, &pkt)
 if err != nil {
 	var decodeErr *binarystruct.DecodeError
 	if errors.As(err, &decodeErr) {

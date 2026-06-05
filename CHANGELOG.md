@@ -13,7 +13,10 @@ conventions. **This release has breaking changes** — see Changed/Removed.
 ### Changed (breaking)
 - **`Marshaller` → `Marshaler`** (stdlib single-`l` spelling), including the
   generated `WriteBinaryWithMarshaler` / `ReadBinaryWithMarshaler` interface
-  methods.
+  methods. No deprecated alias is shipped; for a gradual migration, downstream
+  code can add its own `type Marshaller = binarystruct.Marshaler` to keep old
+  *type references* compiling (the dropped `order` argument and the `Codec` /
+  `codec=` renames still require call-site updates).
 - **Byte order moved to construction.** `NewMarshaler(order)` (or the new
   exported `Marshaler.Order` field) sets the byte order once; the `Marshal`,
   `Unmarshal`, `Write`, `Read`, and `Inspect` **methods no longer take an

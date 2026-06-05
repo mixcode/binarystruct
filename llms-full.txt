@@ -114,6 +114,18 @@ type Mixed struct {
 }
 ```
 
+### H. Migrating from pre-0.3.0 (breaking renames)
+v0.3.0 aligned the API with Go standard-library conventions. When reading or updating older code, translate:
+* **`Marshaller` → `Marshaler`** (type), including `…WithMarshaller` → `…WithMarshaler`.
+* **Order moved to construction:** `ms.Marshal(v, order)` / `Unmarshal` / `Write` / `Read` / `Inspect` → set it once with `NewMarshaler(order)`, then call **without** the `order` argument. (The package-level `binarystruct.Marshal(v, order)` etc. still take it.)
+* **Custom codecs:** `Serializer`/`Serialize`/`Deserialize` → `Codec`/`Encode`/`Decode`; `AddSerializer` → `AddCodec`; and the tag `serializer=NAME` → `codec=NAME`.
+
+For the **type-spelling change only**, a one-line alias in your own code keeps old `Marshaller` *type references* compiling during a gradual migration:
+```go
+type Marshaller = binarystruct.Marshaler // shim: fixes the spelling only
+```
+The alias does **not** address the method-signature (dropped `order`), the `Codec` rename, or the `codec=` tag — those call sites still need updating. The package itself ships no deprecated alias.
+
 ---
 
 ## 3. Debugging Layout Issues

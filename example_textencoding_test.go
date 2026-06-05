@@ -16,6 +16,7 @@ func ExampleMarshaler_AddTextEncoding() {
 
 	// make a explicit marshaller
 	var marshaller = new(binarystruct.Marshaler)
+	marshaller.Order = binarystruct.LittleEndian
 
 	// add Japanese Shift-JIS text encoding
 	// see "golang.org/x/text/encoding/japanese"
@@ -37,7 +38,7 @@ func ExampleMarshaler_AddTextEncoding() {
 	}
 
 	// marshalling
-	data, err := marshaller.Marshal(&in, binarystruct.LittleEndian)
+	data, err := marshaller.Marshal(&in)
 	if err != nil {
 		panic(err)
 	}
@@ -50,7 +51,7 @@ func ExampleMarshaler_AddTextEncoding() {
 
 	// unmarshalling
 	out := st{}
-	_, err = marshaller.Unmarshal(data, binarystruct.LittleEndian, &out)
+	_, err = marshaller.Unmarshal(data, &out)
 	if err != nil {
 		panic(err)
 	}
@@ -64,6 +65,7 @@ func ExampleMarshaler_AddTextEncoding() {
 
 func ExampleMarshaler_DefaultTextEncoding() {
 	var marshaller = new(binarystruct.Marshaler)
+	marshaller.Order = binarystruct.LittleEndian
 
 	// Add Shift-JIS text encoding
 	marshaller.AddTextEncoding("sjis", japanese.ShiftJIS)
@@ -80,7 +82,7 @@ func ExampleMarshaler_DefaultTextEncoding() {
 		S: "こんにちは",
 	}
 
-	data, err := marshaller.Marshal(&in, binarystruct.LittleEndian)
+	data, err := marshaller.Marshal(&in)
 	if err != nil {
 		panic(err)
 	}
@@ -92,7 +94,7 @@ func ExampleMarshaler_DefaultTextEncoding() {
 	fmt.Println()
 
 	out := st{}
-	_, err = marshaller.Unmarshal(data, binarystruct.LittleEndian, &out)
+	_, err = marshaller.Unmarshal(data, &out)
 	if err != nil {
 		panic(err)
 	}

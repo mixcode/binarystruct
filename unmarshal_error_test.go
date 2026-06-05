@@ -23,9 +23,8 @@ func TestUnmarshal_FailureOffset(t *testing.T) {
 	}
 
 	var p Packet
-	var ms Marshaler
 
-	_, err := ms.Unmarshal(buf, BigEndian, &p)
+	_, err := Unmarshal(buf, BigEndian, &p)
 	if err == nil {
 		t.Fatal("expected error but got nil")
 	}

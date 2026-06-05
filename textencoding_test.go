@@ -18,6 +18,7 @@ func TestTextEncoding(t *testing.T) {
 	var err error
 
 	var ms = new(bst.Marshaler)
+	ms.Order = bst.LittleEndian
 
 	ms.AddTextEncoding("sjis", japanese.ShiftJIS)
 	ms.AddTextEncoding("utf16", unicode.UTF16(unicode.LittleEndian, unicode.UseBOM))
@@ -32,7 +33,7 @@ func TestTextEncoding(t *testing.T) {
 			0x0e, 0x00, 0x82, 0xb1, 0x82, 0xf1, 0x82, 0xc9,
 			0x82, 0xbf, 0x82, 0xcd, 0x93, 0xbb, 0x98, 0xa5,
 		}
-		enc, e := ms.Marshal(&in, bst.LittleEndian)
+		enc, e := ms.Marshal(&in)
 		if e != nil {
 			t.Error(e)
 			return
@@ -42,7 +43,7 @@ func TestTextEncoding(t *testing.T) {
 			return
 		}
 		out := st{}
-		_, e = ms.Unmarshal(enc, bst.LittleEndian, &out)
+		_, e = ms.Unmarshal(enc, &out)
 		if e != nil {
 			t.Error(e)
 			return
@@ -64,7 +65,7 @@ func TestTextEncoding(t *testing.T) {
 			0x6f, 0x30, 0xe0, 0x5c, 0x3c, 0x4e, 0x64, 0x00,
 			0x65, 0x00, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00,
 		}
-		enc, e := ms.Marshal(&in, bst.LittleEndian)
+		enc, e := ms.Marshal(&in)
 		if e != nil {
 			t.Error(e)
 			return
@@ -74,7 +75,7 @@ func TestTextEncoding(t *testing.T) {
 			return
 		}
 		out := st{}
-		_, e = ms.Unmarshal(enc, bst.LittleEndian, &out)
+		_, e = ms.Unmarshal(enc, &out)
 		if e != nil {
 			t.Error(e)
 			return
@@ -96,6 +97,7 @@ func TestTextEncoding(t *testing.T) {
 	// DefaultTextEncoding
 	func() {
 		var msDefault = new(bst.Marshaler)
+		msDefault.Order = bst.LittleEndian
 		msDefault.AddTextEncoding("sjis", japanese.ShiftJIS)
 		msDefault.DefaultTextEncoding = "sjis"
 
@@ -107,7 +109,7 @@ func TestTextEncoding(t *testing.T) {
 			0x0e, 0x00, 0x82, 0xb1, 0x82, 0xf1, 0x82, 0xc9,
 			0x82, 0xbf, 0x82, 0xcd, 0x93, 0xbb, 0x98, 0xa5,
 		}
-		enc, e := msDefault.Marshal(&in, bst.LittleEndian)
+		enc, e := msDefault.Marshal(&in)
 		if e != nil {
 			t.Error(e)
 			return
@@ -117,7 +119,7 @@ func TestTextEncoding(t *testing.T) {
 			return
 		}
 		out := st{}
-		_, e = msDefault.Unmarshal(enc, bst.LittleEndian, &out)
+		_, e = msDefault.Unmarshal(enc, &out)
 		if e != nil {
 			t.Error(e)
 			return

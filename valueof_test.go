@@ -83,13 +83,14 @@ type vfSJIS struct {
 
 func TestValueof_BytelenRespectsEncoding(t *testing.T) {
 	var ms Marshaler
+	ms.Order = LittleEndian
 	ms.AddTextEncoding("sjis", japanese.ShiftJIS)
 
 	in := vfSJIS{Text: "あい"}
 	if len(in.Text) != 6 {
 		t.Fatalf("precondition: UTF-8 len of test string = %d, want 6", len(in.Text))
 	}
-	blob, err := ms.Marshal(&in, LittleEndian)
+	blob, err := ms.Marshal(&in)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestValueof_BytelenRespectsEncoding(t *testing.T) {
 	}
 
 	var out vfSJIS
-	if _, err := ms.Unmarshal(blob, LittleEndian, &out); err != nil {
+	if _, err := ms.Unmarshal(blob, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 	if out.Len != 4 || out.Text != "あい" {

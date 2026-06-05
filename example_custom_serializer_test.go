@@ -61,6 +61,7 @@ func (vs *VarintSerializer) Deserialize(r io.Reader, parentStruct reflect.Value,
 
 func ExampleMarshaler_AddSerializer() {
 	marshaller := new(binarystruct.Marshaler)
+	marshaller.Order = binarystruct.LittleEndian
 	marshaller.AddSerializer("varint", &VarintSerializer{})
 
 	type Packet struct {
@@ -73,7 +74,7 @@ func ExampleMarshaler_AddSerializer() {
 	}
 
 	// Marshal structural data
-	blob, err := marshaller.Marshal(in, binarystruct.LittleEndian)
+	blob, err := marshaller.Marshal(in)
 	if err != nil {
 		panic(err)
 	}
@@ -82,7 +83,7 @@ func ExampleMarshaler_AddSerializer() {
 	fmt.Printf("Blob: %x\n", blob)
 
 	var restored Packet
-	_, err = marshaller.Unmarshal(blob, binarystruct.LittleEndian, &restored)
+	_, err = marshaller.Unmarshal(blob, &restored)
 	if err != nil {
 		panic(err)
 	}

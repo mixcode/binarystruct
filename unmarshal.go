@@ -4,7 +4,6 @@ package binarystruct
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -43,47 +42,51 @@ func (e *DecodeError) Unwrap() error {
 
 // Unmarshal decodes binary images into a Go value. The Go value must be a writable type such as a slice, a pointer or an interface.
 func Unmarshal(input []byte, order ByteOrder, govalue interface{}) (n int, err error) {
-	var ms Marshaler
-	return (&ms).Unmarshal(input, order, govalue)
+	return NewMarshaler(order).Unmarshal(input, govalue)
 }
 
 // Read reads binary data from r and decode it into a Go value. The Go value must be a writable type such as a slice, a pointer or an interface.
 func Read(r io.Reader, order ByteOrder, data interface{}) (n int, err error) {
-	var ms Marshaler
-	return (&ms).readValue(r, order, reflect.ValueOf(data))
+	return NewMarshaler(order).Read(r, data)
 }
 
 // UnmarshalAs decodes binary images into a Go value using the supplied tag. The Go value must be a writable type such as a slice, a pointer or an interface.
 func UnmarshalAs(input []byte, tag string, order ByteOrder, govalue interface{}) (n int, err error) {
-	var ms Marshaler
-	return (&ms).UnmarshalAs(input, tag, order, govalue)
+	return NewMarshaler(order).UnmarshalAs(input, tag, govalue)
 }
 
 // ReadAs reads binary data from r and decodes it into a Go value using the supplied tag. The Go value must be a writable type such as a slice, a pointer or an interface.
 func ReadAs(r io.Reader, tag string, order ByteOrder, data interface{}) (n int, err error) {
-	var ms Marshaler
-	return (&ms).ReadAs(r, tag, order, data)
+	return NewMarshaler(order).ReadAs(r, tag, data)
 }
 
-// Unmarshaller.Unmarshal() is binary image decoder with environment in a Marshaler.
-func (ms *Marshaler) Unmarshal(input []byte, order binary.ByteOrder, govalue interface{}) (n int, err error) {
+// Marshaler.Unmarshal() decodes binary data into a Go value using the Marshaler's byte order.
+func (ms *Marshaler) Unmarshal(input []byte, govalue interface{}) (n int, err error) {
 	buf := bytes.NewBuffer(input)
-	return ms.Read(buf, order, govalue)
+	return ms.Read(buf, govalue)
 }
 
-// Unmarshaller.UnmarshalAs() is binary image decoder with environment in a Marshaler using the supplied tag.
-func (ms *Marshaler) UnmarshalAs(input []byte, tag string, order binary.ByteOrder, govalue interface{}) (n int, err error) {
+// Marshaler.UnmarshalAs() decodes binary data using the supplied tag and the Marshaler's byte order.
+func (ms *Marshaler) UnmarshalAs(input []byte, tag string, govalue interface{}) (n int, err error) {
 	buf := bytes.NewBuffer(input)
-	return ms.ReadAs(buf, tag, order, govalue)
+	return ms.ReadAs(buf, tag, govalue)
 }
 
-// Unmarshaller.Read() is binary stream decoder with environment in a Marshaler.
-func (ms *Marshaler) Read(r io.Reader, order binary.ByteOrder, data interface{}) (n int, err error) {
+// Marshaler.Read() decodes a binary stream into a Go value using the Marshaler's byte order.
+func (ms *Marshaler) Read(r io.Reader, data interface{}) (n int, err error) {
+	order, err := ms.effectiveOrder()
+	if err != nil {
+		return 0, err
+	}
 	return ms.readValue(r, order, reflect.ValueOf(data))
 }
 
-// Unmarshaller.ReadAs() is binary stream decoder with environment in a Marshaler using the supplied tag.
-func (ms *Marshaler) ReadAs(r io.Reader, tag string, order binary.ByteOrder, data interface{}) (n int, err error) {
+// Marshaler.ReadAs() decodes a binary stream using the supplied tag and the Marshaler's byte order.
+func (ms *Marshaler) ReadAs(r io.Reader, tag string, data interface{}) (n int, err error) {
+	order, err := ms.effectiveOrder()
+	if err != nil {
+		return 0, err
+	}
 	v := reflect.ValueOf(data)
 	k := v.Type().Kind()
 	if k == reflect.Ptr || k == reflect.Interface {

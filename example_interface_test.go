@@ -63,6 +63,7 @@ func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect
 func Example_interfacePolymorphism() {
 	// Register the custom serializer
 	var ms binarystruct.Marshaler
+	ms.Order = binarystruct.BigEndian
 	ms.AddSerializer("DynamicPayload", &DynamicPayloadSerializer{})
 
 	// 1. Serialize Packet A (MsgType 1)
@@ -70,21 +71,21 @@ func Example_interfacePolymorphism() {
 		MsgType: 1,
 		Payload: &MessageA{ValueA: 0x11223344},
 	}
-	blobA, _ := ms.Marshal(&pktA, binarystruct.BigEndian)
+	blobA, _ := ms.Marshal(&pktA)
 
 	// 2. Serialize Packet B (MsgType 2)
 	pktB := Packet{
 		MsgType: 2,
 		Payload: &MessageB{ValueB: "hello"},
 	}
-	blobB, _ := ms.Marshal(&pktB, binarystruct.BigEndian)
+	blobB, _ := ms.Marshal(&pktB)
 
 	// 3. Deserialize back dynamically
 	var restoredA Packet
-	_, _ = ms.Unmarshal(blobA, binarystruct.BigEndian, &restoredA)
+	_, _ = ms.Unmarshal(blobA, &restoredA)
 
 	var restoredB Packet
-	_, _ = ms.Unmarshal(blobB, binarystruct.BigEndian, &restoredB)
+	_, _ = ms.Unmarshal(blobB, &restoredB)
 
 	// Verify types and values
 	fmt.Printf("Restored A Payload: %T (%+v)\n", restoredA.Payload, restoredA.Payload)

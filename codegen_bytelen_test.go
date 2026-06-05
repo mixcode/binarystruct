@@ -343,6 +343,7 @@ func TestCodegenBytelen_PrefixedEncodedString(t *testing.T) {
 
 func TestPrefixEncoded(t *testing.T) {
 	var ms binarystruct.Marshaler
+	ms.Order = binarystruct.BigEndian
 	ms.AddTextEncoding("sjis", japanese.ShiftJIS)
 
 	s := Msg{B: "ああ"} // 6 bytes UTF-8, 4 bytes Shift-JIS
@@ -351,7 +352,7 @@ func TestPrefixEncoded(t *testing.T) {
 		t.Fatalf("WriteBinaryWithMarshaler: %v", err)
 	}
 	blob := buf.Bytes()
-	rt, err := ms.Marshal(&s, binarystruct.BigEndian)
+	rt, err := ms.Marshal(&s)
 	if err != nil {
 		t.Fatalf("runtime Marshal: %v", err)
 	}
@@ -438,6 +439,7 @@ func TestCodegenBytelen_VariableTextString(t *testing.T) {
 
 func TestVarText(t *testing.T) {
 	var ms binarystruct.Marshaler
+	ms.Order = binarystruct.BigEndian
 	ms.AddTextEncoding("sjis", japanese.ShiftJIS)
 
 	s := Msg{Text: "ああ"} // 6 bytes UTF-8, 4 bytes Shift-JIS
@@ -447,7 +449,7 @@ func TestVarText(t *testing.T) {
 	}
 	blob := buf.Bytes()
 
-	rt, err := ms.Marshal(&s, binarystruct.BigEndian)
+	rt, err := ms.Marshal(&s)
 	if err != nil {
 		t.Fatalf("runtime Marshal: %v", err)
 	}

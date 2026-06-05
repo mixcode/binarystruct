@@ -859,6 +859,7 @@ func (vs *varintSerializer) Deserialize(r io.Reader, parentStruct reflect.Value,
 
 func TestCustomSerializer(t *testing.T) {
 	var ms = new(bst.Marshaler)
+	ms.Order = bst.LittleEndian
 	ms.AddSerializer("varint", &varintSerializer{})
 
 	type structWithCustom struct {
@@ -873,7 +874,7 @@ func TestCustomSerializer(t *testing.T) {
 		Suffix: 0xbb,
 	}
 
-	blob, err := ms.Marshal(in, bst.LittleEndian)
+	blob, err := ms.Marshal(in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -884,7 +885,7 @@ func TestCustomSerializer(t *testing.T) {
 	}
 
 	var out structWithCustom
-	_, err = ms.Unmarshal(blob, bst.LittleEndian, &out)
+	_, err = ms.Unmarshal(blob, &out)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -58,6 +58,11 @@ type structMetadata struct {
 	// sentinel field's `binary:"endian=…"` tag or inherited from a value-embedded
 	// struct. endianNone when the struct declares no order of its own.
 	endian endianOverride
+	// defaultEncoding is the struct-level default text encoding, from the sentinel's
+	// `binary:"encoding=…"` (or inherited via embedding). It is baked into each
+	// string field's metadata that does not set its own encoding=, so it sits
+	// between a per-field encoding= and the Marshaler's DefaultTextEncoding.
+	defaultEncoding string
 }
 
 // fieldByName returns the metadata for the field with the given Go name.
@@ -634,30 +639,37 @@ func parseEndianValue(s string) (endianOverride, error) {
 }
 
 // parseStructSentinel parses the struct-scope options carried by a blank
-// `_ struct{}` sentinel field's binary tag. Only endian= is supported today.
-func parseStructSentinel(tagStr string) (endianOverride, error) {
-	eo := endianNone
+// `_ struct{}` sentinel field's binary tag: endian= (the struct's byte order) and
+// encoding= (its default text encoding).
+func parseStructSentinel(tagStr string) (eo endianOverride, encoding string, err error) {
+	eo = endianNone
 	for _, seg := range strings.Split(tagStr, ",") {
 		seg = strings.TrimSpace(seg)
 		if seg == "" {
 			continue
 		}
 		kv := strings.SplitN(seg, "=", 2)
-		switch strings.TrimSpace(kv[0]) {
+		key := strings.TrimSpace(kv[0])
+		switch key {
 		case "endian":
 			if len(kv) < 2 {
-				return endianNone, fmt.Errorf("missing value for endian in struct-level `_` sentinel tag")
+				return endianNone, "", fmt.Errorf("missing value for endian in struct-level `_` sentinel tag")
 			}
-			e, err := parseEndianValue(kv[1])
-			if err != nil {
-				return endianNone, err
+			e, perr := parseEndianValue(kv[1])
+			if perr != nil {
+				return endianNone, "", perr
 			}
 			eo = e
+		case "encoding":
+			if len(kv) < 2 || strings.TrimSpace(kv[1]) == "" {
+				return endianNone, "", fmt.Errorf("missing value for encoding in struct-level `_` sentinel tag")
+			}
+			encoding = strings.TrimSpace(kv[1])
 		default:
-			return endianNone, fmt.Errorf("unknown struct-level option %q in `_` sentinel tag (only endian= is supported)", strings.TrimSpace(kv[0]))
+			return endianNone, "", fmt.Errorf("unknown struct-level option %q in `_` sentinel tag (only endian= and encoding= are supported)", key)
 		}
 	}
-	return eo, nil
+	return eo, encoding, nil
 }
 
 // getStructMetadata builds or retrieves cached metadata for the struct type.
@@ -673,10 +685,12 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 	// collected for reference-cycle detection after all fields are parsed.
 	valueofRefs := make(map[string][]string)
 
-	// Struct-level byte order: ownEndian comes from a blank `_` sentinel field;
-	// inheritedEndians from value-embedded structs that declare an order.
+	// Struct-level byte order / default encoding: own* come from a blank `_`
+	// sentinel field; inherited* from value-embedded structs that declare them.
 	ownEndian := endianNone
 	var inheritedEndians []endianOverride
+	ownEncoding := ""
+	var inheritedEncodings []string
 
 	for i := 0; i < nField; i++ {
 		field := structType.Field(i)
@@ -687,12 +701,15 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 		// excluded from the layout — it is metadata, not an encoded field.
 		if field.Name == "_" && fKind == reflect.Struct && fType.NumField() == 0 {
 			if tagStr := field.Tag.Get(tagName); tagStr != "" {
-				eo, err := parseStructSentinel(tagStr)
+				eo, enc, err := parseStructSentinel(tagStr)
 				if err != nil {
 					return nil, err
 				}
 				if eo != endianNone {
 					ownEndian = eo
+				}
+				if enc != "" {
+					ownEncoding = enc
 				}
 			}
 			continue
@@ -708,6 +725,9 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 			}
 			if em.endian != endianNone {
 				inheritedEndians = append(inheritedEndians, em.endian)
+			}
+			if em.defaultEncoding != "" {
+				inheritedEncodings = append(inheritedEncodings, em.defaultEncoding)
 			}
 			// fall through: the embedded struct is still encoded as a nested field.
 		}
@@ -1007,7 +1027,35 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 		}
 	}
 
-	meta := &structMetadata{fields: fields, endian: structEndian}
+	// Resolve the struct-level default text encoding, same precedence as endian:
+	// the struct's own sentinel wins; otherwise a single distinct inherited value;
+	// conflicting inherited encodings are an error.
+	structEncoding := ownEncoding
+	if structEncoding == "" {
+		for _, e := range inheritedEncodings {
+			if structEncoding == "" {
+				structEncoding = e
+			} else if e != structEncoding {
+				return nil, fmt.Errorf("conflicting struct-level default encoding inherited from embedded structs in %s", structType.Name())
+			}
+		}
+	}
+
+	// Bake the struct default encoding into string fields that declare none of
+	// their own, so every execution path picks it up via fMeta.encoding. Skip const
+	// fields (a byte-sequence const must not carry an encoding) and non-string
+	// fields (encoding is meaningless for them).
+	if structEncoding != "" {
+		for i := range fields {
+			f := &fields[i]
+			if f.encoding == "" && !f.hasConst && f.encodeType.iKind() == stringKind {
+				f.encoding = structEncoding
+				f.option.encoding = structEncoding
+			}
+		}
+	}
+
+	meta := &structMetadata{fields: fields, endian: structEndian, defaultEncoding: structEncoding}
 	structMetadataCache.Store(structType, meta)
 	return meta, nil
 }

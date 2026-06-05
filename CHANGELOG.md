@@ -44,8 +44,11 @@ conventions. **This release has breaking changes** — see Changed/Removed.
 - **Minimum Go version is now 1.24** (for `encoding.BinaryAppender`).
 
 ### Added
-- **Struct-level byte order** via the `_ struct{}` `binary:"endian=…"` sentinel and
-  via value-embedding a declaring struct; conflicting embedded orders are an error.
+- **Struct-level options** via the blank `_ struct{}` sentinel (and via
+  value-embedding a declaring struct; conflicting inherited values are an error):
+  `endian=` (the struct's byte order) and `encoding=` (a default text encoding for
+  its string fields, between a per-field `encoding=` and `Marshaler.DefaultTextEncoding`).
+  Codegen supports struct-level `endian=` but not struct-level `encoding=`.
 - **`Append`** — `binarystruct.Append(buf, v)` and `Marshaler.Append(buf, v)`
   encode a value and append it to a buffer (the `encoding/binary.Append` analog).
 - **Codegen emits `AppendBinary`** implementing `encoding.BinaryAppender` (Go 1.24).

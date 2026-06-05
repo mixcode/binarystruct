@@ -113,6 +113,12 @@ The `const` option pins a field to a fixed value: **emitted on encode** (the Go 
 > per-field resolution, identically across all three paths (the generated method
 > seeds it too, since the runtime fast-paths into it before seeding). Codegen does
 > not support struct-level `endian=inverse` or order-via-embedding.
+>
+> The same sentinel also carries **`encoding=`** (a default text encoding), parsed
+> into `structMetadata.defaultEncoding` and baked into each string field's metadata
+> that declares no `encoding=` of its own (so it sits between a per-field
+> `encoding=` and `Marshaler.DefaultTextEncoding`). Codegen does not support a
+> struct-level `encoding=` — it errors rather than emit un-encoded output.
 
 ```mermaid
 graph TD

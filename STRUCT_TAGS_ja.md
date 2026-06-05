@@ -60,23 +60,34 @@ MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
 * **使用例**: `binary:"string(10),encoding=shift-jis"`
 * `utf-8`、`shift-jis`、`euc-jp`、`utf-16le` などに対応（`Marshaler.AddTextEncoding` で登録可能）。
 
-### 構造体レベルのバイトオーダー: `_ struct{}` センチネル
-構造体のバイトオーダーは、空の **`_ struct{}` センチネルフィールド**で一度だけ宣言します。
-これは **0 バイト**にエンコードされ（フィールドではなくメタデータ）、構造体全体にそのバイト
-オーダーを適用するため、`Marshal`/`Unmarshal`/… にバイトオーダー引数は不要になります:
+### 構造体レベルのオプション: `_ struct{}` センチネル
+構造体全体に適用するオプションは、空の **`_ struct{}` センチネルフィールド**で一度だけ宣言
+します。これは **0 バイト**にエンコードされます（フィールドではなくメタデータ）。2 つの
+オプションをサポートします:
+
+* **`endian=big|little`** — 構造体のバイトオーダー。`Marshal`/`Unmarshal`/… にバイトオーダー
+  引数が不要になります。
+* **`encoding=NAME`** — 構造体の文字列フィールドのデフォルトテキストエンコーディング。
+  フィールド自身の `encoding=` が優先され、どちらもなければ `Marshaler` の
+  `DefaultTextEncoding` にフォールバックします（エンコーディングは `AddTextEncoding` で登録が
+  必要です）。
+
 ```go
 type Header struct {
-	_     struct{} `binary:"endian=big"` // このフォーマットはビッグエンディアン
+	_     struct{} `binary:"endian=big,encoding=shift-jis"` // バイトオーダー + 既定の文字コード
 	Magic uint32   `binary:"uint32"`
-	Size  uint32   `binary:"uint32"`
+	Name  string   `binary:"wstring"`                       // shift-jis でエンコードされる
 }
 ```
-* バイトオーダーを宣言した構造体を**埋め込む**と、そのオーダーが伝播します（再利用可能な
-  ベース。例: `type bigEndian struct{ _ struct{} \`binary:"endian=big"\` }`）。複数の埋め込みで
-  オーダーが矛盾する場合はエラーになります。
+* これらを宣言した構造体を**埋め込む**と伝播します（再利用可能なベース。例:
+  `type bigEndian struct{ _ struct{} \`binary:"endian=big"\` }`）。複数の埋め込みで値が矛盾する
+  場合はエラーになります。
 * バイトオーダーを宣言しない値（裸のスカラーや外部の構造体）には
   `binarystruct.NewMarshalerOrder(order)` でフォールバックを指定します。指定がないままマルチ
   バイト値をエンコードするとエラーになります。
+* **コード生成:** 静的ジェネレータは構造体レベルの `endian=` をサポートしますが、構造体
+  レベルの `encoding=` は**サポートしません**。各文字列フィールドに `encoding=` を付けるか、
+  ランタイムインタプリタを使ってください。
 
 ### `endian=big|little|inverse`
 構造体に宣言されたバイトオーダーに対するフィールド単位の**上書き**です。

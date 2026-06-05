@@ -134,6 +134,42 @@ func structSentinelEndian(st *ast.StructType) (string, error) {
 	return "", nil
 }
 
+// structSentinelEncoding returns the struct-level default text encoding declared
+// on a blank `_` sentinel field (`binary:"encoding=NAME"`), or "" if none.
+func structSentinelEncoding(st *ast.StructType) string {
+	binRe := regexp.MustCompile(`binary:"([^"]*)"`)
+	for _, field := range st.Fields.List {
+		if len(field.Names) != 1 || field.Names[0].Name != "_" || field.Tag == nil {
+			continue
+		}
+		tagVal, err := strconv.Unquote(field.Tag.Value)
+		if err != nil {
+			continue
+		}
+		m := binRe.FindStringSubmatch(tagVal)
+		if len(m) < 2 {
+			continue
+		}
+		for _, seg := range strings.Split(m[1], ",") {
+			kv := strings.SplitN(strings.TrimSpace(seg), "=", 2)
+			if strings.TrimSpace(kv[0]) == "encoding" && len(kv) == 2 {
+				return strings.TrimSpace(kv[1])
+			}
+		}
+	}
+	return ""
+}
+
+// isStringBinType reports whether a binary type name is a text-string family type
+// (the kinds to which a text encoding applies).
+func isStringBinType(binType string) bool {
+	switch binType {
+	case "string", "bstring", "wstring", "dwstring", "zstring", "z16string":
+		return true
+	}
+	return false
+}
+
 func getGoTypeName(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:
@@ -646,6 +682,21 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	}
 	if bakedLit == "" {
 		return fmt.Errorf("type %s: no byte order — declare it on the struct (a blank `_ struct{}` field tagged `binary:\"endian=big|little\"`) or pass -endian", typeName)
+	}
+
+	// Struct-level default encoding is not supported by codegen: fail loud if a
+	// string field would rely on it (rather than generate silently-wrong, un-encoded
+	// output). The fix is to put encoding= on the field, or use the runtime interpreter.
+	if structEnc := structSentinelEncoding(st); structEnc != "" {
+		for _, field := range st.Fields.List {
+			if len(field.Names) == 0 || field.Names[0].Name == "_" {
+				continue
+			}
+			pt := parseFieldTag(field.Tag)
+			if isStringBinType(pt.binaryType) && pt.options["encoding"] == "" {
+				return fmt.Errorf("type %s: codegen does not support a struct-level encoding= for fields without their own encoding= (field %s); add encoding=%s to that field, or use the runtime interpreter", typeName, field.Names[0].Name, structEnc)
+			}
+		}
 	}
 
 	// Write standard helper functions. The no-arg stdlib encoding interfaces carry

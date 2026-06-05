@@ -46,6 +46,12 @@ This document contains rules, syntax constraints, and patterns to help LLM agent
   ms.AddTextEncoding("shift-jis", htmlindex.Get("shift-jis"))
   blob, err := ms.Marshal(&v) // methods take NO order argument
   ```
+* **Where the encoding comes from** (most specific first): a field's own
+  `encoding=` tag → the struct's sentinel `encoding=` (Rule E) → the Marshaler's
+  `DefaultTextEncoding`. The encoding must be registered either way. Example
+  struct-wide default: `_ struct{} \`binary:"endian=big,encoding=shift-jis"\``.
+  (Codegen supports struct-level `endian=` but not struct-level `encoding=` — put
+  `encoding=` on each string field there.)
 
 ### B. Interface & Polymorphic Payload Unmarshalling
 When unmarshalling into an interface field, you must choose one of two patterns:

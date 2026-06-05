@@ -60,23 +60,33 @@ Configures the text encoding for string conversion.
 * **Usage**: `binary:"string(10),encoding=shift-jis"`
 * Supported encodings include `utf-8`, `shift-jis`, `euc-jp`, `utf-16le`, etc. (registered via `Marshaler.AddTextEncoding`).
 
-### Struct-level byte order: the `_ struct{}` sentinel
-Declare a struct's byte order once with a **blank `_ struct{}` sentinel field**. It
-encodes to **zero bytes** (it is metadata, not a field) and applies the order to the
-whole struct, so `Marshal`/`Unmarshal`/… need no order argument:
+### Struct-level options: the `_ struct{}` sentinel
+Declare struct-wide options once with a **blank `_ struct{}` sentinel field**. It
+encodes to **zero bytes** (it is metadata, not a field). Two options are supported:
+
+* **`endian=big|little`** — the struct's byte order, so `Marshal`/`Unmarshal`/… need
+  no order argument.
+* **`encoding=NAME`** — a default text encoding for the struct's string fields. A
+  string field's own `encoding=` overrides it; with neither, the field falls back to
+  the `Marshaler`'s `DefaultTextEncoding`. (The encoding must still be registered via
+  `Marshaler.AddTextEncoding`.)
+
 ```go
 type Header struct {
-	_     struct{} `binary:"endian=big"` // this format is big-endian
+	_     struct{} `binary:"endian=big,encoding=shift-jis"` // order + default text encoding
 	Magic uint32   `binary:"uint32"`
-	Size  uint32   `binary:"uint32"`
+	Name  string   `binary:"wstring"`                       // encoded as shift-jis
 }
 ```
-* **Embedding** a struct that declares an order propagates it (a reusable base, e.g.
-  `type bigEndian struct{ _ struct{} \`binary:"endian=big"\` }`). Conflicting orders
+* **Embedding** a struct that declares these propagates them (a reusable base, e.g.
+  `type bigEndian struct{ _ struct{} \`binary:"endian=big"\` }`). Conflicting values
   from multiple embedded structs are an error.
 * A value that declares no order (a bare scalar, a third-party struct) takes a
   fallback from `binarystruct.NewMarshalerOrder(order)`; otherwise encoding a
   multi-byte value fails with a clear error.
+* **Codegen:** the static generator supports struct-level `endian=` but **not**
+  struct-level `encoding=` — put `encoding=` on each string field, or use the runtime
+  interpreter.
 
 ### `endian=big|little|inverse`
 Per-field **override** of the struct's declared byte order.

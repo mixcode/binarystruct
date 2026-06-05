@@ -7,8 +7,36 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// TestCodegen_StructEncoding_Errors verifies codegen fails loud (rather than
+// emitting silently-unencoded output) when a string field would rely on a
+// struct-level encoding= it cannot honor.
+func TestCodegen_StructEncoding_Errors(t *testing.T) {
+	t.Parallel()
+	tmpDir, err := os.MkdirTemp(".", "tmp-bs-structenc-")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	src := "package p\n\ntype T struct {\n" +
+		"\t_ struct{} `binary:\"endian=big,encoding=sjis\"`\n" +
+		"\tS string   `binary:\"wstring\"`\n}\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "t.go"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write t.go: %v", err)
+	}
+
+	out, err := exec.Command(sharedCodegenBin, "-type", "T", "-endian", "big", tmpDir).CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected generation to fail for a struct-level encoding on an un-tagged string field; output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "struct-level encoding") {
+		t.Errorf("error should mention struct-level encoding; got:\n%s", out)
+	}
+}
 
 // TestCodegen_StructEndian_NoFlag generates code for a struct that declares its
 // byte order via the `_` sentinel WITHOUT passing -endian, and verifies the

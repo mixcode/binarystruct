@@ -14,6 +14,9 @@
 //
 //	-type string
 //	    Comma-separated list of struct type names to generate methods for (required).
+//	-endian string
+//	    Byte order baked into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary
+//	    methods: "big" or "little" (required when generating Go code; not for -json).
 //	-output string
 //	    Output file name (default: <first_type>_binary.go).
 //

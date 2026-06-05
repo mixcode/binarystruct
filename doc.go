@@ -195,9 +195,12 @@ When unmarshalling fails, errors are returned as a DecodeError pointer which con
 To achieve peak performance in production, compile your struct layouts into static Go code using the standalone binarystruct-codegen tool:
 
 	go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
-	binarystruct-codegen -type Packet,Header
+	binarystruct-codegen -type Packet,Header -endian big
 
-For more information, see the README.md file in the binarystruct-codegen package directory.
+The -endian flag (big or little) is required: the generated no-arg MarshalBinary,
+UnmarshalBinary, and AppendBinary methods implement the standard library's
+order-less encoding interfaces, so the byte order must be chosen explicitly. For
+more information, see the README.md file in the binarystruct-codegen package directory.
 
 # For AI Agents and Code Assistants
 
@@ -210,12 +213,21 @@ It covers the tag cheat sheet, dynamic sizing, custom codecs, text
 encodings, validation, and common pitfalls. Agents generating code against this
 package should read that guide first.
 
-Argument order (a common trap): the byte-order argument is not in the same
-position in every function. Stream functions take the stream first, like
-encoding/binary — Write(w, order, v), Read(r, order, v), Unmarshal(data, order,
-v) — while Marshal takes the value first, like encoding/json — Marshal(v,
-order). The unifying rule: the buffer/stream argument comes first, then order,
-then the value; Marshal has no stream argument, so the value leads. Verify the
-exact signatures rather than assuming Marshal and Write share an argument order.
+Byte order: the order lives on the Marshaler. Construct one with
+NewMarshaler(order) (or set the exported Marshaler.Order field); the Marshal,
+Unmarshal, Write, Read, and Inspect methods take no order argument. A Marshaler
+with no byte order fails loud rather than guessing. The package-level convenience
+functions still take order, and there the position follows the standard library
+each borrows from (a common trap, so verify the signature): stream/buffer first
+like encoding/binary — Write(w, order, v), Read(r, order, v), Unmarshal(data,
+order, v), Append(buf, order, v) — while Marshal takes the value first like
+encoding/json — Marshal(v, order).
+
+Implementing the stdlib encoding interfaces: a tagged type can implement
+encoding.BinaryMarshaler/BinaryUnmarshaler/BinaryAppender by delegating to
+binarystruct. Because Marshal/Write honor encoding.BinaryMarshaler, a hand-written
+MarshalBinary must marshal a method-less twin type to avoid infinite recursion;
+see the runnable example and llms-full.txt. The codegen tool emits these methods
+for you (recursion-safe).
 */
 package binarystruct

@@ -21,12 +21,12 @@ This document contains rules, syntax constraints, and patterns to help LLM agent
   * `bstring`, `wstring`, `dwstring`: Length-prefixed string (1, 2, or 4-byte length prefix)
   * `zstring`, `z16string`: Null-terminated string (C-style or UTF-16 style)
 * **Padding**: `pad(size)` (inserts zero bytes on marshal; skips bytes on unmarshal)
-* **Other**: `ignore` or `-` (skips field), `any` (default primitive layout), `custom` (custom serializer)
+* **Other**: `ignore` or `-` (skips field), `any` (default primitive layout), `custom` (custom codec)
 
 ### Key Options
 * `encoding=NAME`: String character conversion (e.g., `shift-jis`, `utf-16le`).
 * `endian=big|little|inverse`: Byte order **override** for this field only — see Rule G. `inverse` flips the inherited byte order recursively.
-* `serializer=NAME`: Reference to a custom registered serializer.
+* `codec=NAME`: Reference to a custom registered codec.
 * `omittable[=Expression]`: Marks a trailing field as optional (suppresses `io.EOF` errors at start of field or skips based on struct byte-offset check).
 * `range=min..max`: Enforces range check validation on integers and float values (e.g. `range=1..100`, open ranges `range=0..` or `range=..100`).
 * `match=pattern`: Enforces regex match validation on string values (e.g. `match=^[A-Z0-9]+$`).
@@ -41,8 +41,9 @@ This document contains rules, syntax constraints, and patterns to help LLM agent
 * **Rule**: There are no default text encodings (other than raw UTF-8 bytes). Using `encoding=shift-jis` or similar in a tag will fail unless you first register the encoding on the `Marshaler` instance.
 * **Code pattern**:
   ```go
-  var ms binarystruct.Marshaler
+  ms := binarystruct.NewMarshaler(binarystruct.LittleEndian) // byte order set here (see Rule E)
   ms.AddTextEncoding("shift-jis", htmlindex.Get("shift-jis"))
+  blob, err := ms.Marshal(&v)                                // methods take NO order argument
   ```
 
 ### B. Interface & Polymorphic Payload Unmarshalling
@@ -53,9 +54,9 @@ When unmarshalling into an interface field, you must choose one of two patterns:
    pkt := Packet{Payload: &data}
    binarystruct.Unmarshal(blob, order, &pkt)
    ```
-2. **Strategy 2 (Custom Serializer)**: Implement a custom `Serializer` that reads a preceding type field and dynamically allocates the concrete type.
+2. **Strategy 2 (Custom Codec)**: Implement a custom `Codec` that reads a preceding type field and dynamically allocates the concrete type.
    ```go
-   func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parent reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (interface{}, int, error) {
+   func (s *DynamicPayloadCodec) Decode(r io.Reader, parent reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (interface{}, int, error) {
        msgType := parent.FieldByName("MsgType").Uint()
        // Allocate dynamically and decode...
    }
@@ -74,18 +75,26 @@ Wherever a tag takes a size or computed value — `[len]`, `(buf_len)`, `omittab
 * **Reference scope**: decode-side expressions (`[len]`, `(buf_len)`, `omittable`) may reference only fields defined **before** the target. The encode-only `valueof` (Section 7) may reference any field, because the whole Go value is available when encoding.
 * **Functions** `bytelen(F)` / `count(F)` are available **only** inside `valueof` (Section 7), never in decode-side expressions.
 
-### E. Function Argument Order (common trap)
-The package mixes two standard-library conventions, so the `order` argument is NOT always in the same position:
-* **Stream functions put the stream first** (like `encoding/binary`): `Write(w, order, v)`, `Read(r, order, v)`, `Unmarshal(data, order, v)`.
-* **`Marshal` puts the value first** (like `encoding/json`): `Marshal(v, order)`.
+### E. Byte order lives on the Marshaler; methods take no `order`
+The byte order is part of the `Marshaler`. Construct one with `binarystruct.NewMarshaler(order)` (or set the exported `Order` field); the **methods take no `order` argument**:
+```go
+ms := binarystruct.NewMarshaler(binarystruct.BigEndian)
+blob, _ := ms.Marshal(&v)          // no order
+_, _    = ms.Unmarshal(blob, &out) // no order
+```
+A zero-value `Marshaler{}` left without an order **fails loud** (`"no byte order set; use NewMarshaler(order) …"`) instead of guessing.
 
-Unifying rule: *buffer/stream argument first, then `order`, then the value; `Marshal` has no stream argument, so the value leads.* Do not assume `Marshal` and `Write` share an argument order — verify signatures rather than copying from one to the other.
+The **package-level convenience functions** still take `order`, and there the position follows the standard library each borrows from — a common trap, so verify the signature rather than copying between them:
+* **stream/buffer first** (like `encoding/binary`): `Write(w, order, v)`, `Read(r, order, v)`, `Unmarshal(data, order, v)`, `Append(buf, order, v)`.
+* **value first** (like `encoding/json`): `Marshal(v, order)`.
+
+Each package function is just `NewMarshaler(order).Method(...)`, so use them for one-off calls and a constructed `Marshaler` when you register encodings/codecs or reuse the order.
 
 ### F. Concurrency
 The package-level `Marshal`/`Unmarshal`/`Write`/`Read` are safe for concurrent use (each call allocates its own `Marshaler`), and independent `Marshaler` instances may run concurrently (the only shared global is a `sync.Map` metadata cache). Do **not** share a single `*Marshaler` across goroutines: it lazily populates an internal encoder cache (and `AddTextEncoding` mutates it) without locking — use one instance per goroutine, or the package-level functions.
 
 ### G. Byte order is set once by the call; `endian=` is only an override (common trap)
-The `order` argument of `Marshal`/`Unmarshal`/`Write`/`Read` (e.g. `binarystruct.BigEndian`) sets the byte order for the **entire** value and **propagates automatically into every field and nested struct**. The per-field `endian=big|little|inverse` tag is purely an **override** for the rare field that differs (a mixed-endian format); `inverse` flips relative to the inherited order.
+The byte order (set via `NewMarshaler(order)`, the `Order` field, or a package function's `order` argument — e.g. `binarystruct.BigEndian`) applies to the **entire** value and **propagates automatically into every field and nested struct**. The per-field `endian=big|little|inverse` tag is purely an **override** for the rare field that differs (a mixed-endian format); `inverse` flips relative to the inherited order.
 
 * **Do not tag every field with `endian=`.** Set the order once at the call site and tag *only* the exceptions. A struct whose fields all share the call's byte order needs **no** `endian=` tags at all.
 * `endian=` is therefore for heterogeneity, not for choosing the format's overall endianness — that is the `order` argument's job.
@@ -110,14 +119,16 @@ type Mixed struct {
 ## 3. Debugging Layout Issues
 If you encounter layout or padding issues, use the `Inspect` API to print out the struct's byte offsets, sizes, and values.
 
-* **Critical**: If your struct uses custom serializers or custom text encodings, you **MUST** call `marshaller.Inspect(...)` on your configured `Marshaler` instance. Using the package-level `binarystruct.Inspect(...)` will use a default marshaller and show custom fields with size `0`.
+* **Critical**: If your struct uses custom codecs or custom text encodings, you **MUST** call `Inspect` on your configured `Marshaler` instance. Using the package-level `binarystruct.Inspect(...)` will use a default Marshaler and show custom fields with size `0`.
 
 ```go
 // For standard layouts:
 layout, _ := binarystruct.Inspect(&myStruct, binarystruct.BigEndian)
 
-// For custom configured marshallers (with custom serializers/encodings):
-layout, _ := marshaller.Inspect(&myStruct, binarystruct.BigEndian)
+// For a custom-configured Marshaler (custom codecs/encodings) — order set at construction:
+ms := binarystruct.NewMarshaler(binarystruct.BigEndian)
+// ms.AddTextEncoding(...) / ms.AddCodec(...)
+layout, _ := ms.Inspect(&myStruct) // no order argument
 
 fmt.Println(layout.Format(binarystruct.DefaultLayoutFormat))
 ```
@@ -142,7 +153,7 @@ When debugging failures (premature EOFs, array sizing mismatches, etc.), inspect
 Always check for `DecodeError` to diagnose data stream mismatches:
 
 ```go
-_, err := marshaller.Unmarshal(data, binarystruct.BigEndian, &pkt)
+_, err := binarystruct.Unmarshal(data, binarystruct.BigEndian, &pkt)
 if err != nil {
 	var decodeErr *binarystruct.DecodeError
 	if errors.As(err, &decodeErr) {
@@ -187,11 +198,13 @@ To achieve peak performance in production, compile struct layouts into static Go
   ```bash
   binarystruct-codegen -type TestStruct -tests
   ```
+* **Required `-endian` flag**: the generated no-arg `MarshalBinary()`/`UnmarshalBinary()`/`AppendBinary()` methods implement the stdlib `encoding` interfaces, which carry no byte order — so you must bake one with `-endian big` or `-endian little`. Generation **errors** if it is omitted (there is no default). The order-taking `WriteBinary(w, order)` / `ReadBinary(r, order)` methods are also generated and used when binarystruct drives the value with its own order.
+* **Generated methods**: for each type, `MarshalBinary`/`UnmarshalBinary` (stdlib `encoding.BinaryMarshaler`/`Unmarshaler`), `AppendBinary` (stdlib `encoding.BinaryAppender`, Go 1.24), and `WriteBinary`/`ReadBinary` (+ `…WithMarshaler` when the struct uses encodings/codecs).
 * **Runtime Fast-Paths**: The main library automatically detects generated static methods via type assertion (interfaces `BinaryReader`, `BinaryWriter`, `MarshalerContextReader`, `MarshalerContextWriter`) and fast-paths directly to them during `Marshal` / `Unmarshal` calls.
 
 ### Example:
 ```go
-//go:generate binarystruct-codegen -type Packet
+//go:generate binarystruct-codegen -type Packet -endian big
 type Packet struct {
 	Magic uint32 `binary:"uint32"`
 	Data  []byte `binary:"[16]byte"`
@@ -272,4 +285,35 @@ An **integer** `const` is serialized through the active byte order, so the same 
 * **Targets**: integer/bitmap or a raw byte sequence only; other types are a compile-time error. Cannot be combined with `valueof`. The byte form cannot be combined with `encoding=` (raw bytes only) and requires a fixed size (`[N]byte` or `string(N)`).
 * **Codegen**: both shapes are supported by the static code generator.
 
+---
+
+## 9. Implementing the stdlib `encoding` interfaces (and `Append`)
+
+`binarystruct.Append(buf, order, v)` encodes `v` and appends it to `buf`, returning the extended slice — the analog of `encoding/binary.Append` (and `ms.Append(buf, v)` is the order-free method form).
+
+To make a tagged type usable by code that speaks the standard `encoding` interfaces (`gob`, your own framing, etc.), give it `MarshalBinary` / `UnmarshalBinary` / `AppendBinary` (Go 1.24) that delegate to binarystruct with a fixed byte order. **Codegen emits these for you** (`binarystruct-codegen -endian big`); to hand-write them, mind this trap:
+
+> **Trap — infinite recursion.** binarystruct's `Marshal`/`Write` **honor `encoding.BinaryMarshaler`**. If your type's `MarshalBinary` calls `binarystruct.Marshal(self)`, that re-enters `MarshalBinary` forever (stack overflow). Break the cycle by marshalling a **method-less twin type** (the same idiom `encoding/json` uses):
+
+```go
+type Pixel struct {
+	X uint16 `binary:"uint16"`
+	Y uint16 `binary:"uint16"`
+}
+
+type pixelLayout Pixel // same layout & tags, NONE of Pixel's methods → no recursion
+
+func (p *Pixel) MarshalBinary() ([]byte, error) {
+	return binarystruct.Marshal((*pixelLayout)(p), binarystruct.BigEndian)
+}
+func (p *Pixel) AppendBinary(b []byte) ([]byte, error) {
+	return binarystruct.Append(b, binarystruct.BigEndian, (*pixelLayout)(p))
+}
+func (p *Pixel) UnmarshalBinary(data []byte) error {
+	_, err := binarystruct.Unmarshal(data, binarystruct.BigEndian, (*pixelLayout)(p))
+	return err
+}
+```
+
+The byte order is baked in because the stdlib interfaces carry none. (Codegen-generated methods write fields directly via `WriteBinary`, so they don't need the twin-type trick.)
 

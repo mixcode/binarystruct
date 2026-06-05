@@ -47,6 +47,8 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 
 ```
 
+> **Byte order.** The package-level functions take the order as an argument (e.g. `binarystruct.Marshal(&v, binarystruct.BigEndian)`). For a reusable encoder — or one with custom text encodings or codecs — construct a `Marshaler` once with `binarystruct.NewMarshaler(order)`; its `Marshal`/`Unmarshal`/`Write`/`Read`/`Append`/`Inspect` methods then take **no** order argument. A per-field `endian=` tag overrides the order for that field.
+
 ## Features
 
 * **Automatic & Safe Type Conversions**: Effortlessly maps packed binary layouts into Go native types (e.g. converting `uint16` or `int8` streams directly into Go `int` fields) with range and bounds checks.
@@ -55,12 +57,12 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 * **Dynamic Size Expressions**: Calculate array lengths and string buffer sizes dynamically based on other struct fields, supporting arithmetic operations (`+`, `-`, `*`, `/`) and parentheses (e.g., `[PayloadSize - (HeaderLength * 2)]byte`).
 * **Computed Length/Count Fields**: Fill a length or count field automatically at encode time with `valueof=bytelen(F)` / `valueof=count(F)`, so you never hand-maintain a `NameLen` that must equal `len(Name)`. See [Computed Field Values](#computed-field-values-valueof).
 * **Fixed / Magic Values**: Pin signatures and version fields with `const=` — emitted on encode and validated on decode (integer magics like `const=0x04034b50` or byte-sequence magics like `const=0x89504e470d0a1a0a`). See [Fixed / Magic Values](#fixed--magic-values-const).
-* **Interface & Polymorphic Handling**: Automatically deserializes into pre-assigned interface fields, or uses custom serializers to dynamically allocate types based on previously decoded header values.
+* **Interface & Polymorphic Handling**: Automatically deserializes into pre-assigned interface fields, or uses custom codecs to dynamically allocate types based on previously decoded header values.
 * **High-Performance Runtime Interpreter**: Uses dynamic layout compilation and a cached metadata interpreter. Unsafe Mode (default) bypasses reflection using `unsafe.Pointer` and zero-allocation slice streaming, yielding giant performance gain compared with safe mode using Go reflection.
 * **Static Code Generation**: Includes a `binarystruct-codegen` tool that generates optimized, reflection-free `MarshalBinary` / `UnmarshalBinary` methods from struct tags. Achieves up to **6.7x speedup** over safe-mode reflection with near-zero allocations. Supports `go:generate` integration. See [`binarystruct-codegen/README.md`](binarystruct-codegen/README.md).
 * **Multi-Language String Encoding**: Supports converting custom character encodings (e.g., `Shift-JIS`, `UTF-16`) on string fields by registering encodings via `AddTextEncoding` with customizable default fallback encodings.
-* **Single-Value Marshalling**: Serialize/deserialize standalone non-struct variables directly using `MarshalAs` / `UnmarshalAs` with custom tags.
-* **Custom Serializers**: Register custom encoders/decoders via the `Serializer` interface to handle complex validation or dynamic type mappings.
+* **Single-Value Marshalling**: Encode/deserialize standalone non-struct variables directly using `MarshalAs` / `UnmarshalAs` with custom tags.
+* **Custom Codecs**: Register custom encoders/decoders via the `Codec` interface to handle complex validation or dynamic type mappings.
 * **Struct Inspection Helper**: Includes an `Inspect` API that formats struct layouts, displaying field offsets, sizes, types, and values in customizable bases (decimal, hex, binary).
 * **Safe Mode Fallback**: Pure reflection-based Go fallback activated via `-tags safe_binarystruct` build flag for restricted platforms like Google App Engine.
 
@@ -183,7 +185,7 @@ Output:
 +0x07(0x02) [2]byte Data = [170 187]
 ```
 
-> **Note**: If your structure contains custom serializers or encodings, use `marshaller.Inspect(&pkt, ...)` on your custom-configured `Marshaler` instance instead of the package-level `binarystruct.Inspect(&pkt, ...)` to ensure custom options are correctly recognized during inspection.
+> **Note**: If your structure contains custom codecs or encodings, use `ms.Inspect(&pkt)` on your custom-configured `Marshaler` instance (its byte order is set at construction via `NewMarshaler`) instead of the package-level `binarystruct.Inspect(&pkt, order)`, to ensure custom options are correctly recognized during inspection.
 
 ### Exporting Layout to JSON
 
@@ -226,7 +228,7 @@ Run `go generate ./...` to compile your serialization methods.
 
 ### How It Works
 * The generated code implements standard Go `encoding.BinaryMarshaler` and `encoding.BinaryUnmarshaler` interfaces, and high-performance streaming interfaces (`BinaryReader` / `BinaryWriter`).
-* If custom serializers or text encodings are present, context-aware interfaces (`MarshalerContextReader` / `MarshalerContextWriter`) are generated to automatically retrieve custom handlers from the `Marshaler` context at runtime.
+* If custom codecs or text encodings are present, context-aware interfaces (`MarshalerContextReader` / `MarshalerContextWriter`) are generated to automatically retrieve custom handlers from the `Marshaler` context at runtime.
 * The main `binarystruct.Marshal` and `binarystruct.Unmarshal` library calls automatically detect these generated methods and fast-path to executing them directly.
 
 ### Performance Comparison

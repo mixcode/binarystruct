@@ -8,7 +8,7 @@ Any extension to the tag syntax, type options, or serialization logic **must** i
 
 ## 1. Ground Truth Specification & Semantics
 
-| Binary Tag Type | Go Kind Representation | Serialized Width | Runtime Interpreter Logic | Codegen Compiler Mapping |
+| Binary Tag Type | Go Kind Representation | Encoded Width | Runtime Interpreter Logic | Codegen Compiler Mapping |
 | :--- | :--- | :--- | :--- | :--- |
 | **`int8`** / **`uint8`** / **`byte`** | `int8` / `uint8` / `bool` / `byte` | 1 byte | Reads/writes 1 byte. | `tmp[0] = byte(val)` / `val = tmp[0]` |
 | **`int16`** / **`uint16`** / **`word`** | Signed/unsigned 16-bit | 2 bytes | Reads/writes 2 bytes; applies endianness. | `order.PutUint16(...)` / `order.Uint16(...)` |
@@ -23,7 +23,7 @@ Any extension to the tag syntax, type options, or serialization logic **must** i
 | **`z16string`** | `string` | 2*len + 2 bytes | Null-word-terminated UTF-16 style string. | Writes string + `0x0000`; reads until `0x0000`. |
 | **`ignore`** / **`-`** | Any | 0 bytes | Bypassed. | Bypassed. |
 | **`any`** | Any | Natural | Resolves to Go field's natural primitive type mapping. | Bypassed or resolved to the primitive. |
-| **`custom`** | Any | Custom | Requires `serializer` option. Delegates to custom Serializer. | Looks up serializer from Marshaler context via `GetSerializer()`; calls Serialize/Deserialize. |
+| **`custom`** | Any | Custom | Requires `codec` option. Delegates to custom Codec. | Looks up codec from Marshaler context via `GetCodec()`; calls Encode/Decode. |
 
 ### Tag Options
 
@@ -33,7 +33,7 @@ Tag options modify the behavior of binary types. They are appended after the typ
 | :--- | :--- | :--- | :--- |
 | **`endian`** | `endian=big\|little\|inverse` | Integer/float types | Per-field **override** of the call-level `order` argument (which propagates to all fields and nested structs); `inverse` flips the inherited order. Needed only on fields that differ — not on every field. |
 | **`encoding`** | `encoding=NAME` | String types | Applies a text encoding (e.g. Shift-JIS) registered in the Marshaler. |
-| **`serializer`** | `serializer=NAME` | `custom` type | Specifies which registered Serializer to delegate to. |
+| **`codec`** | `codec=NAME` | `custom` type | Specifies which registered Codec to delegate to. |
 | **`omittable`** | `omittable` or `omittable=Expr` | Any | Allows truncated streams: if EOF is reached at this field's start, decoding stops without error. |
 | **`range`** | `range=min..max` | Numeric types | Validates deserialized value is within `[min, max]`. Returns error on violation. |
 | **`match`** | `match=pattern` | String types | Validates deserialized string matches the regex pattern. Returns error on violation. |
@@ -101,6 +101,8 @@ The `const` option pins a field to a fixed value: **emitted on encode** (the Go 
 
 ## 2. Dynamic vs. Static Path Architecture
 
+> **Byte order is carried on the `Marshaler`** (`NewMarshaler(order)` or the `Order` field); the `Marshal`/`Unmarshal`/`Write`/`Read`/`Inspect` methods take no `order` argument, while the package-level functions still do. Internally the order is threaded through the recursion as before, so `resolveByteOrder(order, endian)` and all per-field `endian=` semantics are unchanged across the three paths.
+
 ```mermaid
 graph TD
     A[Struct Definition with binary Tags] --> B{Execution Mode}
@@ -114,7 +116,7 @@ graph TD
     D --> D1[AST Parser: binarystruct-codegen/generator.go]
     D1 --> D2[Go Writer: Generated Methods]
     
-    C2 --> E[Serialized Stream]
+    C2 --> E[Encoded Stream]
     C3 --> E
     D2 --> E
 ```
@@ -125,7 +127,7 @@ When a struct is passed to `Write`/`Read`, the runtime checks for these interfac
 
 | Priority | Interface | Defined In | Purpose |
 | :--- | :--- | :--- | :--- |
-| 1 | `MarshalerContextWriter` / `MarshalerContextReader` | `marshal.go` / `unmarshal.go` | Generated code needing Marshaler access (text encodings, custom serializers). |
+| 1 | `MarshalerContextWriter` / `MarshalerContextReader` | `marshal.go` / `unmarshal.go` | Generated code needing Marshaler access (text encodings, custom codecs). |
 | 2 | `BinaryWriter` / `BinaryReader` | `marshal.go` / `unmarshal.go` | Generated code with no runtime dependencies. |
 | 3 | `encoding.BinaryMarshaler` / `encoding.BinaryUnmarshaler` | Go stdlib | Standard library compatibility fallback. |
 
@@ -165,7 +167,7 @@ When introducing a new binary type, tag option, or modifier, you **must** check 
   Update `parseFieldTag` to extract the option/type. Update `generateFieldWrite` / `generateFieldRead` (and array handlers) to emit the compiled Go statements.
 
 - [ ] **Step 6: Interface Verifications**
-  If the option accesses dynamic instances (like text encodings or custom serializers), ensure it is wired through both the standard interface and context-aware interfaces (`MarshalerContextWriter` / `MarshalerContextReader`).
+  If the option accesses dynamic instances (like text encodings or custom codecs), ensure it is wired through both the standard interface and context-aware interfaces (`MarshalerContextWriter` / `MarshalerContextReader`).
 
 - [ ] **Step 7: Testing**
   Write unit tests verifying correct behavior in both safe and unsafe interpreter modes, and add a test structure verifying the same behavior in the static codegen integration suite ([codegen_integration_test.go](codegen_integration_test.go)).

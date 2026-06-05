@@ -5,6 +5,40 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-05
+
+A naming/API cleanup that aligns the package with Go standard-library
+conventions. **This release has breaking changes** — see Changed/Removed.
+
+### Changed (breaking)
+- **`Marshaller` → `Marshaler`** (stdlib single-`l` spelling), including the
+  generated `WriteBinaryWithMarshaler` / `ReadBinaryWithMarshaler` interface
+  methods.
+- **Byte order moved to construction.** `NewMarshaler(order)` (or the new
+  exported `Marshaler.Order` field) sets the byte order once; the `Marshal`,
+  `Unmarshal`, `Write`, `Read`, and `Inspect` **methods no longer take an
+  `order` argument**. The package-level functions (`binarystruct.Marshal`,
+  `Unmarshal`, `Write`, `Read`, `Append`, `Inspect`) keep their `order`
+  parameter. A `Marshaler` with no byte order now fails loud with a clear error
+  instead of panicking.
+- **Custom `Serializer` → `Codec`.** The interface methods are renamed
+  `Serialize`/`Deserialize` → `Encode`/`Decode`; `AddSerializer`/`RemoveSerializer`/
+  `GetSerializer` → `AddCodec`/`RemoveCodec`/`GetCodec`; and the struct tag
+  keyword **`serializer=NAME` → `codec=NAME`**.
+- **Codegen requires `-endian big|little`.** The generated no-arg
+  `MarshalBinary`/`UnmarshalBinary`/`AppendBinary` methods implement the
+  order-less stdlib `encoding` interfaces, so the baked byte order must be chosen
+  explicitly; generation errors if `-endian` is omitted (no default).
+- **Minimum Go version is now 1.24** (for `encoding.BinaryAppender`).
+
+### Added
+- **`Append`** — `binarystruct.Append(buf, order, v)` and `Marshaler.Append(buf, v)`
+  encode a value and append it to a buffer (the `encoding/binary.Append` analog).
+- **Codegen emits `AppendBinary`** implementing `encoding.BinaryAppender` (Go 1.24).
+- An agent-facing example showing a tagged type implement
+  `encoding.BinaryMarshaler`/`BinaryUnmarshaler`/`BinaryAppender` via binarystruct,
+  including the method-less-twin trick that avoids infinite recursion.
+
 ## [0.2.6] - 2026-06-04
 
 ### Added
@@ -75,6 +109,7 @@ predate this changelog):
 ### Changed
 - Renamed the build tag `safe` → `safe_binarystruct` to avoid collisions.
 
+[0.3.0]: https://github.com/mixcode/binarystruct/releases/tag/v0.3.0
 [0.2.6]: https://github.com/mixcode/binarystruct/releases/tag/v0.2.6
 [0.2.5]: https://github.com/mixcode/binarystruct/releases/tag/v0.2.5
 [0.2.4]: https://github.com/mixcode/binarystruct/releases/tag/v0.2.4

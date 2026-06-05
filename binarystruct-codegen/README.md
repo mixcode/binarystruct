@@ -19,6 +19,7 @@ binarystruct-codegen -type TypeName[,TypeName2,...] [flags] [directory]
 | Flag | Description |
 | :--- | :--- |
 | `-type` | Comma-separated list of struct type names to generate methods for (**required**). |
+| `-endian` | Byte order baked into the no-arg `MarshalBinary`/`UnmarshalBinary`/`AppendBinary` methods: `big` or `little`. **Required when generating Go code** (the stdlib `encoding` interfaces carry no byte order, so there is no default); not needed with `-json`. |
 | `-output` | Output file name (default: `<first_type>_binary.go` or `<first_type>.json` if `-json` is set). |
 | `-json` | Export parsed struct layout metadata to JSON instead of generating Go code. |
 | `-tests` | Include test files (`*_test.go`) when parsing package files. |
@@ -32,30 +33,32 @@ binarystruct-codegen -type TypeName[,TypeName2,...] [flags] [directory]
 ## Examples
 
 ```bash
-# Generate methods for Packet and Header types in the current directory
-binarystruct-codegen -type Packet,Header
+# Generate methods for Packet and Header types (big-endian) in the current directory
+binarystruct-codegen -type Packet,Header -endian big
 
 # Specify output file and source directory
-binarystruct-codegen -type Packet -output packet_gen.go ./protocol
+binarystruct-codegen -type Packet -endian little -output packet_gen.go ./protocol
 
-# Export structural metadata for Packet as a JSON schema layout
+# Export structural metadata for Packet as a JSON schema layout (no -endian needed)
 binarystruct-codegen -type Packet -json -output layout.json
 ```
 
 ### With `go:generate`
 
 ```go
-//go:generate binarystruct-codegen -type Packet,Header
+//go:generate binarystruct-codegen -type Packet,Header -endian big
 ```
 
 ## What Gets Generated
 
-For each specified type, the tool generates:
+For each specified type, the tool generates (the no-arg methods bake the `-endian` order):
 
 - `MarshalBinary() ([]byte, error)` — implements `encoding.BinaryMarshaler`
+- `AppendBinary(b []byte) ([]byte, error)` — implements `encoding.BinaryAppender` (Go 1.24)
 - `UnmarshalBinary(data []byte) error` — implements `encoding.BinaryUnmarshaler`
+- `WriteBinary(w io.Writer, order ByteOrder) (int, error)` / `ReadBinary(r io.Reader, order ByteOrder) (int, error)` — order-taking forms binarystruct dispatches to
 
-If the struct uses features requiring a `Marshaler` context (text encodings via `encoding=`, custom serializers via `serializer=`), context-aware methods are also generated:
+If the struct uses features requiring a `Marshaler` context (text encodings via `encoding=`, custom codecs via `codec=`), context-aware methods are also generated:
 
 - `WriteBinaryWithMarshaler(ms *Marshaler, w io.Writer, order ByteOrder) (int, error)`
 - `ReadBinaryWithMarshaler(ms *Marshaler, r io.Reader, order ByteOrder) (int, error)`
@@ -75,7 +78,7 @@ The binarystruct-codegen tool supports the full `binary:"..."` tag syntax includ
 - Omittable fields (`omittable`)
 - Endian override (`endian=big|little|inverse`)
 - Text encoding (`encoding=NAME`)
-- Custom serializers (`custom,serializer=NAME`)
+- Custom codecs (`custom,codec=NAME`)
 - Nested structs
 
 For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the parent project.

@@ -22,7 +22,7 @@ MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
 
 ## 2. Binary Types
 
-| Tag Type | Go Kind | Serialized Size | Description |
+| Tag Type | Go Kind | Encoded Size | Description |
 | :--- | :--- | :--- | :--- |
 | **`int8`** | Signed Int / Bool | 1 byte | 8-bit signed integer |
 | **`int16`** | Signed Int | 2 bytes | 16-bit signed integer |
@@ -47,7 +47,7 @@ MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
 | **`pad`** | None | `buf_len` bytes | Zero-filled padding bytes. Source value is ignored |
 | **`ignore`** / **`-`** | Any | 0 bytes | The field is completely ignored during serialization |
 | **`any`** | Any | Natural | Uses the Go field's natural primitive type encoding |
-| **`custom`** | Any | Custom | Indicates custom serializer override (must be paired with `serializer`) |
+| **`custom`** | Any | Custom | Indicates custom codec override (must be paired with `codec`) |
 
 ---
 
@@ -68,9 +68,9 @@ Overrides the default byte order (endianness) for the field.
 * **Usage**: `Value uint32 `binary:"uint32,endian=inverse"`` (propagates recursively to nested struct fields).
 * **This tag is an override only.** The byte order is set once by the `order` argument of `Marshal`/`Unmarshal`/`Write`/`Read` and propagates to every field and nested struct automatically. Add `endian=` **only to the fields that differ** from that order (e.g. a mixed-endian format) — do **not** tag every field; a struct whose fields all use the call's byte order needs no `endian=` tags at all.
 
-### `serializer=NAME`
-Uses a custom registered `Serializer` to marshal and unmarshal this field.
-* **Usage**: `Data MyCustomType `binary:"custom,serializer=MyCustomSerializer"``
+### `codec=NAME`
+Uses a custom registered `Codec` to marshal and unmarshal this field.
+* **Usage**: `Data MyCustomType `binary:"custom,codec=MyCustomCodec"``
 
 ### `omittable[=Expr]`
 Marks a trailing field as optional.
@@ -168,18 +168,18 @@ pkt := Packet{Payload: &data}
 _, err := binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &pkt)
 ```
 
-### Strategy 2: Dynamic Allocation using a Custom Serializer
-For network packets or files containing polymorphic payloads (e.g. Type-Length-Value or packet headers followed by dynamic bodies), you can use a custom `Serializer`. 
+### Strategy 2: Dynamic Allocation using a Custom Codec
+For network packets or files containing polymorphic payloads (e.g. Type-Length-Value or packet headers followed by dynamic bodies), you can use a custom `Codec`. 
 
-The custom deserializer can inspect previously decoded fields of the parent struct (e.g., a `Type` or `MessageID` field) and dynamically allocate the appropriate concrete type at runtime:
+The custom decodec can inspect previously decoded fields of the parent struct (e.g., a `Type` or `MessageID` field) and dynamically allocate the appropriate concrete type at runtime:
 
 ```go
 type Packet struct {
 	MsgType uint8       `binary:"uint8"`
-	Payload interface{} `binary:"custom,serializer=DynamicPayload"`
+	Payload interface{} `binary:"custom,codec=DynamicPayload"`
 }
 
-func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
+func (s *DynamicPayloadCodec) Decode(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
 	// Inspect the previously decoded "MsgType" field in the parent struct
 	msgTypeField := parentStruct.FieldByName("MsgType")
 	

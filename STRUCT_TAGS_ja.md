@@ -47,7 +47,7 @@ MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
 | **`pad`** | なし | `バッファ長` バイト | ゼロで埋められるパディング。ソースの値は無視されます |
 | **`ignore`** / **`-`** | 任意 | 0 バイト | シリアライズ/デシリアライズ時に対象外として無視されます |
 | **`any`** | 任意 | 自然長 | Goのフィールドの型に合わせた標準的な変換を行います |
-| **`custom`** | 任意 | カスタム | カスタムシリアライザの適用を示します（`serializer` オプションと併用） |
+| **`custom`** | 任意 | カスタム | カスタムコーデックの適用を示します（`codec` オプションと併用） |
 
 ---
 
@@ -68,9 +68,9 @@ MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
 * **使用例**: `Value uint32 `binary:"uint32,endian=inverse"``（ネストされた構造体フィールドにも再帰的に伝播します）。
 * **このタグは上書き専用です。** バイトオーダーは `Marshal`/`Unmarshal`/`Write`/`Read` の `order` 引数で一度だけ設定され、すべてのフィールドとネストされた構造体へ自動的に伝播します。`endian=` は、そのバイトオーダーと**異なるフィールドにのみ**付けてください（例: エンディアン混在フォーマット）。すべてのフィールドに付ける必要はありません。フィールドがすべて呼び出し時のバイトオーダーを使う構造体には `endian=` タグは一切不要です。
 
-### `serializer=NAME`
-登録済みのカスタム `Serializer` を用いて、このフィールドをエンコード/デコードします。
-* **使用例**: `Data MyCustomType `binary:"custom,serializer=MyCustomSerializer"``
+### `codec=NAME`
+登録済みのカスタム `Codec` を用いて、このフィールドをエンコード/デコードします。
+* **使用例**: `Data MyCustomType `binary:"custom,codec=MyCustomCodec"``
 
 ### `omittable[=Expr]`
 フィールドをオミット可能（オプション）としてマークします。
@@ -168,18 +168,18 @@ pkt := Packet{Payload: &data}
 _, err := binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &pkt)
 ```
 
-### 方法 2: カスタムシリアライザによる動的割り当て
-Type-Length-Value（TLV）や、パケットヘッダーの後に動的なメッセージボディが続くパケット形式のように、動的に具象型を割り当てたい場合は、カスタムの `Serializer` を使用します。
+### 方法 2: カスタムコーデックによる動的割り当て
+Type-Length-Value（TLV）や、パケットヘッダーの後に動的なメッセージボディが続くパケット形式のように、動的に具象型を割り当てたい場合は、カスタムの `Codec` を使用します。
 
-カスタムデシリアライザ内では、すでにデコード済みの親構造体のフィールド（例: `Type` や `MessageID` など）の値を検査して、実行時に動的に適切な具象型を割り当てることができます。
+カスタムデコーダ内では、すでにデコード済みの親構造体のフィールド（例: `Type` や `MessageID` など）の値を検査して、実行時に動的に適切な具象型を割り当てることができます。
 
 ```go
 type Packet struct {
 	MsgType uint8       `binary:"uint8"`
-	Payload interface{} `binary:"custom,serializer=DynamicPayload"`
+	Payload interface{} `binary:"custom,codec=DynamicPayload"`
 }
 
-func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
+func (s *DynamicPayloadCodec) Decode(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
 	// 親構造体のすでにデコード済みの "MsgType" フィールドをチェックする
 	msgTypeField := parentStruct.FieldByName("MsgType")
 	

@@ -3,6 +3,9 @@
 > [!NOTE]
 > **AI Agents**: AIエージェント開発用のリファレンスおよび実装ルールは [llms-full.txt](llms-full.txt) を参照してください。
 
+> [!IMPORTANT]
+> **0.2.x からの移行:** v0.3.0 には破壊的変更があります（`Marshaler`/`Codec` への改名、構造体でのバイトオーダー宣言、バイトオーダー引数のない API）。**[MIGRATION.md](MIGRATION.md)** を参照してください。
+
 # binarystruct: GO構造体のバイナリ変換
 
 「binarystruct」は生のバイナリデータとGo構造体の間の変換を半自動かするためのパッケージです。

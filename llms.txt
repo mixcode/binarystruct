@@ -12,3 +12,4 @@ An automatic type-converting binary data marshaller/unmarshaller for Go structs 
 - [Struct Tag Reference](STRUCT_TAGS.md) — Detailed guide on binary struct tag syntax, options, and endianness overrides.
 - [Technical Specification](SPECIFICATION.md) — Ground-truth specification for runtime interpreter mechanics and compiler behavior.
 - [Static Code Generator (binarystruct-codegen)](binarystruct-codegen/README.md) — Standalone CLI tool details to compile tags into static, zero-allocation Go methods.
+- [Migration Guide (→ v0.3.0)](MIGRATION.md) — Upgrade path from 0.2.x: the Marshaler/Codec renames, struct-declared byte order, and the order-free API.

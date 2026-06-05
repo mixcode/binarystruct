@@ -3,6 +3,9 @@
 > [!NOTE]
 > **AI Agents**: Read [llms-full.txt](llms-full.txt) for a complete system prompt manual, rules, and syntax details for code generation.
 
+> [!IMPORTANT]
+> **Upgrading from 0.2.x?** v0.3.0 has breaking changes (the `Marshaler`/`Codec` renames, struct-declared byte order, an order-free API). See **[MIGRATION.md](MIGRATION.md)**.
+
 # binarystruct : binary data encoder/decoder for native Go structs
 
 Package binarystruct is an automatic type-converting binary data encoder/decoder(or marshaller/unmarshaller) for go-language structs.

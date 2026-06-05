@@ -132,7 +132,7 @@ type Mixed struct {
 ```
 
 ### H. Migrating from pre-0.3.0 (breaking renames)
-v0.3.0 aligned the API with Go standard-library conventions. When reading or updating older code, translate:
+**Full upgrade path with before/after code and a checklist: [MIGRATION.md](MIGRATION.md).** In short, v0.3.0 aligned the API with Go standard-library conventions; when reading or updating older code, translate:
 * **`Marshaller` → `Marshaler`** (type), including `…WithMarshaller` → `…WithMarshaler`.
 * **Order removed from the API:** `Marshal(v, order)` / `Unmarshal(data, order, v)` / `Write` / `Read` / `Inspect` (package funcs *and* methods) → declare the order on the struct (`_ struct{}` `binary:"endian=…"`) and call order-free; for a value that declares none, use `NewMarshalerOrder(order)`. The old `NewMarshaler(order)` → `NewMarshalerOrder(order)`.
 * **Custom codecs:** `Serializer`/`Serialize`/`Deserialize` → `Codec`/`Encode`/`Decode`; `AddSerializer` → `AddCodec`; and the tag `serializer=NAME` → `codec=NAME`.

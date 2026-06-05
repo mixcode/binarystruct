@@ -72,6 +72,9 @@ func (ms *Marshaler) unsafeWriteStruct(w io.Writer, order ByteOrder, strc reflec
 	if err != nil {
 		return 0, err
 	}
+	// A struct-level byte order overrides the inherited order for this struct's
+	// fields; per-field endian= still overrides it in turn.
+	order = resolveByteOrder(order, meta.endian)
 
 	var base unsafe.Pointer
 	if strc.CanAddr() {
@@ -378,6 +381,9 @@ func (ms *Marshaler) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflect
 	if err != nil {
 		return 0, err
 	}
+	// A struct-level byte order overrides the inherited order for this struct's
+	// fields; per-field endian= still overrides it in turn.
+	order = resolveByteOrder(order, meta.endian)
 
 	var base unsafe.Pointer
 	if strc.CanAddr() {

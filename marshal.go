@@ -410,6 +410,10 @@ func (ms *Marshaler) writeStruct(w io.Writer, order ByteOrder, strc reflect.Valu
 	if err != nil {
 		return 0, err
 	}
+	// A struct-level byte order (declared via a `_` sentinel or inherited from an
+	// embedded struct) overrides the inherited order for this struct's fields;
+	// per-field endian= still overrides it in turn.
+	order = resolveByteOrder(order, meta.endian)
 	wErr := func(i int, e error) error {
 		f := typ.Field(i)
 		return fmt.Errorf("field <%s>: %w", f.Name, e)

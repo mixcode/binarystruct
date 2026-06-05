@@ -181,6 +181,9 @@ func (ms *Marshaler) inspectStruct(strc reflect.Value, order ByteOrder, prefix s
 	if err != nil {
 		return err
 	}
+	// Match the encode/decode paths: a struct-level byte order overrides the
+	// inherited order for this struct's fields.
+	order = resolveByteOrder(order, meta.endian)
 
 	omittedRemaining := false
 	for _, fMeta := range meta.fields {

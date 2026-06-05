@@ -455,6 +455,9 @@ func (ms *Marshaler) readStruct(r io.Reader, order ByteOrder, strc reflect.Value
 	if err != nil {
 		return 0, err
 	}
+	// A struct-level byte order overrides the inherited order for this struct's
+	// fields; per-field endian= still overrides it in turn.
+	order = resolveByteOrder(order, meta.endian)
 
 	firstElem := true
 	wErr := func(i int, e error) error { // return a wrapped error

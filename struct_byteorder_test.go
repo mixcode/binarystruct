@@ -3,6 +3,7 @@
 package binarystruct
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
 )
@@ -106,5 +107,68 @@ func TestStructLevelEndian_UnknownOptionError(t *testing.T) {
 	}
 	if _, err := getStructMetadata(reflect.TypeOf(S{})); err == nil {
 		t.Fatal("expected an error for an unknown struct-level option, got nil")
+	}
+}
+
+// --- F2: the declared order is actually applied by the runtime ---
+// (these run under both the default unsafe path and `-tags safe_binarystruct`.)
+
+// TestStructLevelEndian_AppliedWins: a struct-declared order overrides the order
+// argument (D1) on both encode and decode, and round-trips.
+func TestStructLevelEndian_AppliedWins(t *testing.T) {
+	type S struct {
+		_ struct{} `binary:"endian=big"`
+		V uint16   `binary:"uint16"`
+	}
+	in := S{V: 0x0102}
+	// Marshal with LittleEndian — the struct's big-endian declaration must win.
+	blob, err := Marshal(&in, LittleEndian)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{0x01, 0x02}; !bytes.Equal(blob, want) {
+		t.Errorf("encode: got %x, want %x (struct big-endian must override the LittleEndian arg)", blob, want)
+	}
+	var out S
+	if _, err := Unmarshal(blob, LittleEndian, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.V != 0x0102 {
+		t.Errorf("round-trip: V = %#x, want 0x0102", out.V)
+	}
+}
+
+// TestStructLevelEndian_FieldOverridesStruct: a per-field endian= still overrides
+// the struct-level order for that one field.
+func TestStructLevelEndian_FieldOverridesStruct(t *testing.T) {
+	type S struct {
+		_  struct{} `binary:"endian=big"`
+		BE uint16   `binary:"uint16"`
+		LE uint16   `binary:"uint16,endian=little"`
+	}
+	in := S{BE: 0x0102, LE: 0x0102}
+	blob, err := Marshal(&in, BigEndian)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{0x01, 0x02, 0x02, 0x01}; !bytes.Equal(blob, want) {
+		t.Errorf("got %x, want %x (BE field big, LE field little)", blob, want)
+	}
+}
+
+// TestStructLevelEndian_EmbeddedApplied: an embedded marker base's order is applied
+// by the runtime, overriding the order argument.
+func TestStructLevelEndian_EmbeddedApplied(t *testing.T) {
+	type S struct {
+		beBase
+		V uint16 `binary:"uint16"`
+	}
+	in := S{V: 0x0102}
+	blob, err := Marshal(&in, LittleEndian) // beBase declares big-endian → wins
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{0x01, 0x02}; !bytes.Equal(blob, want) {
+		t.Errorf("got %x, want %x (embedded big-endian must win)", blob, want)
 	}
 }

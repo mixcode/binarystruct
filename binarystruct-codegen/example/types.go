@@ -1,6 +1,6 @@
 // Copyright 2026 github.com/mixcode
 
-//go:generate go run github.com/mixcode/binarystruct/binarystruct-codegen -type Packet -output packet_binary.go
+//go:generate go run github.com/mixcode/binarystruct/binarystruct-codegen -type Packet -endian big -output packet_binary.go
 package example
 
 type Packet struct {

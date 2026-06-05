@@ -33,6 +33,12 @@ func WriteAs(w io.Writer, tag string, order ByteOrder, govalue interface{}) (n i
 	return NewMarshaler(order).WriteAs(w, tag, govalue)
 }
 
+// Append encodes a go value and appends the binary data to buf, returning the
+// extended slice (mirroring encoding/binary.Append and the encoding.BinaryAppender idiom).
+func Append(buf []byte, order ByteOrder, govalue interface{}) (out []byte, err error) {
+	return NewMarshaler(order).Append(buf, govalue)
+}
+
 // Marshaler is go-type to binary-type encoder/decoder with environmental values.
 // The byte order is part of the Marshaler: set it with NewMarshaler (or the Order
 // field) once, and the Marshal/Unmarshal/Write/Read methods no longer take an
@@ -168,6 +174,14 @@ func (ms *Marshaler) WriteAs(w io.Writer, tag string, data interface{}) (n int, 
 	}
 
 	return ms.writeMain(w, order, v, encodeType, option, reflect.Value{}, -1)
+}
+
+// Marshaler.Append() encodes a go value and appends the binary data to buf using
+// the Marshaler's byte order, returning the extended slice. A nil buf is allowed.
+func (ms *Marshaler) Append(buf []byte, data interface{}) (out []byte, err error) {
+	b := bytes.NewBuffer(buf)
+	_, err = ms.Write(b, data)
+	return b.Bytes(), err
 }
 
 // write a reflect.Value

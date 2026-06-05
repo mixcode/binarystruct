@@ -16,6 +16,13 @@ func (s *Packet) MarshalBinary() ([]byte, error) {
 	return b.Bytes(), err
 }
 
+// AppendBinary implements encoding.BinaryAppender.
+func (s *Packet) AppendBinary(b []byte) ([]byte, error) {
+	buf := bytes.NewBuffer(b)
+	_, err := s.WriteBinary(buf, binarystruct.BigEndian)
+	return buf.Bytes(), err
+}
+
 // UnmarshalBinary implements encoding.BinaryUnmarshaler.
 func (s *Packet) UnmarshalBinary(data []byte) error {
 	r := bytes.NewReader(data)

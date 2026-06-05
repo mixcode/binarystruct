@@ -31,7 +31,7 @@ func genBytelenCase(t *testing.T, pkg, typesSrc, typeList, testSrc string) {
 		t.Fatalf("failed to write types.go: %v", err)
 	}
 
-	genCmd := exec.Command(codegenBin, "-type", typeList, tmpDir)
+	genCmd := exec.Command(codegenBin, "-type", typeList, "-endian", "big", tmpDir)
 	var genStderr bytes.Buffer
 	genCmd.Stderr = &genStderr
 	if err := genCmd.Run(); err != nil {

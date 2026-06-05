@@ -46,7 +46,24 @@ var (
 	outputFile   = flag.String("output", "", "output file name; default <first_type>_binary.go (or <first_type>.json if -json is set)")
 	includeTests = flag.Bool("tests", false, "include test files (*_test.go) when parsing the package")
 	jsonOutput   = flag.Bool("json", false, "generate JSON representation of the struct layout instead of Go source code")
+	endian       = flag.String("endian", "", "byte order baked into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods: \"big\" or \"little\" (required when generating Go code)")
 )
+
+// orderLiteral maps the -endian flag to the binarystruct byte-order expression
+// the generated code uses. There is no default: the stdlib encoding.Binary*
+// interfaces carry no order, so the baked order must be chosen explicitly.
+func orderLiteral(endian string) (string, error) {
+	switch endian {
+	case "big":
+		return "binarystruct.BigEndian", nil
+	case "little":
+		return "binarystruct.LittleEndian", nil
+	case "":
+		return "", fmt.Errorf("missing required -endian flag (\"big\" or \"little\"): the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods need an explicit byte order")
+	default:
+		return "", fmt.Errorf("invalid -endian value %q: must be \"big\" or \"little\"", endian)
+	}
+}
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `binarystruct-codegen: generate static MarshalBinary/UnmarshalBinary methods.
@@ -120,11 +137,19 @@ func main() {
 	}
 
 	if *jsonOutput {
+		// JSON layout export bakes no byte order, so -endian is not required here.
 		if err := g.GenerateJSON(out); err != nil {
 			log.Fatalf("JSON generation failed: %v", err)
 		}
 		fmt.Printf("Generated binarystruct JSON layout for %s -> %s\n", *typeNames, filepath.Base(out))
 	} else {
+		lit, err := orderLiteral(*endian)
+		if err != nil {
+			log.Print(err)
+			flag.Usage()
+			os.Exit(1)
+		}
+		g.Endian = lit
 		if err := g.Generate(out); err != nil {
 			log.Fatalf("generation failed: %v", err)
 		}

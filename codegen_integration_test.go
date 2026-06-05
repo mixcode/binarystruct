@@ -45,7 +45,7 @@ type TestStruct struct {
 	}
 
 	// 3. Run the codegen tool on the temp directory
-	genCmd := exec.Command(codegenBin, "-type", "TestStruct,TestNested", tmpDir)
+	genCmd := exec.Command(codegenBin, "-type", "TestStruct,TestNested", "-endian", "big", tmpDir)
 	var genStderr bytes.Buffer
 	genCmd.Stderr = &genStderr
 	if err := genCmd.Run(); err != nil {
@@ -230,7 +230,7 @@ type Packet struct {
 		t.Fatalf("failed to write test struct file: %v", err)
 	}
 
-	genCmd := exec.Command(codegenBin, "-type", "Packet", tmpDir)
+	genCmd := exec.Command(codegenBin, "-type", "Packet", "-endian", "big", tmpDir)
 	var genStderr bytes.Buffer
 	genCmd.Stderr = &genStderr
 	if err := genCmd.Run(); err != nil {
@@ -316,7 +316,7 @@ type Packet struct {
 		t.Fatalf("failed to write test struct file: %v", err)
 	}
 
-	genCmd := exec.Command(codegenBin, "-type", "Packet", tmpDir)
+	genCmd := exec.Command(codegenBin, "-type", "Packet", "-endian", "big", tmpDir)
 	var genStderr bytes.Buffer
 	genCmd.Stderr = &genStderr
 	if err := genCmd.Run(); err != nil {

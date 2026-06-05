@@ -24,6 +24,12 @@ type Generator struct {
 	Types        []string
 	IncludeTests bool
 
+	// Endian is the byte-order expression (e.g. "binarystruct.BigEndian") baked
+	// into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods, which
+	// implement the order-less stdlib encoding interfaces. Set from the -endian
+	// flag; required when generating Go code.
+	Endian string
+
 	// structs holds every struct type parsed from the target package, keyed by
 	// name. Populated by Generate; used to recognize nested-struct fields when
 	// translating bytelen() (case 5).
@@ -584,18 +590,26 @@ func emitLocalScratch(buf *bytes.Buffer, body string) {
 }
 
 func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.StructType) error {
-	// Write standard helper functions
+	// Write standard helper functions. The no-arg stdlib encoding interfaces carry
+	// no byte order, so they bake the order chosen via the -endian flag (g.Endian).
 	fmt.Fprintf(buf, "// MarshalBinary implements encoding.BinaryMarshaler.\n")
 	fmt.Fprintf(buf, "func (s *%s) MarshalBinary() ([]byte, error) {\n", typeName)
 	buf.WriteString("\tvar b bytes.Buffer\n")
-	buf.WriteString("\t_, err := s.WriteBinary(&b, binarystruct.BigEndian)\n")
+	fmt.Fprintf(buf, "\t_, err := s.WriteBinary(&b, %s)\n", g.Endian)
 	buf.WriteString("\treturn b.Bytes(), err\n")
+	buf.WriteString("}\n\n")
+
+	fmt.Fprintf(buf, "// AppendBinary implements encoding.BinaryAppender.\n")
+	fmt.Fprintf(buf, "func (s *%s) AppendBinary(b []byte) ([]byte, error) {\n", typeName)
+	buf.WriteString("\tbuf := bytes.NewBuffer(b)\n")
+	fmt.Fprintf(buf, "\t_, err := s.WriteBinary(buf, %s)\n", g.Endian)
+	buf.WriteString("\treturn buf.Bytes(), err\n")
 	buf.WriteString("}\n\n")
 
 	fmt.Fprintf(buf, "// UnmarshalBinary implements encoding.BinaryUnmarshaler.\n")
 	fmt.Fprintf(buf, "func (s *%s) UnmarshalBinary(data []byte) error {\n", typeName)
 	buf.WriteString("\tr := bytes.NewReader(data)\n")
-	buf.WriteString("\t_, err := s.ReadBinary(r, binarystruct.BigEndian)\n")
+	fmt.Fprintf(buf, "\t_, err := s.ReadBinary(r, %s)\n", g.Endian)
 	buf.WriteString("\treturn err\n")
 	buf.WriteString("}\n\n")
 

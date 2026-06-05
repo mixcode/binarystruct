@@ -43,6 +43,33 @@ func TestNewMarshaler_MatchesPackageFunc(t *testing.T) {
 	}
 }
 
+// TestAppend verifies that Append appends the encoded bytes onto an existing
+// buffer (the encoding.BinaryAppender idiom), leaving the prefix intact and
+// producing the same bytes Marshal would, after the prefix.
+func TestAppend(t *testing.T) {
+	in := orderProbe{V: 0x0102}
+	prefix := []byte{0xaa, 0xbb}
+
+	got, err := Append(prefix, BigEndian, &in)
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	enc, _ := Marshal(&in, BigEndian)
+	want := append(append([]byte{}, prefix...), enc...)
+	if !bytes.Equal(got, want) {
+		t.Errorf("Append: got %x, want %x", got, want)
+	}
+
+	// A nil buffer yields exactly the encoded bytes.
+	got2, err := NewMarshaler(BigEndian).Append(nil, &in)
+	if err != nil {
+		t.Fatalf("Append(nil): %v", err)
+	}
+	if !bytes.Equal(got2, enc) {
+		t.Errorf("Append(nil): got %x, want %x", got2, enc)
+	}
+}
+
 // TestMarshaler_NoOrder_FailsLoud verifies that a zero-value Marshaler (Order
 // left nil, e.g. by skipping NewMarshaler) fails with a clear error on every
 // order-free entry point instead of panicking deep in a scalar write.

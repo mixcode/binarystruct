@@ -31,7 +31,7 @@ Tag options modify the behavior of binary types. They are appended after the typ
 
 | Option | Syntax | Applies To | Description |
 | :--- | :--- | :--- | :--- |
-| **`endian`** | `endian=big\|little\|inverse` | Integer/float types | Overrides the struct-level byte order for this field. |
+| **`endian`** | `endian=big\|little\|inverse` | Integer/float types | Per-field **override** of the call-level `order` argument (which propagates to all fields and nested structs); `inverse` flips the inherited order. Needed only on fields that differ — not on every field. |
 | **`encoding`** | `encoding=NAME` | String types | Applies a text encoding (e.g. Shift-JIS) registered in the Marshaller. |
 | **`serializer`** | `serializer=NAME` | `custom` type | Specifies which registered Serializer to delegate to. |
 | **`omittable`** | `omittable` or `omittable=Expr` | Any | Allows truncated streams: if EOF is reached at this field's start, decoding stops without error. |

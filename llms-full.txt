@@ -25,7 +25,7 @@ This document contains rules, syntax constraints, and patterns to help LLM agent
 
 ### Key Options
 * `encoding=NAME`: String character conversion (e.g., `shift-jis`, `utf-16le`).
-* `endian=big|little|inverse`: Byte order override. `inverse` flips the parent's byte order recursively.
+* `endian=big|little|inverse`: Byte order **override** for this field only — see Rule G. `inverse` flips the inherited byte order recursively.
 * `serializer=NAME`: Reference to a custom registered serializer.
 * `omittable[=Expression]`: Marks a trailing field as optional (suppresses `io.EOF` errors at start of field or skips based on struct byte-offset check).
 * `range=min..max`: Enforces range check validation on integers and float values (e.g. `range=1..100`, open ranges `range=0..` or `range=..100`).
@@ -83,6 +83,27 @@ Unifying rule: *buffer/stream argument first, then `order`, then the value; `Mar
 
 ### F. Concurrency
 The package-level `Marshal`/`Unmarshal`/`Write`/`Read` are safe for concurrent use (each call allocates its own `Marshaller`), and independent `Marshaller` instances may run concurrently (the only shared global is a `sync.Map` metadata cache). Do **not** share a single `*Marshaller` across goroutines: it lazily populates an internal encoder cache (and `AddTextEncoding` mutates it) without locking — use one instance per goroutine, or the package-level functions.
+
+### G. Byte order is set once by the call; `endian=` is only an override (common trap)
+The `order` argument of `Marshal`/`Unmarshal`/`Write`/`Read` (e.g. `binarystruct.BigEndian`) sets the byte order for the **entire** value and **propagates automatically into every field and nested struct**. The per-field `endian=big|little|inverse` tag is purely an **override** for the rare field that differs (a mixed-endian format); `inverse` flips relative to the inherited order.
+
+* **Do not tag every field with `endian=`.** Set the order once at the call site and tag *only* the exceptions. A struct whose fields all share the call's byte order needs **no** `endian=` tags at all.
+* `endian=` is therefore for heterogeneity, not for choosing the format's overall endianness — that is the `order` argument's job.
+
+```go
+// Right: order set once; no per-field endian tags needed.
+type Header struct {
+	Magic uint32 `binary:"uint32"`
+	Size  uint32 `binary:"uint32"`
+}
+binarystruct.Unmarshal(buf, binarystruct.LittleEndian, &h) // whole struct is little-endian
+
+// endian= belongs only on the field that breaks from the inherited order:
+type Mixed struct {
+	LE uint32 `binary:"uint32"`              // inherits the call's order
+	BE uint32 `binary:"uint32,endian=big"`   // this one field overrides
+}
+```
 
 ---
 

@@ -55,7 +55,7 @@ Example:
 ## Tag Options
 
   - encoding=NAME: Sets string text encoding (e.g. shift-jis, utf-8).
-  - endian=big|little|inverse: Overrides default byte order for this field.
+  - endian=big|little|inverse: Per-field override of the call's byte order (which is set once by the order argument and propagates to every field). Use only on fields that differ from it (e.g. mixed-endian formats); inverse flips the inherited order. Do not tag every field.
   - serializer=NAME: Applies a registered Serializer for custom encoding.
   - omittable: Suppresses EOF errors at this field's start.
   - omittable=Expr: Skips the field if byte size limits are reached.

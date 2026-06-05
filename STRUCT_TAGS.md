@@ -66,6 +66,7 @@ Overrides the default byte order (endianness) for the field.
 * **`little`**: Forces Little Endian.
 * **`inverse`**: Inverts the parent struct's configured byte order.
 * **Usage**: `Value uint32 `binary:"uint32,endian=inverse"`` (propagates recursively to nested struct fields).
+* **This tag is an override only.** The byte order is set once by the `order` argument of `Marshal`/`Unmarshal`/`Write`/`Read` and propagates to every field and nested struct automatically. Add `endian=` **only to the fields that differ** from that order (e.g. a mixed-endian format) — do **not** tag every field; a struct whose fields all use the call's byte order needs no `endian=` tags at all.
 
 ### `serializer=NAME`
 Uses a custom registered `Serializer` to marshal and unmarshal this field.

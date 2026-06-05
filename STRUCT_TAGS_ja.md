@@ -66,6 +66,7 @@ MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
 * **`little`**: リトルエンディアンを強制。
 * **`inverse`**: 親構造体に指定されたバイトオーダーを反転。
 * **使用例**: `Value uint32 `binary:"uint32,endian=inverse"``（ネストされた構造体フィールドにも再帰的に伝播します）。
+* **このタグは上書き専用です。** バイトオーダーは `Marshal`/`Unmarshal`/`Write`/`Read` の `order` 引数で一度だけ設定され、すべてのフィールドとネストされた構造体へ自動的に伝播します。`endian=` は、そのバイトオーダーと**異なるフィールドにのみ**付けてください（例: エンディアン混在フォーマット）。すべてのフィールドに付ける必要はありません。フィールドがすべて呼び出し時のバイトオーダーを使う構造体には `endian=` タグは一切不要です。
 
 ### `serializer=NAME`
 登録済みのカスタム `Serializer` を用いて、このフィールドをエンコード/デコードします。

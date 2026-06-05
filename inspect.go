@@ -17,7 +17,7 @@ type FieldLayout struct {
 	GoType     string      `json:"go_type"`
 	BinaryType string      `json:"binary_type"`
 	Offset     int         `json:"offset"`              // Offset from the start of the struct (in bytes)
-	Size       int         `json:"size"`                // Serialized size of the field (in bytes)
+	Size       int         `json:"size"`                // Encoded size of the field (in bytes)
 	Tag        string      `json:"tag"`                 // Raw binary tag
 	Endian     string      `json:"endian"`              // Byte order representation
 	RawValue   interface{} `json:"raw_value,omitempty"` // Field's current value
@@ -144,7 +144,7 @@ func Inspect(govalue interface{}, order ByteOrder) (*StructLayout, error) {
 	return NewMarshaler(order).Inspect(govalue)
 }
 
-// Inspect analyzes a struct instance using this Marshaler's byte order and custom configuration (e.g. serializers).
+// Inspect analyzes a struct instance using this Marshaler's byte order and custom configuration (e.g. codecs).
 func (ms *Marshaler) Inspect(govalue interface{}) (*StructLayout, error) {
 	order, err := ms.effectiveOrder()
 	if err != nil {
@@ -281,8 +281,8 @@ func (ms *Marshaler) inspectStruct(strc reflect.Value, order ByteOrder, prefix s
 			if fMeta.endian != endianNone {
 				option.endian = fMeta.endian
 			}
-			if fMeta.serializer != "" {
-				option.serializer = fMeta.serializer
+			if fMeta.codec != "" {
+				option.codec = fMeta.codec
 			}
 		}
 
@@ -301,18 +301,18 @@ func (ms *Marshaler) inspectStruct(strc reflect.Value, order ByteOrder, prefix s
 		size := 0
 		details := ""
 
-		if option.serializer != "" {
-			if ms.serializers != nil {
-				serializer, ok := ms.serializers[option.serializer]
+		if option.codec != "" {
+			if ms.codecs != nil {
+				codec, ok := ms.codecs[option.codec]
 				if ok && v.IsValid() {
 					var buf bytes.Buffer
-					nWritten, errSer := serializer.Serialize(&buf, fieldVal.Interface(), strc, fMeta.index, fieldOrder)
+					nWritten, errSer := codec.Encode(&buf, fieldVal.Interface(), strc, fMeta.index, fieldOrder)
 					if errSer == nil {
 						size = nWritten
 					}
 				}
 			}
-			details = "custom serializer: " + option.serializer
+			details = "custom codec: " + option.codec
 		} else if v.IsValid() && v.Kind() == reflect.Struct && naturalType == iStruct {
 			// Nested struct recursion
 			err := ms.inspectStruct(v, fieldOrder, fieldName, fields, offset)

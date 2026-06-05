@@ -182,8 +182,8 @@ func (ms *Marshaler) unsafeWriteStruct(w io.Writer, order ByteOrder, strc reflec
 			break
 		}
 
-		// If it's interface, nil, or has custom serializer, fall back to reflection
-		if typ.Field(fMeta.index).Type.Kind() == reflect.Interface || fMeta.serializer != "" || isNil {
+		// If it's interface, nil, or has custom codec, fall back to reflection
+		if typ.Field(fMeta.index).Type.Kind() == reflect.Interface || fMeta.codec != "" || isNil {
 			var m int
 			fieldVal := strc.Field(fMeta.index)
 			naturalType, option := getNaturalType(fieldVal)
@@ -212,8 +212,8 @@ func (ms *Marshaler) unsafeWriteStruct(w io.Writer, order ByteOrder, strc reflec
 				if fMeta.endian != endianNone {
 					option.endian = fMeta.endian
 				}
-				if fMeta.serializer != "" {
-					option.serializer = fMeta.serializer
+				if fMeta.codec != "" {
+					option.codec = fMeta.codec
 				}
 			}
 			m, err = ms.writeMain(w, order, fieldVal, naturalType, option, strc, fMeta.index)
@@ -441,8 +441,8 @@ func (ms *Marshaler) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflect
 			}
 		}
 
-		// If it's interface or has custom serializer, fall back to reflection
-		if typ.Field(fMeta.index).Type.Kind() == reflect.Interface || fMeta.serializer != "" {
+		// If it's interface or has custom codec, fall back to reflection
+		if typ.Field(fMeta.index).Type.Kind() == reflect.Interface || fMeta.codec != "" {
 			var m int
 			fieldVal := strc.Field(fMeta.index)
 			naturalType, option := getNaturalType(fieldVal)
@@ -471,8 +471,8 @@ func (ms *Marshaler) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflect
 				if fMeta.endian != endianNone {
 					option.endian = fMeta.endian
 				}
-				if fMeta.serializer != "" {
-					option.serializer = fMeta.serializer
+				if fMeta.codec != "" {
+					option.codec = fMeta.codec
 				}
 			}
 			m, err = ms.readMain(r, order, fieldVal, naturalType, option, strc, fMeta.index)

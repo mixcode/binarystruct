@@ -810,9 +810,9 @@ func TestEndianTags(t *testing.T) {
 	}
 }
 
-type varintSerializer struct{}
+type varintCodec struct{}
 
-func (vs *varintSerializer) Serialize(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (n int, err error) {
+func (vs *varintCodec) Encode(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (n int, err error) {
 	v, ok := value.(int)
 	if !ok {
 		return 0, fmt.Errorf("expected int")
@@ -822,7 +822,7 @@ func (vs *varintSerializer) Serialize(w io.Writer, value interface{}, parentStru
 	return w.Write(buf[:length])
 }
 
-func (vs *varintSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (value interface{}, n int, err error) {
+func (vs *varintCodec) Decode(r io.Reader, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (value interface{}, n int, err error) {
 	var val uint64
 	var shift uint
 	var bytesRead int
@@ -857,14 +857,14 @@ func (vs *varintSerializer) Deserialize(r io.Reader, parentStruct reflect.Value,
 	return int(val), bytesRead, nil
 }
 
-func TestCustomSerializer(t *testing.T) {
+func TestCustomCodec(t *testing.T) {
 	var ms = new(bst.Marshaler)
 	ms.Order = bst.LittleEndian
-	ms.AddSerializer("varint", &varintSerializer{})
+	ms.AddCodec("varint", &varintCodec{})
 
 	type structWithCustom struct {
 		Prefix uint8
-		Val    int `binary:"custom,serializer=varint"`
+		Val    int `binary:"custom,codec=varint"`
 		Suffix uint8
 	}
 

@@ -29,7 +29,7 @@ type structFieldMetadata struct {
 	valueofExpr   string
 	encoding      string
 	endian        endianOverride
-	serializer    string
+	codec         string
 	ignore        bool
 	unexported    bool
 	fieldErr      error
@@ -595,11 +595,11 @@ func parseTagString(tagStr string, strc reflect.Value, naturalType eType, natura
 				err = fmt.Errorf("missing value for endian tag")
 				return
 			}
-		case "serializer":
+		case "codec":
 			if len(t) > 1 {
-				option.serializer = t[1]
+				option.codec = t[1]
 			} else {
-				err = fmt.Errorf("missing value for serializer tag")
+				err = fmt.Errorf("missing value for codec tag")
 				return
 			}
 		case "valueof":
@@ -719,11 +719,11 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 				} else {
 					return nil, fmt.Errorf("missing value for endian tag on field %s", field.Name)
 				}
-			case "serializer":
+			case "codec":
 				if len(t) > 1 {
-					meta.serializer = t[1]
+					meta.codec = t[1]
 				} else {
-					return nil, fmt.Errorf("missing value for serializer tag on field %s", field.Name)
+					return nil, fmt.Errorf("missing value for codec tag on field %s", field.Name)
 				}
 			case "omittable":
 				meta.omittable = true
@@ -811,8 +811,8 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 			if meta.endian != endianNone {
 				meta.option.endian = meta.endian
 			}
-			if meta.serializer != "" {
-				meta.option.serializer = meta.serializer
+			if meta.codec != "" {
+				meta.option.codec = meta.codec
 			}
 
 			// Decode-side size expressions must be arithmetic only: reject

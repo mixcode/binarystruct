@@ -128,12 +128,12 @@ func (ms *Marshaler) readValue(r io.Reader, order ByteOrder, v reflect.Value) (n
 func (ms *Marshaler) readMain(r io.Reader, order ByteOrder, v reflect.Value, encodeType eType, option typeOption, parentStruct reflect.Value, fieldIndex int) (n int, err error) {
 	order = resolveByteOrder(order, option.endian)
 
-	if option.serializer != "" {
-		serializer, ok := ms.serializers[option.serializer]
+	if option.codec != "" {
+		codec, ok := ms.codecs[option.codec]
 		if !ok {
-			return 0, fmt.Errorf("unknown serializer: %s", option.serializer)
+			return 0, fmt.Errorf("unknown codec: %s", option.codec)
 		}
-		val, n, err := serializer.Deserialize(r, parentStruct, fieldIndex, order)
+		val, n, err := codec.Decode(r, parentStruct, fieldIndex, order)
 		if err != nil {
 			return n, err
 		}
@@ -498,7 +498,7 @@ func (ms *Marshaler) readStruct(r io.Reader, order ByteOrder, strc reflect.Value
 		}
 
 		v := fieldVal
-		if (fKind == reflect.Ptr || fKind == reflect.Interface) && fMeta.serializer == "" {
+		if (fKind == reflect.Ptr || fKind == reflect.Interface) && fMeta.codec == "" {
 			// allocate pointers
 			v, _ = dereferencePointer(v)
 		}
@@ -552,13 +552,13 @@ func (ms *Marshaler) readStruct(r io.Reader, order ByteOrder, strc reflect.Value
 			if fMeta.endian != endianNone {
 				option.endian = fMeta.endian
 			}
-			if fMeta.serializer != "" {
-				option.serializer = fMeta.serializer
+			if fMeta.codec != "" {
+				option.codec = fMeta.codec
 			}
 		}
 
 		if fKind == reflect.Ptr || fKind == reflect.Interface {
-			if fMeta.serializer == "" {
+			if fMeta.codec == "" {
 				option.indirectCount = 0
 			}
 		}

@@ -501,7 +501,7 @@ func (g *Generator) Generate(outPath string) error {
 			if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
 				needFmt = true
 			}
-			if val, ok := parsedTag.options["serializer"]; ok && val != "" {
+			if val, ok := parsedTag.options["codec"]; ok && val != "" {
 				needErrors = true
 				needFmt = true
 			}
@@ -854,11 +854,11 @@ func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binTyp
 		fmt.Fprintf(buf, "\tif %s != nil {\n", target)
 	}
 
-	if val, ok := parsedTag.options["serializer"]; ok && val != "" {
-		fmt.Fprintf(buf, "\tif ms == nil {\n\t\treturn n, errors.New(\"marshaller context required for custom serializer %s\")\n\t}\n", val)
-		fmt.Fprintf(buf, "\t{\n\t\tser := ms.GetSerializer(%q)\n", val)
-		buf.WriteString("\t\tif ser == nil {\n\t\t\treturn n, fmt.Errorf(\"unknown serializer: %s\", " + strconv.Quote(val) + ")\n\t\t}\n")
-		fmt.Fprintf(buf, "\t\tm, err = ser.Serialize(w, %s, nil, -1, order)\n", accessor)
+	if val, ok := parsedTag.options["codec"]; ok && val != "" {
+		fmt.Fprintf(buf, "\tif ms == nil {\n\t\treturn n, errors.New(\"marshaller context required for custom codec %s\")\n\t}\n", val)
+		fmt.Fprintf(buf, "\t{\n\t\tser := ms.GetCodec(%q)\n", val)
+		buf.WriteString("\t\tif ser == nil {\n\t\t\treturn n, fmt.Errorf(\"unknown codec: %s\", " + strconv.Quote(val) + ")\n\t\t}\n")
+		fmt.Fprintf(buf, "\t\tm, err = ser.Encode(w, %s, nil, -1, order)\n", accessor)
 		buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
 		if isPtr {
 			buf.WriteString("\t}\n")
@@ -953,11 +953,11 @@ func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType
 		fmt.Fprintf(buf, "\t{\n\t\tvar val %s\n", strings.TrimPrefix(goType, "*"))
 	}
 
-	if val, ok := parsedTag.options["serializer"]; ok && val != "" {
-		fmt.Fprintf(buf, "\tif ms == nil {\n\t\treturn n, errors.New(\"marshaller context required for custom serializer %s\")\n\t}\n", val)
-		fmt.Fprintf(buf, "\t{\n\t\tser := ms.GetSerializer(%q)\n", val)
-		buf.WriteString("\t\tif ser == nil {\n\t\t\treturn n, fmt.Errorf(\"unknown serializer: %s\", " + strconv.Quote(val) + ")\n\t\t}\n")
-		fmt.Fprintf(buf, "\t\tvalDec, m, err := ser.Deserialize(r, nil, -1, order)\n")
+	if val, ok := parsedTag.options["codec"]; ok && val != "" {
+		fmt.Fprintf(buf, "\tif ms == nil {\n\t\treturn n, errors.New(\"marshaller context required for custom codec %s\")\n\t}\n", val)
+		fmt.Fprintf(buf, "\t{\n\t\tser := ms.GetCodec(%q)\n", val)
+		buf.WriteString("\t\tif ser == nil {\n\t\t\treturn n, fmt.Errorf(\"unknown codec: %s\", " + strconv.Quote(val) + ")\n\t\t}\n")
+		fmt.Fprintf(buf, "\t\tvalDec, m, err := ser.Decode(r, nil, -1, order)\n")
 		buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n")
 		fmt.Fprintf(buf, "\t\t%s = valDec.(%s)\n\t}\n", accessor, strings.TrimPrefix(goType, "*"))
 	} else {

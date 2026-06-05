@@ -12,10 +12,10 @@ import (
 	"strings"
 )
 
-// Serializer is a user-defined binary encoder/decoder interface.
-type Serializer interface {
-	Serialize(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order ByteOrder) (n int, err error)
-	Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order ByteOrder) (value interface{}, n int, err error)
+// Codec is a user-defined binary encoder/decoder interface.
+type Codec interface {
+	Encode(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order ByteOrder) (n int, err error)
+	Decode(r io.Reader, parentStruct reflect.Value, fieldIndex int, order ByteOrder) (value interface{}, n int, err error)
 }
 
 // type ByteOrder is an alias of encoding/binary.ByteOrder
@@ -110,7 +110,7 @@ const (
 	// then the the value's default encoding will be used.
 	Any
 
-	// Custom type allows registering a custom Serializer
+	// Custom type allows registering a custom Codec
 	Custom
 
 	// internal-only types
@@ -166,7 +166,7 @@ type typeOption struct {
 	bufLen        int            // tagged field is a string or a padding of length bufLen: `binary:"STRINGTYPE(buflen)"`
 	encoding      string         // string encoding of the field: `binary:"string,encoding=ENC"`
 	endian        endianOverride // byte order override: `binary:"...,endian=big|little|inverse"`
-	serializer    string         // custom serializer name: `binary:"...,serializer=Serializer_Name"`
+	codec         string         // custom codec name: `binary:"...,codec=Codec_Name"`
 }
 
 func getITypeFromRType(rt reflect.Type) (it eType) {

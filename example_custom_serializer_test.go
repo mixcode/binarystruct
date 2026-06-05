@@ -11,10 +11,10 @@ import (
 	"github.com/mixcode/binarystruct"
 )
 
-// VarintSerializer encodes and decodes integer values as 7-bit varints.
-type VarintSerializer struct{}
+// VarintCodec encodes and decodes integer values as 7-bit varints.
+type VarintCodec struct{}
 
-func (vs *VarintSerializer) Serialize(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (n int, err error) {
+func (vs *VarintCodec) Encode(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (n int, err error) {
 	v, ok := value.(int)
 	if !ok {
 		return 0, fmt.Errorf("expected int")
@@ -24,7 +24,7 @@ func (vs *VarintSerializer) Serialize(w io.Writer, value interface{}, parentStru
 	return w.Write(buf[:length])
 }
 
-func (vs *VarintSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
+func (vs *VarintCodec) Decode(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
 	var val uint64
 	var shift uint
 	var bytesRead int
@@ -59,14 +59,14 @@ func (vs *VarintSerializer) Deserialize(r io.Reader, parentStruct reflect.Value,
 	return int(val), bytesRead, nil
 }
 
-func ExampleMarshaler_AddSerializer() {
+func ExampleMarshaler_AddCodec() {
 	marshaller := new(binarystruct.Marshaler)
 	marshaller.Order = binarystruct.LittleEndian
-	marshaller.AddSerializer("varint", &VarintSerializer{})
+	marshaller.AddCodec("varint", &VarintCodec{})
 
 	type Packet struct {
-		// Custom Serializer: uses the registered "varint" serializer
-		Count int `binary:"custom,serializer=varint"`
+		// Custom Codec: uses the registered "varint" codec
+		Count int `binary:"custom,codec=varint"`
 	}
 
 	in := Packet{

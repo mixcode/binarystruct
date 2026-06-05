@@ -64,9 +64,9 @@ Arguments:
 Generated code implements encoding.BinaryMarshaler and encoding.BinaryUnmarshaler
 interfaces, producing optimized static methods that bypass runtime reflection.
 
-If the struct uses runtime-dependent features (text encodings, custom serializers),
+If the struct uses runtime-dependent features (text encodings, custom codecs),
 context-aware methods (WriteBinaryWithMarshaler/ReadBinaryWithMarshaler) are also
-generated, allowing the Marshaler to pass through encodings and serializers.
+generated, allowing the Marshaler to pass through encodings and codecs.
 
 See https://github.com/mixcode/binarystruct for the full library documentation.
 `)

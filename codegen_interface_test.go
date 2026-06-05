@@ -110,38 +110,38 @@ func TestCodegenContextInterface_FastPath(t *testing.T) {
 	}
 }
 
-// mockSerializer is a minimal Serializer for testing GetSerializer.
-type mockSerializer struct{}
+// mockCodec is a minimal Codec for testing GetCodec.
+type mockCodec struct{}
 
-func (mockSerializer) Serialize(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (int, error) {
+func (mockCodec) Encode(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (int, error) {
 	return 0, nil
 }
-func (mockSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (interface{}, int, error) {
+func (mockCodec) Decode(r io.Reader, parentStruct reflect.Value, fieldIndex int, order bst.ByteOrder) (interface{}, int, error) {
 	return nil, 0, nil
 }
 
-func TestGetSerializer(t *testing.T) {
+func TestGetCodec(t *testing.T) {
 	var ms bst.Marshaler
 
-	// GetSerializer on empty Marshaler should return nil
-	if s := ms.GetSerializer("foo"); s != nil {
-		t.Error("expected nil for unregistered serializer on empty Marshaler")
+	// GetCodec on empty Marshaler should return nil
+	if s := ms.GetCodec("foo"); s != nil {
+		t.Error("expected nil for unregistered codec on empty Marshaler")
 	}
 
 	// Register and retrieve
-	ms.AddSerializer("myser", mockSerializer{})
-	if s := ms.GetSerializer("myser"); s == nil {
-		t.Error("expected non-nil for registered serializer")
+	ms.AddCodec("myser", mockCodec{})
+	if s := ms.GetCodec("myser"); s == nil {
+		t.Error("expected non-nil for registered codec")
 	}
 
 	// Not found after registration of a different name
-	if s := ms.GetSerializer("other"); s != nil {
+	if s := ms.GetCodec("other"); s != nil {
 		t.Error("expected nil for unregistered name")
 	}
 
 	// Remove and verify gone
-	ms.RemoveSerializer("myser")
-	if s := ms.GetSerializer("myser"); s != nil {
+	ms.RemoveCodec("myser")
+	if s := ms.GetCodec("myser"); s != nil {
 		t.Error("expected nil after removal")
 	}
 }

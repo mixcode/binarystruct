@@ -50,13 +50,13 @@ Example:
   - pad: Zero-filled padding bytes of (buf_len) size (source value ignored).
   - ignore, -: Ignored field during serialization.
   - any: Natural type encoding (default).
-  - custom: Custom serializer override (must be paired with serializer option).
+  - custom: Custom codec override (must be paired with codec option).
 
 ## Tag Options
 
   - encoding=NAME: Sets string text encoding (e.g. shift-jis, utf-8).
   - endian=big|little|inverse: Per-field override of the call's byte order (which is set once by the order argument and propagates to every field). Use only on fields that differ from it (e.g. mixed-endian formats); inverse flips the inherited order. Do not tag every field.
-  - serializer=NAME: Applies a registered Serializer for custom encoding.
+  - codec=NAME: Applies a registered Codec for custom encoding.
   - omittable: Suppresses EOF errors at this field's start.
   - omittable=Expr: Skips the field if byte size limits are reached.
   - range=min..max: Performs range validation check on integers and floats.
@@ -121,16 +121,16 @@ If a struct field is of an interface type, the decoder checks if the field has b
 	// Unmarshal decodes binary bytes directly into the 'data' variable
 	_, err := binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &pkt)
 
-## Dynamic Allocation using a Custom Serializer
+## Dynamic Allocation using a Custom Codec
 
-For packets containing polymorphic payloads (e.g. TLV or packet headers followed by dynamic bodies), you can use a custom Serializer. The custom deserializer can inspect previously decoded fields of the parent struct and dynamically allocate the appropriate concrete type at runtime:
+For packets containing polymorphic payloads (e.g. TLV or packet headers followed by dynamic bodies), you can use a custom Codec. The custom decodec can inspect previously decoded fields of the parent struct and dynamically allocate the appropriate concrete type at runtime:
 
 	type Packet struct {
 		MsgType uint8       `binary:"uint8"`
-		Payload interface{} `binary:"custom,serializer=DynamicPayload"`
+		Payload interface{} `binary:"custom,codec=DynamicPayload"`
 	}
 
-	func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
+	func (s *DynamicPayloadCodec) Decode(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
 		// Inspect the previously decoded "MsgType" field in the parent struct
 		msgTypeField := parentStruct.FieldByName("MsgType")
 
@@ -206,7 +206,7 @@ available in the repository as llms-full.txt (indexed by llms.txt):
 
 	https://raw.githubusercontent.com/mixcode/binarystruct/main/llms-full.txt
 
-It covers the tag cheat sheet, dynamic sizing, custom serializers, text
+It covers the tag cheat sheet, dynamic sizing, custom codecs, text
 encodings, validation, and common pitfalls. Agents generating code against this
 package should read that guide first.
 

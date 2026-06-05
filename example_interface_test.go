@@ -22,18 +22,18 @@ type MessageB struct {
 // Packet wraps a dynamic payload
 type Packet struct {
 	MsgType uint8       `binary:"uint8"`
-	Payload interface{} `binary:"custom,serializer=DynamicPayload"`
+	Payload interface{} `binary:"custom,codec=DynamicPayload"`
 }
 
-// DynamicPayloadSerializer handles dynamic allocation
-type DynamicPayloadSerializer struct{}
+// DynamicPayloadCodec handles dynamic allocation
+type DynamicPayloadCodec struct{}
 
-func (s *DynamicPayloadSerializer) Serialize(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (n int, err error) {
+func (s *DynamicPayloadCodec) Encode(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (n int, err error) {
 	// Serialization simply delegates to standard Write
 	return binarystruct.Write(w, order, value)
 }
 
-func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
+func (s *DynamicPayloadCodec) Decode(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
 	// 1. Inspect the previously decoded "MsgType" field in the parent struct
 	msgTypeField := parentStruct.FieldByName("MsgType")
 	if !msgTypeField.IsValid() {
@@ -61,26 +61,26 @@ func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect
 }
 
 func Example_interfacePolymorphism() {
-	// Register the custom serializer
+	// Register the custom codec
 	var ms binarystruct.Marshaler
 	ms.Order = binarystruct.BigEndian
-	ms.AddSerializer("DynamicPayload", &DynamicPayloadSerializer{})
+	ms.AddCodec("DynamicPayload", &DynamicPayloadCodec{})
 
-	// 1. Serialize Packet A (MsgType 1)
+	// 1. Encode Packet A (MsgType 1)
 	pktA := Packet{
 		MsgType: 1,
 		Payload: &MessageA{ValueA: 0x11223344},
 	}
 	blobA, _ := ms.Marshal(&pktA)
 
-	// 2. Serialize Packet B (MsgType 2)
+	// 2. Encode Packet B (MsgType 2)
 	pktB := Packet{
 		MsgType: 2,
 		Payload: &MessageB{ValueB: "hello"},
 	}
 	blobB, _ := ms.Marshal(&pktB)
 
-	// 3. Deserialize back dynamically
+	// 3. Decode back dynamically
 	var restoredA Packet
 	_, _ = ms.Unmarshal(blobA, &restoredA)
 

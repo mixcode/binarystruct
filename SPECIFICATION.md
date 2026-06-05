@@ -80,7 +80,7 @@ Examples: `valueof=bytelen(Name)`, `valueof=bytelen(Payload)+2`, `valueof=count(
 | Path | Mapping |
 | :--- | :--- |
 | **Runtime** (`marshal.go`, `unsafe_io.go`) | Before writing the field, if `valueofExpr` is set, evaluate it with the context-carrying value evaluator (Marshaller + byte order + struct metadata) and write the resulting integer in place of the field value. The unsafe path routes `valueof` fields through the reflection writer (rare fields; negligible cost). |
-| **Codegen** (`generator.go`) | Emit the value computation inline before the integer write. `count(F)` → `len(s.F)`; `bytelen(F)` → `len(s.F)` when `F` is a byte slice/array or a non-encoded `string`. `bytelen` of a nested struct or text-encoded string is **not** supported by codegen — `translateValueof` returns a generation-time error; use the runtime interpreter for those structs. |
+| **Codegen** (`generator.go`) | Emit the value computation inline before the integer write. `count(F)` → `len(s.F)`. `bytelen(F)` is resolved for nearly every field shape: byte slices/arrays and raw `string` (`len`), fixed `string(N)` buffers (the buffer width), all length-prefixed/null-terminated string variants (`prefix + content + terminator`), text-encoded strings (an `ms`-guarded `EncodeText` measurement matching the encode path), fixed-width scalars and scalar arrays (`width × count`), and nested structs / tag-counted arrays-of-structs / pointer-to-struct (a byte-exact runtime measurement via `binarystruct.Write(io.Discard, …)` that mirrors the encode path; a `nil` pointer contributes `0`). Still rejected at generation time (`bytelenExpr` returns an error → use the runtime interpreter): `bytelen` of a **pointer-element struct array** or a **pointer scalar field**, and a `valueof` expression that references another `valueof` field. |
 
 ### Fixed / Magic Values: `const`
 
@@ -141,7 +141,7 @@ When a struct is passed to `Write`/`Read`, the runtime checks for these interfac
    * **Codegen**: Declares a global package-level variable `var regex_Struct_Field = regexp.MustCompile(pattern)` to precompile at package load.
 4. **Computed Assignment (`valueof`) & Expression Functions**:
    * **Runtime**: `valueof` fields are resolved at encode time only, via a context-carrying evaluator able to compute `bytelen()`/`count()`; the result is written without mutating the struct (emit-only). `bytelen()` measures into a scratch buffer, so the output stream stays forward-only. Functions are `valueof`-only; decode expressions remain arithmetic-only and may reference preceding fields only.
-   * **Codegen**: Emits the value computation inline before the field write — `len(s.F)` for `count` and for `bytelen` of byte slices/arrays and non-encoded strings. `bytelen` of a nested struct or text-encoded string is rejected at generation time (use the runtime interpreter). No write-back is generated.
+   * **Codegen**: Emits the value computation inline before the field write — `len(s.F)` for `count`, and for `bytelen` resolves nearly every field shape (scalars and scalar arrays, byte slices/arrays, all string variants including text-encoded, nested structs, tag-counted arrays of structs, and pointer-to-struct; see §1's `valueof` codegen row for the exact mapping). It still rejects `bytelen` of a pointer-element struct array or a pointer scalar field at generation time (use the runtime interpreter). No write-back is generated.
 
 ---
 

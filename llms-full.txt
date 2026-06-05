@@ -220,7 +220,7 @@ type Record struct {
 * **Encode-only.** On decode the field is read normally; size the target with a decode-side `[len]` expression.
 * **Emit-only (no write-back), by design.** The computed value is written to the stream but your Go struct field is left unchanged — this keeps encoding a pure, side-effect-free read (safe for concurrent marshalling). **To obtain the computed values in Go, do a `Marshal`/`Unmarshal` (or `Write`/`Read`) round trip.** A write-back mode will not be added.
 * **Integer/bitmap fields only**; other field types are a compile-time error. `bytelen`/`count` are valid only inside `valueof`.
-* **Codegen support**: `count(F)` and `bytelen(F)` of byte slices/arrays and non-encoded strings are supported by the static code generator; `bytelen` of nested structs or text-encoded strings is not yet — use the runtime interpreter for those.
+* **Codegen support**: the static code generator resolves `count(F)` and `bytelen(F)` for nearly every field shape — fixed-width scalars and scalar arrays, byte slices/arrays, fixed `string(N)` and all length-prefixed/null-terminated string variants (including text-encoded, via an `ms`-guarded `EncodeText` measurement), nested structs, tag-counted arrays of structs, and pointer-to-struct. It still rejects (generation-time error → use the runtime interpreter for that struct) `bytelen` of a **pointer-element struct array** or a **pointer scalar field**.
 
 ---
 

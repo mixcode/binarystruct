@@ -4,10 +4,11 @@ This document provides instructions for AI developer agents modifying, extending
 
 ## 1. Ground Truth Specification
 * **Crucial Rule**: The source of truth for all syntax constraints, interpreter mapping, and codegen compiler behaviors is **[SPECIFICATION.md](SPECIFICATION.md)**.
-* When adding a new tag type, option, or keyword:
-  1. Follow the development step sequence defined in `SPECIFICATION.md`.
-  2. Implement changes on both the **dynamic runtime path** (`struct.go`, `marshal.go`/`unmarshal.go`, `unsafe_io.go`) and the **static compilation path** (`binarystruct-codegen/generator.go`).
-  3. Ensure both paths behave identically and pass the integration tests.
+* When adding a new tag type, option, or keyword, follow the **Extension Protocol (Sync Checklist) in [SPECIFICATION.md](SPECIFICATION.md) §3** step by step. The critical invariant it encodes: the same behavior is implemented in **three parallel execution paths that must stay byte-identical**, and a change to one is a silent bug unless mirrored in all three:
+  1. **Safe / reflection path** — `marshal.go` / `unmarshal.go` (parsed in `struct.go`).
+  2. **Unsafe path** — `unsafe_io.go` (`unsafeWriteStruct` / `unsafeReadStruct`; active by default, replaced by panicking stubs under `-tags safe_binarystruct`).
+  3. **Static codegen path** — `binarystruct-codegen/generator.go`.
+* After implementing, add tests in **all three modes** (safe, unsafe, and the codegen integration suite) and update the docs: `SPECIFICATION.md`, `STRUCT_TAGS.md` (+ `STRUCT_TAGS_ja.md`), **`llms-full.txt`**, and the README recipe if it is a common pattern.
 
 ## 2. Codebase Architecture Map
 * **[struct.go](struct.go)**: Layout parser and AST-like metadata compiler (`getStructMetadata`).
@@ -17,5 +18,12 @@ This document provides instructions for AI developer agents modifying, extending
 * **[STRUCT_TAGS.md](STRUCT_TAGS.md)**: User-facing documentation for tag syntaxes.
 
 ## 3. Development and Testing Rules
+* **Build, test, and verify** (a `go.work` two-module workspace — the root library and the nested `binarystruct-codegen` module). All of the following must pass before a change is complete:
+  ```bash
+  go test ./...                              # default = unsafe interpreter path + codegen integration
+  go test -tags safe_binarystruct ./...      # safe / reflection-only path (must match)
+  (cd binarystruct-codegen && go test ./...) # the code generator's own module
+  gofmt -l . && go vet ./...                 # formatting + vet must be clean
+  ```
 * **Test Hygiene**: Keep the default test output quiet. Any subprocesses or integration tests (like [codegen_integration_test.go](codegen_integration_test.go)) must respect the `testing.Verbose()` flag and capture outputs instead of writing directly to stdout/stderr.
 * **Compatibility**: Ensure any optimizer or codegen enhancements fall back gracefully to the safe reflection mode if compiled with `-tags safe_binarystruct`.

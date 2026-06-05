@@ -92,6 +92,48 @@ func parseFieldTag(tag *ast.BasicLit) parsedFieldTag {
 	return res
 }
 
+// structSentinelEndian scans a struct's fields for a blank `_` sentinel carrying
+// a struct-level endian= and returns the byte-order literal expression
+// ("binarystruct.BigEndian"/"binarystruct.LittleEndian"), or "" if none is
+// declared. endian=inverse is unsupported by codegen (it depends on a runtime
+// caller order), so it is a generation-time error.
+func structSentinelEndian(st *ast.StructType) (string, error) {
+	binRe := regexp.MustCompile(`binary:"([^"]*)"`)
+	for _, field := range st.Fields.List {
+		if len(field.Names) != 1 || field.Names[0].Name != "_" || field.Tag == nil {
+			continue
+		}
+		tagVal, err := strconv.Unquote(field.Tag.Value)
+		if err != nil {
+			continue
+		}
+		m := binRe.FindStringSubmatch(tagVal)
+		if len(m) < 2 {
+			continue
+		}
+		for _, seg := range strings.Split(m[1], ",") {
+			kv := strings.SplitN(strings.TrimSpace(seg), "=", 2)
+			if strings.TrimSpace(kv[0]) != "endian" {
+				continue
+			}
+			if len(kv) < 2 {
+				return "", fmt.Errorf("missing value for endian in `_` sentinel tag")
+			}
+			switch strings.ToLower(strings.TrimSpace(kv[1])) {
+			case "big":
+				return "binarystruct.BigEndian", nil
+			case "little":
+				return "binarystruct.LittleEndian", nil
+			case "inverse":
+				return "", fmt.Errorf("struct-level endian=inverse is not supported by codegen; use the runtime interpreter")
+			default:
+				return "", fmt.Errorf("unknown endian value %q in `_` sentinel tag", kv[1])
+			}
+		}
+	}
+	return "", nil
+}
+
 func getGoTypeName(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:
@@ -487,7 +529,7 @@ func (g *Generator) Generate(outPath string) error {
 			return fmt.Errorf("type %s not found in package %s", typeName, pkgName)
 		}
 		for _, field := range st.Fields.List {
-			if len(field.Names) == 0 {
+			if len(field.Names) == 0 || field.Names[0].Name == "_" {
 				continue
 			}
 			goType := getGoTypeName(field.Type)
@@ -542,7 +584,7 @@ func (g *Generator) Generate(outPath string) error {
 			return fmt.Errorf("type %s not found in package %s", typeName, pkgName)
 		}
 		for _, field := range st.Fields.List {
-			if len(field.Names) == 0 {
+			if len(field.Names) == 0 || field.Names[0].Name == "_" {
 				continue
 			}
 			fieldName := field.Names[0].Name
@@ -590,26 +632,43 @@ func emitLocalScratch(buf *bytes.Buffer, body string) {
 }
 
 func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.StructType) error {
+	// Resolve the type's byte order. A struct-level `_` sentinel declaration wins;
+	// otherwise the -endian flag supplies the order baked into the no-arg stdlib
+	// methods. If neither is present, generation fails (the stdlib encoding
+	// interfaces carry no order, so we must not fabricate one).
+	structLit, err := structSentinelEndian(st)
+	if err != nil {
+		return fmt.Errorf("type %s: %w", typeName, err)
+	}
+	bakedLit := structLit
+	if bakedLit == "" {
+		bakedLit = g.Endian
+	}
+	if bakedLit == "" {
+		return fmt.Errorf("type %s: no byte order — declare it on the struct (a blank `_ struct{}` field tagged `binary:\"endian=big|little\"`) or pass -endian", typeName)
+	}
+
 	// Write standard helper functions. The no-arg stdlib encoding interfaces carry
-	// no byte order, so they bake the order chosen via the -endian flag (g.Endian).
+	// no byte order, so they bake bakedLit (the struct's declared order if any,
+	// else the -endian flag).
 	fmt.Fprintf(buf, "// MarshalBinary implements encoding.BinaryMarshaler.\n")
 	fmt.Fprintf(buf, "func (s *%s) MarshalBinary() ([]byte, error) {\n", typeName)
 	buf.WriteString("\tvar b bytes.Buffer\n")
-	fmt.Fprintf(buf, "\t_, err := s.WriteBinary(&b, %s)\n", g.Endian)
+	fmt.Fprintf(buf, "\t_, err := s.WriteBinary(&b, %s)\n", bakedLit)
 	buf.WriteString("\treturn b.Bytes(), err\n")
 	buf.WriteString("}\n\n")
 
 	fmt.Fprintf(buf, "// AppendBinary implements encoding.BinaryAppender.\n")
 	fmt.Fprintf(buf, "func (s *%s) AppendBinary(b []byte) ([]byte, error) {\n", typeName)
 	buf.WriteString("\tbuf := bytes.NewBuffer(b)\n")
-	fmt.Fprintf(buf, "\t_, err := s.WriteBinary(buf, %s)\n", g.Endian)
+	fmt.Fprintf(buf, "\t_, err := s.WriteBinary(buf, %s)\n", bakedLit)
 	buf.WriteString("\treturn buf.Bytes(), err\n")
 	buf.WriteString("}\n\n")
 
 	fmt.Fprintf(buf, "// UnmarshalBinary implements encoding.BinaryUnmarshaler.\n")
 	fmt.Fprintf(buf, "func (s *%s) UnmarshalBinary(data []byte) error {\n", typeName)
 	buf.WriteString("\tr := bytes.NewReader(data)\n")
-	fmt.Fprintf(buf, "\t_, err := s.ReadBinary(r, %s)\n", g.Endian)
+	fmt.Fprintf(buf, "\t_, err := s.ReadBinary(r, %s)\n", bakedLit)
 	buf.WriteString("\treturn err\n")
 	buf.WriteString("}\n\n")
 
@@ -626,7 +685,7 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	// Field info for resolving valueof's bytelen()/count() at generation time.
 	fieldInfo := make(map[string]cgFieldInfo)
 	for _, field := range st.Fields.List {
-		if len(field.Names) == 0 {
+		if len(field.Names) == 0 || field.Names[0].Name == "_" {
 			continue
 		}
 		pt := parseFieldTag(field.Tag)
@@ -649,7 +708,7 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	if err := func() error {
 		buf := &writeBody
 		for _, field := range st.Fields.List {
-			if len(field.Names) == 0 {
+			if len(field.Names) == 0 || field.Names[0].Name == "_" {
 				continue
 			}
 			fieldName := field.Names[0].Name
@@ -706,6 +765,11 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	}(); err != nil {
 		return err
 	}
+	if structLit != "" {
+		// A struct-declared order wins over the order the caller passed in (the
+		// runtime fast-paths here before seeding the struct order, so we seed it).
+		fmt.Fprintf(buf, "\torder = %s\n", structLit)
+	}
 	emitLocalScratch(buf, writeBody.String())
 	buf.Write(writeBody.Bytes())
 	buf.WriteString("\treturn n, nil\n")
@@ -725,7 +789,7 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	if err := func() error {
 		buf := &readBody
 		for _, field := range st.Fields.List {
-			if len(field.Names) == 0 {
+			if len(field.Names) == 0 || field.Names[0].Name == "_" {
 				continue
 			}
 			fieldName := field.Names[0].Name
@@ -773,6 +837,9 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 		return nil
 	}(); err != nil {
 		return err
+	}
+	if structLit != "" {
+		fmt.Fprintf(buf, "\torder = %s\n", structLit)
 	}
 	emitLocalScratch(buf, readBody.String())
 	buf.Write(readBody.Bytes())
@@ -1241,7 +1308,7 @@ func (g *Generator) GenerateJSON(outPath string) error {
 		}
 		var fields []CodegenField
 		for _, field := range st.Fields.List {
-			if len(field.Names) == 0 {
+			if len(field.Names) == 0 || field.Names[0].Name == "_" {
 				continue
 			}
 			fieldName := field.Names[0].Name

@@ -49,7 +49,7 @@ var (
 	outputFile   = flag.String("output", "", "output file name; default <first_type>_binary.go (or <first_type>.json if -json is set)")
 	includeTests = flag.Bool("tests", false, "include test files (*_test.go) when parsing the package")
 	jsonOutput   = flag.Bool("json", false, "generate JSON representation of the struct layout instead of Go source code")
-	endian       = flag.String("endian", "", "byte order baked into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods: \"big\" or \"little\" (required when generating Go code)")
+	endian       = flag.String("endian", "", "fallback byte order (\"big\" or \"little\") baked into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods; optional when the struct declares its own order via a blank `_ struct{}` endian= field")
 )
 
 // orderLiteral maps the -endian flag to the binarystruct byte-order expression
@@ -146,13 +146,19 @@ func main() {
 		}
 		fmt.Printf("Generated binarystruct JSON layout for %s -> %s\n", *typeNames, filepath.Base(out))
 	} else {
-		lit, err := orderLiteral(*endian)
-		if err != nil {
-			log.Print(err)
-			flag.Usage()
-			os.Exit(1)
+		// -endian is optional: a struct that declares its own order (a blank
+		// `_ struct{}` field tagged endian=) supplies it. The flag only sets the
+		// fallback baked into the no-arg methods; the generator errors per-type if
+		// neither is present. Validate the flag only when it is given.
+		if *endian != "" {
+			lit, err := orderLiteral(*endian)
+			if err != nil {
+				log.Print(err)
+				flag.Usage()
+				os.Exit(1)
+			}
+			g.Endian = lit
 		}
-		g.Endian = lit
 		if err := g.Generate(out); err != nil {
 			log.Fatalf("generation failed: %v", err)
 		}

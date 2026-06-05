@@ -54,6 +54,10 @@ type structFieldMetadata struct {
 
 type structMetadata struct {
 	fields []structFieldMetadata
+	// endian is the struct-level byte-order declaration, from a blank `_ struct{}`
+	// sentinel field's `binary:"endian=…"` tag or inherited from a value-embedded
+	// struct. endianNone when the struct declares no order of its own.
+	endian endianOverride
 }
 
 // fieldByName returns the metadata for the field with the given Go name.
@@ -615,7 +619,47 @@ func parseTagString(tagStr string, strc reflect.Value, naturalType eType, natura
 	return
 }
 
-// getStructMetadata builds or retrieves cached metadata for the struct type.
+// parseEndianValue maps a tag's endian= value to an endianOverride.
+func parseEndianValue(s string) (endianOverride, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "big":
+		return endianBig, nil
+	case "little":
+		return endianLittle, nil
+	case "inverse":
+		return endianInverse, nil
+	default:
+		return endianNone, fmt.Errorf("unknown endian value: %s", s)
+	}
+}
+
+// parseStructSentinel parses the struct-scope options carried by a blank
+// `_ struct{}` sentinel field's binary tag. Only endian= is supported today.
+func parseStructSentinel(tagStr string) (endianOverride, error) {
+	eo := endianNone
+	for _, seg := range strings.Split(tagStr, ",") {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		kv := strings.SplitN(seg, "=", 2)
+		switch strings.TrimSpace(kv[0]) {
+		case "endian":
+			if len(kv) < 2 {
+				return endianNone, fmt.Errorf("missing value for endian in struct-level `_` sentinel tag")
+			}
+			e, err := parseEndianValue(kv[1])
+			if err != nil {
+				return endianNone, err
+			}
+			eo = e
+		default:
+			return endianNone, fmt.Errorf("unknown struct-level option %q in `_` sentinel tag (only endian= is supported)", strings.TrimSpace(kv[0]))
+		}
+	}
+	return eo, nil
+}
+
 // getStructMetadata builds or retrieves cached metadata for the struct type.
 func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 	if val, ok := structMetadataCache.Load(structType); ok {
@@ -629,10 +673,44 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 	// collected for reference-cycle detection after all fields are parsed.
 	valueofRefs := make(map[string][]string)
 
+	// Struct-level byte order: ownEndian comes from a blank `_` sentinel field;
+	// inheritedEndians from value-embedded structs that declare an order.
+	ownEndian := endianNone
+	var inheritedEndians []endianOverride
+
 	for i := 0; i < nField; i++ {
 		field := structType.Field(i)
 		fType := field.Type
 		fKind := fType.Kind()
+
+		// A blank `_ struct{}` field carries struct-scope options (endian=) and is
+		// excluded from the layout — it is metadata, not an encoded field.
+		if field.Name == "_" && fKind == reflect.Struct && fType.NumField() == 0 {
+			if tagStr := field.Tag.Get(tagName); tagStr != "" {
+				eo, err := parseStructSentinel(tagStr)
+				if err != nil {
+					return nil, err
+				}
+				if eo != endianNone {
+					ownEndian = eo
+				}
+			}
+			continue
+		}
+
+		// A value-embedded struct that declares its own order propagates it to this
+		// struct (D4). Pointer-embedded structs are skipped to avoid metadata cycles
+		// (value embedding cannot form a cycle, so the recursion always terminates).
+		if field.Anonymous && fKind == reflect.Struct {
+			em, err := getStructMetadata(fType)
+			if err != nil {
+				return nil, err
+			}
+			if em.endian != endianNone {
+				inheritedEndians = append(inheritedEndians, em.endian)
+			}
+			// fall through: the embedded struct is still encoded as a nested field.
+		}
 
 		var fieldErr error
 		switch fKind {
@@ -915,7 +993,21 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 		}
 	}
 
-	meta := &structMetadata{fields: fields}
+	// Resolve the struct-level byte order: the struct's own `_` sentinel wins;
+	// otherwise a single distinct order inherited from value-embedded structs.
+	// Conflicting inherited orders are an error (V4) rather than a silent choice.
+	structEndian := ownEndian
+	if structEndian == endianNone {
+		for _, e := range inheritedEndians {
+			if structEndian == endianNone {
+				structEndian = e
+			} else if e != structEndian {
+				return nil, fmt.Errorf("conflicting struct-level byte order inherited from embedded structs in %s", structType.Name())
+			}
+		}
+	}
+
+	meta := &structMetadata{fields: fields, endian: structEndian}
 	structMetadataCache.Store(structType, meta)
 	return meta, nil
 }

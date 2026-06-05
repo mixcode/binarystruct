@@ -12,10 +12,10 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
-func ExampleMarshaller_AddTextEncoding() {
+func ExampleMarshaler_AddTextEncoding() {
 
 	// make a explicit marshaller
-	var marshaller = new(binarystruct.Marshaller)
+	var marshaller = new(binarystruct.Marshaler)
 
 	// add Japanese Shift-JIS text encoding
 	// see "golang.org/x/text/encoding/japanese"
@@ -62,8 +62,8 @@ func ExampleMarshaller_AddTextEncoding() {
 	// {こんにちは 峠丼}
 }
 
-func ExampleMarshaller_DefaultTextEncoding() {
-	var marshaller = new(binarystruct.Marshaller)
+func ExampleMarshaler_DefaultTextEncoding() {
+	var marshaller = new(binarystruct.Marshaler)
 
 	// Add Shift-JIS text encoding
 	marshaller.AddTextEncoding("sjis", japanese.ShiftJIS)

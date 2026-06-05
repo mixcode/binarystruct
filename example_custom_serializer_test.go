@@ -59,8 +59,8 @@ func (vs *VarintSerializer) Deserialize(r io.Reader, parentStruct reflect.Value,
 	return int(val), bytesRead, nil
 }
 
-func ExampleMarshaller_AddSerializer() {
-	marshaller := new(binarystruct.Marshaller)
+func ExampleMarshaler_AddSerializer() {
+	marshaller := new(binarystruct.Marshaler)
 	marshaller.AddSerializer("varint", &VarintSerializer{})
 
 	type Packet struct {

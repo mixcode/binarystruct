@@ -58,7 +58,7 @@ Tag options are appended using comma separators:
 ### `encoding=NAME`
 Configures the text encoding for string conversion.
 * **Usage**: `binary:"string(10),encoding=shift-jis"`
-* Supported encodings include `utf-8`, `shift-jis`, `euc-jp`, `utf-16le`, etc. (registered via `Marshaller.AddTextEncoding`).
+* Supported encodings include `utf-8`, `shift-jis`, `euc-jp`, `utf-16le`, etc. (registered via `Marshaler.AddTextEncoding`).
 
 ### `endian=big|little|inverse`
 Overrides the default byte order (endianness) for the field.

@@ -326,7 +326,7 @@ func TestPrefixTerm(t *testing.T) {
 }
 
 // Prefixed + text-encoded string: bytelen() = prefix width + encoded content,
-// measured through the Marshaller's custom encoding.
+// measured through the Marshaler's custom encoding.
 func TestCodegenBytelen_PrefixedEncodedString(t *testing.T) {
 	types := `type Msg struct {
 	LB uint16 ` + "`" + `binary:"uint16,valueof=bytelen(B)"` + "`" + `
@@ -342,13 +342,13 @@ func TestCodegenBytelen_PrefixedEncodedString(t *testing.T) {
 )
 
 func TestPrefixEncoded(t *testing.T) {
-	var ms binarystruct.Marshaller
+	var ms binarystruct.Marshaler
 	ms.AddTextEncoding("sjis", japanese.ShiftJIS)
 
 	s := Msg{B: "ああ"} // 6 bytes UTF-8, 4 bytes Shift-JIS
 	var buf bytes.Buffer
-	if _, err := s.WriteBinaryWithMarshaller(&ms, &buf, binarystruct.BigEndian); err != nil {
-		t.Fatalf("WriteBinaryWithMarshaller: %v", err)
+	if _, err := s.WriteBinaryWithMarshaler(&ms, &buf, binarystruct.BigEndian); err != nil {
+		t.Fatalf("WriteBinaryWithMarshaler: %v", err)
 	}
 	blob := buf.Bytes()
 	rt, err := ms.Marshal(&s, binarystruct.BigEndian)
@@ -421,7 +421,7 @@ func TestPointerStruct(t *testing.T) {
 
 // Case 4: bytelen() of a variable-length text-encoded string. The generated
 // measurement mirrors the encode path's ms-guarded EncodeText, so the length is
-// the encoded (Shift-JIS) byte count, threaded through a custom Marshaller.
+// the encoded (Shift-JIS) byte count, threaded through a custom Marshaler.
 func TestCodegenBytelen_VariableTextString(t *testing.T) {
 	types := `type Msg struct {
 	TextLen uint16 ` + "`" + `binary:"uint16,valueof=bytelen(Text)"` + "`" + `
@@ -437,13 +437,13 @@ func TestCodegenBytelen_VariableTextString(t *testing.T) {
 )
 
 func TestVarText(t *testing.T) {
-	var ms binarystruct.Marshaller
+	var ms binarystruct.Marshaler
 	ms.AddTextEncoding("sjis", japanese.ShiftJIS)
 
 	s := Msg{Text: "ああ"} // 6 bytes UTF-8, 4 bytes Shift-JIS
 	var buf bytes.Buffer
-	if _, err := s.WriteBinaryWithMarshaller(&ms, &buf, binarystruct.BigEndian); err != nil {
-		t.Fatalf("WriteBinaryWithMarshaller: %v", err)
+	if _, err := s.WriteBinaryWithMarshaler(&ms, &buf, binarystruct.BigEndian); err != nil {
+		t.Fatalf("WriteBinaryWithMarshaler: %v", err)
 	}
 	blob := buf.Bytes()
 

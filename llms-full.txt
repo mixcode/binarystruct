@@ -38,10 +38,10 @@ This document contains rules, syntax constraints, and patterns to help LLM agent
 ## 2. Crucial Coding Rules & Constraints
 
 ### A. String Encodings Must Be Registered
-* **Rule**: There are no default text encodings (other than raw UTF-8 bytes). Using `encoding=shift-jis` or similar in a tag will fail unless you first register the encoding on the `Marshaller` instance.
+* **Rule**: There are no default text encodings (other than raw UTF-8 bytes). Using `encoding=shift-jis` or similar in a tag will fail unless you first register the encoding on the `Marshaler` instance.
 * **Code pattern**:
   ```go
-  var ms binarystruct.Marshaller
+  var ms binarystruct.Marshaler
   ms.AddTextEncoding("shift-jis", htmlindex.Get("shift-jis"))
   ```
 
@@ -82,7 +82,7 @@ The package mixes two standard-library conventions, so the `order` argument is N
 Unifying rule: *buffer/stream argument first, then `order`, then the value; `Marshal` has no stream argument, so the value leads.* Do not assume `Marshal` and `Write` share an argument order — verify signatures rather than copying from one to the other.
 
 ### F. Concurrency
-The package-level `Marshal`/`Unmarshal`/`Write`/`Read` are safe for concurrent use (each call allocates its own `Marshaller`), and independent `Marshaller` instances may run concurrently (the only shared global is a `sync.Map` metadata cache). Do **not** share a single `*Marshaller` across goroutines: it lazily populates an internal encoder cache (and `AddTextEncoding` mutates it) without locking — use one instance per goroutine, or the package-level functions.
+The package-level `Marshal`/`Unmarshal`/`Write`/`Read` are safe for concurrent use (each call allocates its own `Marshaler`), and independent `Marshaler` instances may run concurrently (the only shared global is a `sync.Map` metadata cache). Do **not** share a single `*Marshaler` across goroutines: it lazily populates an internal encoder cache (and `AddTextEncoding` mutates it) without locking — use one instance per goroutine, or the package-level functions.
 
 ### G. Byte order is set once by the call; `endian=` is only an override (common trap)
 The `order` argument of `Marshal`/`Unmarshal`/`Write`/`Read` (e.g. `binarystruct.BigEndian`) sets the byte order for the **entire** value and **propagates automatically into every field and nested struct**. The per-field `endian=big|little|inverse` tag is purely an **override** for the rare field that differs (a mixed-endian format); `inverse` flips relative to the inherited order.
@@ -110,7 +110,7 @@ type Mixed struct {
 ## 3. Debugging Layout Issues
 If you encounter layout or padding issues, use the `Inspect` API to print out the struct's byte offsets, sizes, and values.
 
-* **Critical**: If your struct uses custom serializers or custom text encodings, you **MUST** call `marshaller.Inspect(...)` on your configured `Marshaller` instance. Using the package-level `binarystruct.Inspect(...)` will use a default marshaller and show custom fields with size `0`.
+* **Critical**: If your struct uses custom serializers or custom text encodings, you **MUST** call `marshaller.Inspect(...)` on your configured `Marshaler` instance. Using the package-level `binarystruct.Inspect(...)` will use a default marshaller and show custom fields with size `0`.
 
 ```go
 // For standard layouts:
@@ -187,7 +187,7 @@ To achieve peak performance in production, compile struct layouts into static Go
   ```bash
   binarystruct-codegen -type TestStruct -tests
   ```
-* **Runtime Fast-Paths**: The main library automatically detects generated static methods via type assertion (interfaces `BinaryReader`, `BinaryWriter`, `MarshallerContextReader`, `MarshallerContextWriter`) and fast-paths directly to them during `Marshal` / `Unmarshal` calls.
+* **Runtime Fast-Paths**: The main library automatically detects generated static methods via type assertion (interfaces `BinaryReader`, `BinaryWriter`, `MarshalerContextReader`, `MarshalerContextWriter`) and fast-paths directly to them during `Marshal` / `Unmarshal` calls.
 
 ### Example:
 ```go

@@ -62,7 +62,7 @@ func (s *DynamicPayloadSerializer) Deserialize(r io.Reader, parentStruct reflect
 
 func Example_interfacePolymorphism() {
 	// Register the custom serializer
-	var ms binarystruct.Marshaller
+	var ms binarystruct.Marshaler
 	ms.AddSerializer("DynamicPayload", &DynamicPayloadSerializer{})
 
 	// 1. Serialize Packet A (MsgType 1)

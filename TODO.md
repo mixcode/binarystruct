@@ -1,11 +1,11 @@
 # TODO List
 
 ## Completed (v2 Release)
-- [x] **One-value Marshaller/Unmarshaller**: Added `MarshalAs`, `UnmarshalAs`, `WriteAs`, and `ReadAs` to support encoding/decoding non-struct variables with explicit tags.
+- [x] **One-value Marshaler/Unmarshaller**: Added `MarshalAs`, `UnmarshalAs`, `WriteAs`, and `ReadAs` to support encoding/decoding non-struct variables with explicit tags.
 - [x] **Explicit Endian Marking**: Added `endian=big`, `endian=little`, and `endian=inverse` tag options to control byte order per field, propagating down into nested structs.
-- [x] **Default Text Encoding Setting**: Added default text encoding control to `Marshaller`, supporting tags like `encoding=shift-jis` alongside custom text encoding registration.
+- [x] **Default Text Encoding Setting**: Added default text encoding control to `Marshaler`, supporting tags like `encoding=shift-jis` alongside custom text encoding registration.
 - [x] **Tag Evaluator Upgrades**: Added multiplication (`*`), division (`/`), and parentheses (`()`) support to the dynamic tag expression evaluator.
-- [x] **Custom Serializers**: Added support for custom encoder/decoders using the `Serializer` interface and `AddSerializer` on `Marshaller`.
+- [x] **Custom Serializers**: Added support for custom encoder/decoders using the `Serializer` interface and `AddSerializer` on `Marshaler`.
 - [x] **Benchmarks & Advanced Optimizers**: Added caching of parsed struct layout metadata to avoid reflection and tag-parsing overhead on subsequent operations.
 - [x] **Omittable/Optional field tag**: Added `omittable` and `omittable=Expr` options to skip trailing or size-bounded fields on serialization and deserialization.
 - [x] **Struct Inspection helper**: Added `Inspect` and layout description formatting with customizable base conversions (decimal/hex).

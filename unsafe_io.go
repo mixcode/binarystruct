@@ -66,7 +66,7 @@ func getITypeFromRKind(k reflect.Kind) eType {
 	return iInvalid
 }
 
-func (ms *Marshaller) unsafeWriteStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err error) {
+func (ms *Marshaler) unsafeWriteStruct(w io.Writer, order ByteOrder, strc reflect.Value) (n int, err error) {
 	typ := strc.Type()
 	meta, err := getStructMetadata(typ)
 	if err != nil {
@@ -332,7 +332,7 @@ func (ms *Marshaller) unsafeWriteStruct(w io.Writer, order ByteOrder, strc refle
 	return
 }
 
-func (ms *Marshaller) unsafeWriteScalar(w io.Writer, order ByteOrder, ptr unsafe.Pointer, encodeType eType, goKind reflect.Kind) (n int, err error) {
+func (ms *Marshaler) unsafeWriteScalar(w io.Writer, order ByteOrder, ptr unsafe.Pointer, encodeType eType, goKind reflect.Kind) (n int, err error) {
 	k := encodeType
 	if k == Any || k == iInvalid {
 		k = getITypeFromRKind(goKind)
@@ -372,7 +372,7 @@ func (ms *Marshaller) unsafeWriteScalar(w io.Writer, order ByteOrder, ptr unsafe
 	return writeU64(w, order, u64, sz)
 }
 
-func (ms *Marshaller) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err error) {
+func (ms *Marshaler) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err error) {
 	typ := strc.Type()
 	meta, err := getStructMetadata(typ)
 	if err != nil {
@@ -663,7 +663,7 @@ func (ms *Marshaller) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflec
 	return
 }
 
-func (ms *Marshaller) unsafeReadScalar(r io.Reader, order ByteOrder, ptr unsafe.Pointer, encodeType eType, goKind reflect.Kind) (n int, err error) {
+func (ms *Marshaler) unsafeReadScalar(r io.Reader, order ByteOrder, ptr unsafe.Pointer, encodeType eType, goKind reflect.Kind) (n int, err error) {
 	k := encodeType
 	if k == Any || k == iInvalid {
 		k = getITypeFromRKind(goKind)
@@ -724,7 +724,7 @@ func swapBytes(buf []byte, sz int) {
 	}
 }
 
-func (ms *Marshaller) unsafeWriteSlice(w io.Writer, fieldOrder ByteOrder, currPtr unsafe.Pointer, isSlice bool, arrayLen int, elType eType, goElType reflect.Type) (n int, ok bool, err error) {
+func (ms *Marshaler) unsafeWriteSlice(w io.Writer, fieldOrder ByteOrder, currPtr unsafe.Pointer, isSlice bool, arrayLen int, elType eType, goElType reflect.Type) (n int, ok bool, err error) {
 	if !isCompatibleFastPath(goElType, elType) {
 		return 0, false, nil
 	}
@@ -793,7 +793,7 @@ func (ms *Marshaller) unsafeWriteSlice(w io.Writer, fieldOrder ByteOrder, currPt
 	return written, true, nil
 }
 
-func (ms *Marshaller) unsafeReadSlice(r io.Reader, fieldOrder ByteOrder, currPtr unsafe.Pointer, fieldVal reflect.Value, isSlice bool, arrayLen int, elType eType, goElType reflect.Type) (n int, ok bool, err error) {
+func (ms *Marshaler) unsafeReadSlice(r io.Reader, fieldOrder ByteOrder, currPtr unsafe.Pointer, fieldVal reflect.Value, isSlice bool, arrayLen int, elType eType, goElType reflect.Type) (n int, ok bool, err error) {
 	if !isCompatibleFastPath(goElType, elType) {
 		return 0, false, nil
 	}

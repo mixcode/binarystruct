@@ -858,7 +858,7 @@ func (vs *varintSerializer) Deserialize(r io.Reader, parentStruct reflect.Value,
 }
 
 func TestCustomSerializer(t *testing.T) {
-	var ms = new(bst.Marshaller)
+	var ms = new(bst.Marshaler)
 	ms.AddSerializer("varint", &varintSerializer{})
 
 	type structWithCustom struct {

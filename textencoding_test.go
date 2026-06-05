@@ -17,7 +17,7 @@ import (
 func TestTextEncoding(t *testing.T) {
 	var err error
 
-	var ms = new(bst.Marshaller)
+	var ms = new(bst.Marshaler)
 
 	ms.AddTextEncoding("sjis", japanese.ShiftJIS)
 	ms.AddTextEncoding("utf16", unicode.UTF16(unicode.LittleEndian, unicode.UseBOM))
@@ -95,7 +95,7 @@ func TestTextEncoding(t *testing.T) {
 
 	// DefaultTextEncoding
 	func() {
-		var msDefault = new(bst.Marshaller)
+		var msDefault = new(bst.Marshaler)
 		msDefault.AddTextEncoding("sjis", japanese.ShiftJIS)
 		msDefault.DefaultTextEncoding = "sjis"
 

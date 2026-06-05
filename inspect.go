@@ -141,12 +141,12 @@ func (sl *StructLayout) Format(cfg LayoutFormat) string {
 
 // Inspect analyzes a struct instance and returns its exact binary layout.
 func Inspect(govalue interface{}, order ByteOrder) (*StructLayout, error) {
-	var ms Marshaller
+	var ms Marshaler
 	return (&ms).Inspect(govalue, order)
 }
 
-// Inspect analyzes a struct instance using this Marshaller's custom configuration (e.g. serializers).
-func (ms *Marshaller) Inspect(govalue interface{}, order ByteOrder) (*StructLayout, error) {
+// Inspect analyzes a struct instance using this Marshaler's custom configuration (e.g. serializers).
+func (ms *Marshaler) Inspect(govalue interface{}, order ByteOrder) (*StructLayout, error) {
 	v := reflect.ValueOf(govalue)
 	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 		if v.IsNil() {
@@ -172,7 +172,7 @@ func (ms *Marshaller) Inspect(govalue interface{}, order ByteOrder) (*StructLayo
 	return sl, nil
 }
 
-func (ms *Marshaller) inspectStruct(strc reflect.Value, order ByteOrder, prefix string, fields *[]FieldLayout, offset *int) error {
+func (ms *Marshaler) inspectStruct(strc reflect.Value, order ByteOrder, prefix string, fields *[]FieldLayout, offset *int) error {
 	typ := strc.Type()
 	meta, err := getStructMetadata(typ)
 	if err != nil {

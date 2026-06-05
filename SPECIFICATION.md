@@ -23,7 +23,7 @@ Any extension to the tag syntax, type options, or serialization logic **must** i
 | **`z16string`** | `string` | 2*len + 2 bytes | Null-word-terminated UTF-16 style string. | Writes string + `0x0000`; reads until `0x0000`. |
 | **`ignore`** / **`-`** | Any | 0 bytes | Bypassed. | Bypassed. |
 | **`any`** | Any | Natural | Resolves to Go field's natural primitive type mapping. | Bypassed or resolved to the primitive. |
-| **`custom`** | Any | Custom | Requires `serializer` option. Delegates to custom Serializer. | Looks up serializer from Marshaller context via `GetSerializer()`; calls Serialize/Deserialize. |
+| **`custom`** | Any | Custom | Requires `serializer` option. Delegates to custom Serializer. | Looks up serializer from Marshaler context via `GetSerializer()`; calls Serialize/Deserialize. |
 
 ### Tag Options
 
@@ -32,7 +32,7 @@ Tag options modify the behavior of binary types. They are appended after the typ
 | Option | Syntax | Applies To | Description |
 | :--- | :--- | :--- | :--- |
 | **`endian`** | `endian=big\|little\|inverse` | Integer/float types | Per-field **override** of the call-level `order` argument (which propagates to all fields and nested structs); `inverse` flips the inherited order. Needed only on fields that differ — not on every field. |
-| **`encoding`** | `encoding=NAME` | String types | Applies a text encoding (e.g. Shift-JIS) registered in the Marshaller. |
+| **`encoding`** | `encoding=NAME` | String types | Applies a text encoding (e.g. Shift-JIS) registered in the Marshaler. |
 | **`serializer`** | `serializer=NAME` | `custom` type | Specifies which registered Serializer to delegate to. |
 | **`omittable`** | `omittable` or `omittable=Expr` | Any | Allows truncated streams: if EOF is reached at this field's start, decoding stops without error. |
 | **`range`** | `range=min..max` | Numeric types | Validates deserialized value is within `[min, max]`. Returns error on violation. |
@@ -73,13 +73,13 @@ Examples: `valueof=bytelen(Name)`, `valueof=bytelen(Payload)+2`, `valueof=count(
 
 **Reference scope (forward references permitted).** Because the entire Go value is available at encode time, a `valueof` expression may reference **any** field in the struct, including fields declared *after* it. This is the deliberate counterpart to decode-side `[arrayLen]`/`buf_len` expressions, which remain **arithmetic-only** and may reference only **preceding** fields. Function tokens (`bytelen`/`count`) are rejected outside `valueof`.
 
-**`bytelen()` evaluation.** Size is obtained by encoding `F` with the active Marshaller into a scratch buffer and counting the bytes — guaranteeing it equals what is actually written. (Raw `len()` is **not** used for strings, since text encodings such as Shift-JIS change the byte width.) Implementations may fast-path trivially-sized targets — byte slices, fixed-width scalars, and fixed arrays of scalars — with `len`/byte-width arithmetic to avoid a second encode.
+**`bytelen()` evaluation.** Size is obtained by encoding `F` with the active Marshaler into a scratch buffer and counting the bytes — guaranteeing it equals what is actually written. (Raw `len()` is **not** used for strings, since text encodings such as Shift-JIS change the byte width.) Implementations may fast-path trivially-sized targets — byte slices, fixed-width scalars, and fixed arrays of scalars — with `len`/byte-width arithmetic to avoid a second encode.
 
 **Validation (at `getStructMetadata`):** the target is an integer/bitmap kind; the function name is `bytelen` or `count`; the argument names an existing field; a `count` argument is a slice or array field; reference cycles among `valueof` fields are rejected.
 
 | Path | Mapping |
 | :--- | :--- |
-| **Runtime** (`marshal.go`, `unsafe_io.go`) | Before writing the field, if `valueofExpr` is set, evaluate it with the context-carrying value evaluator (Marshaller + byte order + struct metadata) and write the resulting integer in place of the field value. The unsafe path routes `valueof` fields through the reflection writer (rare fields; negligible cost). |
+| **Runtime** (`marshal.go`, `unsafe_io.go`) | Before writing the field, if `valueofExpr` is set, evaluate it with the context-carrying value evaluator (Marshaler + byte order + struct metadata) and write the resulting integer in place of the field value. The unsafe path routes `valueof` fields through the reflection writer (rare fields; negligible cost). |
 | **Codegen** (`generator.go`) | Emit the value computation inline before the integer write. `count(F)` → `len(s.F)`. `bytelen(F)` is resolved for nearly every field shape: byte slices/arrays and raw `string` (`len`), fixed `string(N)` buffers (the buffer width), all length-prefixed/null-terminated string variants (`prefix + content + terminator`), text-encoded strings (an `ms`-guarded `EncodeText` measurement matching the encode path), fixed-width scalars and scalar arrays (`width × count`), and nested structs / tag-counted arrays-of-structs / pointer-to-struct (a byte-exact runtime measurement via `binarystruct.Write(io.Discard, …)` that mirrors the encode path; a `nil` pointer contributes `0`). Still rejected at generation time (`bytelenExpr` returns an error → use the runtime interpreter): `bytelen` of a **pointer-element struct array** or a **pointer scalar field**, and a `valueof` expression that references another `valueof` field. |
 
 ### Fixed / Magic Values: `const`
@@ -125,7 +125,7 @@ When a struct is passed to `Write`/`Read`, the runtime checks for these interfac
 
 | Priority | Interface | Defined In | Purpose |
 | :--- | :--- | :--- | :--- |
-| 1 | `MarshallerContextWriter` / `MarshallerContextReader` | `marshal.go` / `unmarshal.go` | Generated code needing Marshaller access (text encodings, custom serializers). |
+| 1 | `MarshalerContextWriter` / `MarshalerContextReader` | `marshal.go` / `unmarshal.go` | Generated code needing Marshaler access (text encodings, custom serializers). |
 | 2 | `BinaryWriter` / `BinaryReader` | `marshal.go` / `unmarshal.go` | Generated code with no runtime dependencies. |
 | 3 | `encoding.BinaryMarshaler` / `encoding.BinaryUnmarshaler` | Go stdlib | Standard library compatibility fallback. |
 
@@ -165,7 +165,7 @@ When introducing a new binary type, tag option, or modifier, you **must** check 
   Update `parseFieldTag` to extract the option/type. Update `generateFieldWrite` / `generateFieldRead` (and array handlers) to emit the compiled Go statements.
 
 - [ ] **Step 6: Interface Verifications**
-  If the option accesses dynamic instances (like text encodings or custom serializers), ensure it is wired through both the standard interface and context-aware interfaces (`MarshallerContextWriter` / `MarshallerContextReader`).
+  If the option accesses dynamic instances (like text encodings or custom serializers), ensure it is wired through both the standard interface and context-aware interfaces (`MarshalerContextWriter` / `MarshalerContextReader`).
 
 - [ ] **Step 7: Testing**
   Write unit tests verifying correct behavior in both safe and unsafe interpreter modes, and add a test structure verifying the same behavior in the static codegen integration suite ([codegen_integration_test.go](codegen_integration_test.go)).

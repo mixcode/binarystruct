@@ -58,7 +58,7 @@ MyString string `binary:"string(StrLen+2),encoding=shift-jis,omittable"`
 ### `encoding=NAME`
 文字列変換用のテキストエンコーディングを指定します。
 * **使用例**: `binary:"string(10),encoding=shift-jis"`
-* `utf-8`、`shift-jis`、`euc-jp`、`utf-16le` などに対応（`Marshaller.AddTextEncoding` で登録可能）。
+* `utf-8`、`shift-jis`、`euc-jp`、`utf-16le` などに対応（`Marshaler.AddTextEncoding` で登録可能）。
 
 ### `endian=big|little|inverse`
 このフィールドのデフォルトエンディアン（バイトオーダー）を上書きします。

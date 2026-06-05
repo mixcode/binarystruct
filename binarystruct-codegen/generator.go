@@ -602,12 +602,12 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	// 1. WriteBinary (Standard)
 	fmt.Fprintf(buf, "// WriteBinary implements binarystruct.BinaryWriter.\n")
 	fmt.Fprintf(buf, "func (s *%s) WriteBinary(w io.Writer, order binarystruct.ByteOrder) (int, error) {\n", typeName)
-	buf.WriteString("\treturn s.WriteBinaryWithMarshaller(nil, w, order)\n")
+	buf.WriteString("\treturn s.WriteBinaryWithMarshaler(nil, w, order)\n")
 	buf.WriteString("}\n\n")
 
-	// 2. WriteBinaryWithMarshaller (Context-aware)
-	fmt.Fprintf(buf, "// WriteBinaryWithMarshaller implements binarystruct.MarshallerContextWriter.\n")
-	fmt.Fprintf(buf, "func (s *%s) WriteBinaryWithMarshaller(ms *binarystruct.Marshaller, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {\n", typeName)
+	// 2. WriteBinaryWithMarshaler (Context-aware)
+	fmt.Fprintf(buf, "// WriteBinaryWithMarshaler implements binarystruct.MarshalerContextWriter.\n")
+	fmt.Fprintf(buf, "func (s *%s) WriteBinaryWithMarshaler(ms *binarystruct.Marshaler, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {\n", typeName)
 
 	// Field info for resolving valueof's bytelen()/count() at generation time.
 	fieldInfo := make(map[string]cgFieldInfo)
@@ -700,12 +700,12 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	// 3. ReadBinary (Standard)
 	fmt.Fprintf(buf, "// ReadBinary implements binarystruct.BinaryReader.\n")
 	fmt.Fprintf(buf, "func (s *%s) ReadBinary(r io.Reader, order binarystruct.ByteOrder) (int, error) {\n", typeName)
-	buf.WriteString("\treturn s.ReadBinaryWithMarshaller(nil, r, order)\n")
+	buf.WriteString("\treturn s.ReadBinaryWithMarshaler(nil, r, order)\n")
 	buf.WriteString("}\n\n")
 
-	// 4. ReadBinaryWithMarshaller (Context-aware)
-	fmt.Fprintf(buf, "// ReadBinaryWithMarshaller implements binarystruct.MarshallerContextReader.\n")
-	fmt.Fprintf(buf, "func (s *%s) ReadBinaryWithMarshaller(ms *binarystruct.Marshaller, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {\n", typeName)
+	// 4. ReadBinaryWithMarshaler (Context-aware)
+	fmt.Fprintf(buf, "// ReadBinaryWithMarshaler implements binarystruct.MarshalerContextReader.\n")
+	fmt.Fprintf(buf, "func (s *%s) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {\n", typeName)
 
 	var readBody bytes.Buffer
 	if err := func() error {

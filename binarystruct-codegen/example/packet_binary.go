@@ -25,11 +25,11 @@ func (s *Packet) UnmarshalBinary(data []byte) error {
 
 // WriteBinary implements binarystruct.BinaryWriter.
 func (s *Packet) WriteBinary(w io.Writer, order binarystruct.ByteOrder) (int, error) {
-	return s.WriteBinaryWithMarshaller(nil, w, order)
+	return s.WriteBinaryWithMarshaler(nil, w, order)
 }
 
-// WriteBinaryWithMarshaller implements binarystruct.MarshallerContextWriter.
-func (s *Packet) WriteBinaryWithMarshaller(ms *binarystruct.Marshaller, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {
+// WriteBinaryWithMarshaler implements binarystruct.MarshalerContextWriter.
+func (s *Packet) WriteBinaryWithMarshaler(ms *binarystruct.Marshaler, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {
 	var tmp [8]byte
 	var m int
 	{
@@ -67,11 +67,11 @@ func (s *Packet) WriteBinaryWithMarshaller(ms *binarystruct.Marshaller, w io.Wri
 
 // ReadBinary implements binarystruct.BinaryReader.
 func (s *Packet) ReadBinary(r io.Reader, order binarystruct.ByteOrder) (int, error) {
-	return s.ReadBinaryWithMarshaller(nil, r, order)
+	return s.ReadBinaryWithMarshaler(nil, r, order)
 }
 
-// ReadBinaryWithMarshaller implements binarystruct.MarshallerContextReader.
-func (s *Packet) ReadBinaryWithMarshaller(ms *binarystruct.Marshaller, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {
+// ReadBinaryWithMarshaler implements binarystruct.MarshalerContextReader.
+func (s *Packet) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {
 	var tmp [8]byte
 	var m int
 	{

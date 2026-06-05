@@ -82,7 +82,7 @@ type vfSJIS struct {
 }
 
 func TestValueof_BytelenRespectsEncoding(t *testing.T) {
-	var ms Marshaller
+	var ms Marshaler
 	ms.AddTextEncoding("sjis", japanese.ShiftJIS)
 
 	in := vfSJIS{Text: "あい"}

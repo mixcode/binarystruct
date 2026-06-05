@@ -68,12 +68,12 @@ type mockContextStruct struct {
 	calledRead  bool
 }
 
-func (m *mockContextStruct) WriteBinaryWithMarshaller(ms *bst.Marshaller, w io.Writer, order bst.ByteOrder) (int, error) {
+func (m *mockContextStruct) WriteBinaryWithMarshaler(ms *bst.Marshaler, w io.Writer, order bst.ByteOrder) (int, error) {
 	m.calledWrite = true
 	return w.Write([]byte(m.Val))
 }
 
-func (m *mockContextStruct) ReadBinaryWithMarshaller(ms *bst.Marshaller, r io.Reader, order bst.ByteOrder) (int, error) {
+func (m *mockContextStruct) ReadBinaryWithMarshaler(ms *bst.Marshaler, r io.Reader, order bst.ByteOrder) (int, error) {
 	m.calledRead = true
 	var buf [5]byte
 	n, err := io.ReadFull(r, buf[:])
@@ -91,7 +91,7 @@ func TestCodegenContextInterface_FastPath(t *testing.T) {
 		t.Fatalf("Marshal failed: %v", err)
 	}
 	if !s.calledWrite {
-		t.Error("expected WriteBinaryWithMarshaller to be called")
+		t.Error("expected WriteBinaryWithMarshaler to be called")
 	}
 	if string(blob) != "hello" {
 		t.Errorf("expected hello, got %s", string(blob))
@@ -103,7 +103,7 @@ func TestCodegenContextInterface_FastPath(t *testing.T) {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 	if !s2.calledRead {
-		t.Error("expected ReadBinaryWithMarshaller to be called")
+		t.Error("expected ReadBinaryWithMarshaler to be called")
 	}
 	if s2.Val != "hello" {
 		t.Errorf("expected hello, got %s", s2.Val)
@@ -121,11 +121,11 @@ func (mockSerializer) Deserialize(r io.Reader, parentStruct reflect.Value, field
 }
 
 func TestGetSerializer(t *testing.T) {
-	var ms bst.Marshaller
+	var ms bst.Marshaler
 
-	// GetSerializer on empty Marshaller should return nil
+	// GetSerializer on empty Marshaler should return nil
 	if s := ms.GetSerializer("foo"); s != nil {
-		t.Error("expected nil for unregistered serializer on empty Marshaller")
+		t.Error("expected nil for unregistered serializer on empty Marshaler")
 	}
 
 	// Register and retrieve

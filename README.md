@@ -183,7 +183,7 @@ Output:
 +0x07(0x02) [2]byte Data = [170 187]
 ```
 
-> **Note**: If your structure contains custom serializers or encodings, use `marshaller.Inspect(&pkt, ...)` on your custom-configured `Marshaller` instance instead of the package-level `binarystruct.Inspect(&pkt, ...)` to ensure custom options are correctly recognized during inspection.
+> **Note**: If your structure contains custom serializers or encodings, use `marshaller.Inspect(&pkt, ...)` on your custom-configured `Marshaler` instance instead of the package-level `binarystruct.Inspect(&pkt, ...)` to ensure custom options are correctly recognized during inspection.
 
 ### Exporting Layout to JSON
 
@@ -226,7 +226,7 @@ Run `go generate ./...` to compile your serialization methods.
 
 ### How It Works
 * The generated code implements standard Go `encoding.BinaryMarshaler` and `encoding.BinaryUnmarshaler` interfaces, and high-performance streaming interfaces (`BinaryReader` / `BinaryWriter`).
-* If custom serializers or text encodings are present, context-aware interfaces (`MarshallerContextReader` / `MarshallerContextWriter`) are generated to automatically retrieve custom handlers from the `Marshaller` context at runtime.
+* If custom serializers or text encodings are present, context-aware interfaces (`MarshalerContextReader` / `MarshalerContextWriter`) are generated to automatically retrieve custom handlers from the `Marshaler` context at runtime.
 * The main `binarystruct.Marshal` and `binarystruct.Unmarshal` library calls automatically detect these generated methods and fast-path to executing them directly.
 
 ### Performance Comparison

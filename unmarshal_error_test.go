@@ -23,7 +23,7 @@ func TestUnmarshal_FailureOffset(t *testing.T) {
 	}
 
 	var p Packet
-	var ms Marshaller
+	var ms Marshaler
 
 	_, err := ms.Unmarshal(buf, BigEndian, &p)
 	if err == nil {

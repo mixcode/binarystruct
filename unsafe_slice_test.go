@@ -49,7 +49,7 @@ func TestUnsafeSliceFastPath(t *testing.T) {
 		Slice: []uint32{0x11223344, 0x55667788, 0x99aabbcc, 0xddeeff00},
 	}
 
-	var ms Marshaller
+	var ms Marshaler
 
 	// 1. Native / Little Endian (Direct copy)
 	blobLE, err := ms.Marshal(&in, LittleEndian)
@@ -100,7 +100,7 @@ func TestUnsafeSlicePaddingAndGrowing(t *testing.T) {
 		Slice: []uint16{0x1122, 0x3344},
 	}
 
-	var ms Marshaller
+	var ms Marshaler
 	blob, err := ms.Marshal(&in, LittleEndian)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)

@@ -55,12 +55,12 @@ For each specified type, the tool generates:
 - `MarshalBinary() ([]byte, error)` — implements `encoding.BinaryMarshaler`
 - `UnmarshalBinary(data []byte) error` — implements `encoding.BinaryUnmarshaler`
 
-If the struct uses features requiring a `Marshaller` context (text encodings via `encoding=`, custom serializers via `serializer=`), context-aware methods are also generated:
+If the struct uses features requiring a `Marshaler` context (text encodings via `encoding=`, custom serializers via `serializer=`), context-aware methods are also generated:
 
-- `WriteBinaryWithMarshaller(ms *Marshaller, w io.Writer, order ByteOrder) (int, error)`
-- `ReadBinaryWithMarshaller(ms *Marshaller, r io.Reader, order ByteOrder) (int, error)`
+- `WriteBinaryWithMarshaler(ms *Marshaler, w io.Writer, order ByteOrder) (int, error)`
+- `ReadBinaryWithMarshaler(ms *Marshaler, r io.Reader, order ByteOrder) (int, error)`
 
-These implement `MarshallerContextWriter` / `MarshallerContextReader`, enabling the binarystruct runtime to dispatch directly to the generated code when called through a `Marshaller`.
+These implement `MarshalerContextWriter` / `MarshalerContextReader`, enabling the binarystruct runtime to dispatch directly to the generated code when called through a `Marshaler`.
 
 ## Supported Tag Features
 

@@ -61,7 +61,7 @@ output, err := binarystruct.Marshal(&strc, binarystruct.BigEndian)
 * **多言語テキストエンコーディング**: `AddTextEncoding` で文字コード（例: `Shift-JIS`, `UTF-16`）をあらかじめ登録しておくことで、文字列フィールドに対して文字コード変換に対応し、フォールバック用のデフォルトエンコードを設定できます。
 * **フィールド単位のエンディアン制御**: フィールドごとにエンディアン（`big`, `little`, `inverse`（反転））を指定でき、ネストされた構造体へも再帰的に伝播します。
 * **単一値のシリアライズ**: 構造体でない変数単体に対しても、カスタムタグを指定して `MarshalAs` / `UnmarshalAs` で直接エンコード/デコードできます。
-* **カスタムシリアライザ**: `Serializer` インターフェースを実装して Marshaller に登録することで、複雑なデータ検証や動的マッピングを処理できます。
+* **カスタムシリアライザ**: `Serializer` インターフェースを実装して Marshaler に登録することで、複雑なデータ検証や動的マッピングを処理できます。
 * **構造体レイアウト検証ヘルパー**: 構造体のメモリ上のオフセット、サイズ、型、値を10進数/16進数/2進数でカスタマイズして可視化できる `Inspect` API を提供します。
 * **Safeモードへのフォールバック**: Google App Engineなどでの実行環境制限がある場合、`-tags safe_binarystruct` ビルドフラグで純粋なリフレクションによる標準Go実装に切り替え可能です。
 
@@ -184,7 +184,7 @@ fmt.Println(layout.Format(format))
 +0x07(0x02) [2]byte Data = [170 187]
 ```
 
-> **注意**: 構造体にカスタムシリアライザやエンコーディングを使用している場合は、パッケージレベルの `binarystruct.Inspect(&pkt, ...)` ではなく、設定済みの Marshaller インスタンスの `marshaller.Inspect(&pkt, ...)` を使用してください。これにより、検証時にカスタム設定が正しく認識されます。
+> **注意**: 構造体にカスタムシリアライザやエンコーディングを使用している場合は、パッケージレベルの `binarystruct.Inspect(&pkt, ...)` ではなく、設定済みの Marshaler インスタンスの `marshaller.Inspect(&pkt, ...)` を使用してください。これにより、検証時にカスタム設定が正しく認識されます。
 
 ### レイアウトのJSON出力
 
@@ -227,7 +227,7 @@ type Packet struct {
 
 ### 仕組みと特徴
 * 生成されたコードは、Go標準の `encoding.BinaryMarshaler` および `encoding.BinaryUnmarshaler` インタフェースの他、高パフォーマンスなストリーミングインタフェース（`BinaryReader` / `BinaryWriter`）を実装します。
-* カスタムシリアライザやテキストエンコーディングが指定されている場合、コンテキスト対応インタフェース（`MarshallerContextReader` / `MarshallerContextWriter`）が生成され、実行時に自動的に [Marshaller] コンテキストから適切なハンドラを取得します。
+* カスタムシリアライザやテキストエンコーディングが指定されている場合、コンテキスト対応インタフェース（`MarshalerContextReader` / `MarshalerContextWriter`）が生成され、実行時に自動的に [Marshaler] コンテキストから適切なハンドラを取得します。
 * パッケージレベルの `binarystruct.Marshal` / `binarystruct.Unmarshal` を使用している場合でも、対象オブジェクトが生成されたメソッドを実装している場合は、自動的にリフレクションをバイパスして生成されたメソッドを高速実行（ファストパス）します。
 
 ### 性能比較

@@ -24,7 +24,7 @@ func ExampleInspect() {
 	}
 
 	// Inspect the layout of the struct
-	layout, err := binarystruct.Inspect(pkt, binarystruct.BigEndian)
+	layout, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Inspect(pkt)
 	if err != nil {
 		panic(err)
 	}

@@ -23,6 +23,12 @@ var (
 
 	// validation constraint failed
 	ErrValidationError = errors.New("validation failed")
+
+	// no byte order is available to encode/decode a multi-byte value: the value
+	// declared none (no struct-level or per-field endian=) and the Marshaler has
+	// no Order. Declare it on the struct via a blank _ struct{} field tagged
+	// endian=, or use NewMarshalerOrder(order) / set Marshaler.Order.
+	errNoByteOrder = errors.New("no byte order: declare endian= on the struct or use NewMarshalerOrder(order)")
 )
 
 // DecodeError is returned when unmarshalling fails, describing the field name and byte offset of the failure.
@@ -41,23 +47,23 @@ func (e *DecodeError) Unwrap() error {
 }
 
 // Unmarshal decodes binary images into a Go value. The Go value must be a writable type such as a slice, a pointer or an interface.
-func Unmarshal(input []byte, order ByteOrder, govalue interface{}) (n int, err error) {
-	return NewMarshaler(order).Unmarshal(input, govalue)
+func Unmarshal(input []byte, govalue interface{}) (n int, err error) {
+	return NewMarshaler().Unmarshal(input, govalue)
 }
 
 // Read reads binary data from r and decode it into a Go value. The Go value must be a writable type such as a slice, a pointer or an interface.
-func Read(r io.Reader, order ByteOrder, data interface{}) (n int, err error) {
-	return NewMarshaler(order).Read(r, data)
+func Read(r io.Reader, data interface{}) (n int, err error) {
+	return NewMarshaler().Read(r, data)
 }
 
 // UnmarshalAs decodes binary images into a Go value using the supplied tag. The Go value must be a writable type such as a slice, a pointer or an interface.
-func UnmarshalAs(input []byte, tag string, order ByteOrder, govalue interface{}) (n int, err error) {
-	return NewMarshaler(order).UnmarshalAs(input, tag, govalue)
+func UnmarshalAs(input []byte, tag string, govalue interface{}) (n int, err error) {
+	return NewMarshaler().UnmarshalAs(input, tag, govalue)
 }
 
 // ReadAs reads binary data from r and decodes it into a Go value using the supplied tag. The Go value must be a writable type such as a slice, a pointer or an interface.
-func ReadAs(r io.Reader, tag string, order ByteOrder, data interface{}) (n int, err error) {
-	return NewMarshaler(order).ReadAs(r, tag, data)
+func ReadAs(r io.Reader, tag string, data interface{}) (n int, err error) {
+	return NewMarshaler().ReadAs(r, tag, data)
 }
 
 // Marshaler.Unmarshal() decodes binary data into a Go value using the Marshaler's byte order.
@@ -72,21 +78,15 @@ func (ms *Marshaler) UnmarshalAs(input []byte, tag string, govalue interface{}) 
 	return ms.ReadAs(buf, tag, govalue)
 }
 
-// Marshaler.Read() decodes a binary stream into a Go value using the Marshaler's byte order.
+// Marshaler.Read() decodes a binary stream into a Go value. The byte order comes
+// from the value's declaration, falling back to the Marshaler's Order field.
 func (ms *Marshaler) Read(r io.Reader, data interface{}) (n int, err error) {
-	order, err := ms.effectiveOrder()
-	if err != nil {
-		return 0, err
-	}
-	return ms.readValue(r, order, reflect.ValueOf(data))
+	return ms.readValue(r, ms.Order, reflect.ValueOf(data))
 }
 
-// Marshaler.ReadAs() decodes a binary stream using the supplied tag and the Marshaler's byte order.
+// Marshaler.ReadAs() decodes a binary stream using the supplied tag.
 func (ms *Marshaler) ReadAs(r io.Reader, tag string, data interface{}) (n int, err error) {
-	order, err := ms.effectiveOrder()
-	if err != nil {
-		return 0, err
-	}
+	order := ms.Order
 	v := reflect.ValueOf(data)
 	k := v.Type().Kind()
 	if k == reflect.Ptr || k == reflect.Interface {
@@ -778,6 +778,10 @@ func (ms *Marshaler) readString(r io.Reader, order ByteOrder, v reflect.Value, e
 
 // read bytes according to the byte order
 func readU64(r io.Reader, order ByteOrder, bytesize int) (u64 uint64, n int, err error) {
+	if bytesize > 1 && order == nil {
+		err = errNoByteOrder
+		return
+	}
 	var buf [8]byte
 	b := buf[:bytesize]
 	n, err = io.ReadFull(r, b)

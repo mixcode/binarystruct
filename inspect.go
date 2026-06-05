@@ -139,17 +139,26 @@ func (sl *StructLayout) Format(cfg LayoutFormat) string {
 	return sb.String()
 }
 
-// Inspect analyzes a struct instance and returns its exact binary layout.
-func Inspect(govalue interface{}, order ByteOrder) (*StructLayout, error) {
-	return NewMarshaler(order).Inspect(govalue)
+// endianString renders a byte order for the layout table, tolerating a nil order
+// (a value that declares none, inspected without a fallback order).
+func endianString(o ByteOrder) string {
+	if o == nil {
+		return "?"
+	}
+	return o.String()
 }
 
-// Inspect analyzes a struct instance using this Marshaler's byte order and custom configuration (e.g. codecs).
+// Inspect analyzes a struct instance and returns its exact binary layout. The
+// byte order comes from the struct's `endian=` declaration; for an undeclared
+// struct, use NewMarshalerOrder(order).Inspect.
+func Inspect(govalue interface{}) (*StructLayout, error) {
+	return NewMarshaler().Inspect(govalue)
+}
+
+// Inspect analyzes a struct instance using this Marshaler's configuration (e.g.
+// codecs) and byte order (the struct's declaration, falling back to ms.Order).
 func (ms *Marshaler) Inspect(govalue interface{}) (*StructLayout, error) {
-	order, err := ms.effectiveOrder()
-	if err != nil {
-		return nil, err
-	}
+	order := ms.Order
 	v := reflect.ValueOf(govalue)
 	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 		if v.IsNil() {
@@ -166,7 +175,7 @@ func (ms *Marshaler) Inspect(govalue interface{}) (*StructLayout, error) {
 	}
 
 	offset := 0
-	err = ms.inspectStruct(v, order, "", &sl.Fields, &offset)
+	err := ms.inspectStruct(v, order, "", &sl.Fields, &offset)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +219,7 @@ func (ms *Marshaler) inspectStruct(strc reflect.Value, order ByteOrder, prefix s
 				Offset:     *offset,
 				Size:       0,
 				Tag:        tagStr,
-				Endian:     resolveByteOrder(order, fMeta.endian).String(),
+				Endian:     endianString(resolveByteOrder(order, fMeta.endian)),
 				RawValue:   nil,
 				Details:    "omitted (subsequent to an omitted field)",
 			})
@@ -229,7 +238,7 @@ func (ms *Marshaler) inspectStruct(strc reflect.Value, order ByteOrder, prefix s
 					Offset:     *offset,
 					Size:       0,
 					Tag:        tagStr,
-					Endian:     resolveByteOrder(order, fMeta.endian).String(),
+					Endian:     endianString(resolveByteOrder(order, fMeta.endian)),
 					RawValue:   nil,
 					Details:    fmt.Sprintf("omitted (reached limit %d)", limit),
 				})
@@ -251,7 +260,7 @@ func (ms *Marshaler) inspectStruct(strc reflect.Value, order ByteOrder, prefix s
 				Offset:     *offset,
 				Size:       0,
 				Tag:        tagStr,
-				Endian:     resolveByteOrder(order, fMeta.endian).String(),
+				Endian:     endianString(resolveByteOrder(order, fMeta.endian)),
 				RawValue:   nil,
 				Details:    "omitted (pointer is nil)",
 			})
@@ -342,7 +351,7 @@ func (ms *Marshaler) inspectStruct(strc reflect.Value, order ByteOrder, prefix s
 			Offset:     *offset,
 			Size:       size,
 			Tag:        tagStr,
-			Endian:     fieldOrder.String(),
+			Endian:     endianString(fieldOrder),
 			RawValue:   fieldVal.Interface(),
 			Details:    details,
 		})

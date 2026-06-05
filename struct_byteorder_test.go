@@ -122,7 +122,7 @@ func TestStructLevelEndian_AppliedWins(t *testing.T) {
 	}
 	in := S{V: 0x0102}
 	// Marshal with LittleEndian — the struct's big-endian declaration must win.
-	blob, err := Marshal(&in, LittleEndian)
+	blob, err := NewMarshalerOrder(LittleEndian).Marshal(&in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestStructLevelEndian_AppliedWins(t *testing.T) {
 		t.Errorf("encode: got %x, want %x (struct big-endian must override the LittleEndian arg)", blob, want)
 	}
 	var out S
-	if _, err := Unmarshal(blob, LittleEndian, &out); err != nil {
+	if _, err := NewMarshalerOrder(LittleEndian).Unmarshal(blob, &out); err != nil {
 		t.Fatal(err)
 	}
 	if out.V != 0x0102 {
@@ -147,7 +147,7 @@ func TestStructLevelEndian_FieldOverridesStruct(t *testing.T) {
 		LE uint16   `binary:"uint16,endian=little"`
 	}
 	in := S{BE: 0x0102, LE: 0x0102}
-	blob, err := Marshal(&in, BigEndian)
+	blob, err := NewMarshalerOrder(BigEndian).Marshal(&in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestStructLevelEndian_EmbeddedApplied(t *testing.T) {
 		V uint16 `binary:"uint16"`
 	}
 	in := S{V: 0x0102}
-	blob, err := Marshal(&in, LittleEndian) // beBase declares big-endian → wins
+	blob, err := NewMarshalerOrder(LittleEndian).Marshal(&in) // beBase declares big-endian → wins
 	if err != nil {
 		t.Fatal(err)
 	}

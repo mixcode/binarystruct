@@ -36,7 +36,7 @@ func Example_nestedStructs() {
 	}
 
 	// Marshal with BigEndian
-	blob, err := binarystruct.Marshal(in, binarystruct.BigEndian)
+	blob, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(in)
 	if err != nil {
 		panic(err)
 	}
@@ -51,7 +51,7 @@ func Example_nestedStructs() {
 	fmt.Printf("Blob hex: %x\n", blob)
 
 	var restored MainHeader
-	_, err = binarystruct.Unmarshal(blob, binarystruct.BigEndian, &restored)
+	_, err = binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Unmarshal(blob, &restored)
 	if err != nil {
 		panic(err)
 	}
@@ -78,7 +78,7 @@ func Example_endianOverride() {
 	}
 
 	// Marshal structural data with LittleEndian
-	blob, err := binarystruct.Marshal(in, binarystruct.LittleEndian)
+	blob, err := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Marshal(in)
 	if err != nil {
 		panic(err)
 	}
@@ -88,7 +88,7 @@ func Example_endianOverride() {
 	fmt.Printf("Blob: %x\n", blob)
 
 	var restored Packet
-	_, err = binarystruct.Unmarshal(blob, binarystruct.LittleEndian, &restored)
+	_, err = binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Unmarshal(blob, &restored)
 	if err != nil {
 		panic(err)
 	}

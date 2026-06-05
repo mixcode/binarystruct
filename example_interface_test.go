@@ -30,7 +30,7 @@ type DynamicPayloadCodec struct{}
 
 func (s *DynamicPayloadCodec) Encode(w io.Writer, value interface{}, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (n int, err error) {
 	// Serialization simply delegates to standard Write
-	return binarystruct.Write(w, order, value)
+	return binarystruct.NewMarshalerOrder(order).Write(w, value)
 }
 
 func (s *DynamicPayloadCodec) Decode(r io.Reader, parentStruct reflect.Value, fieldIndex int, order binarystruct.ByteOrder) (value interface{}, n int, err error) {
@@ -52,7 +52,7 @@ func (s *DynamicPayloadCodec) Decode(r io.Reader, parentStruct reflect.Value, fi
 	}
 
 	// 3. Decode binary stream into the allocated structure
-	n, err = binarystruct.Read(r, order, payload)
+	n, err = binarystruct.NewMarshalerOrder(order).Read(r, payload)
 	if err != nil {
 		return nil, n, err
 	}

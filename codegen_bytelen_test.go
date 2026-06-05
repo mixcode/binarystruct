@@ -91,7 +91,7 @@ func TestNested(t *testing.T) {
 	if !bytes.Equal(blob, want) {
 		t.Fatalf("blob = % x\nwant  = % x", blob, want)
 	}
-	rt, err := binarystruct.Marshal(s, binarystruct.BigEndian)
+	rt, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(s)
 	if err != nil {
 		t.Fatalf("runtime Marshal: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestNestedVarLen(t *testing.T) {
 	if !bytes.Equal(blob, want) {
 		t.Fatalf("blob = % x\nwant  = % x", blob, want)
 	}
-	rt, err := binarystruct.Marshal(s, binarystruct.BigEndian)
+	rt, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(s)
 	if err != nil {
 		t.Fatalf("runtime Marshal: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestNestedArith(t *testing.T) {
 	if !bytes.Equal(blob, want) {
 		t.Fatalf("blob = % x\nwant  = % x", blob, want)
 	}
-	rt, err := binarystruct.Marshal(s, binarystruct.BigEndian)
+	rt, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(s)
 	if err != nil {
 		t.Fatalf("runtime Marshal: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestScalarArray(t *testing.T) {
 	if !bytes.Equal(blob, want) {
 		t.Fatalf("blob = % x\nwant  = % x", blob, want)
 	}
-	rt, err := binarystruct.Marshal(s, binarystruct.BigEndian)
+	rt, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(s)
 	if err != nil {
 		t.Fatalf("runtime Marshal: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestFixedString(t *testing.T) {
 	if !bytes.Equal(blob, want) {
 		t.Fatalf("blob = % x\nwant  = % x", blob, want)
 	}
-	rt, err := binarystruct.Marshal(s, binarystruct.BigEndian)
+	rt, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(s)
 	if err != nil {
 		t.Fatalf("runtime Marshal: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestPrefixTerm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalBinary: %v", err)
 	}
-	rt, err := binarystruct.Marshal(s, binarystruct.BigEndian)
+	rt, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(s)
 	if err != nil {
 		t.Fatalf("runtime Marshal: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestPointerStruct(t *testing.T) {
 	if !bytes.Equal(blob, want) {
 		t.Fatalf("blob = % x\nwant  = % x", blob, want)
 	}
-	rt, err := binarystruct.Marshal(s, binarystruct.BigEndian)
+	rt, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(s)
 	if err != nil {
 		t.Fatalf("runtime Marshal: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestStructArray(t *testing.T) {
 	if !bytes.Equal(blob, want) {
 		t.Fatalf("blob = % x\nwant  = % x", blob, want)
 	}
-	rt, err := binarystruct.Marshal(s, binarystruct.BigEndian)
+	rt, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(s)
 	if err != nil {
 		t.Fatalf("runtime Marshal: %v", err)
 	}

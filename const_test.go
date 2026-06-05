@@ -16,7 +16,7 @@ func TestConst_IntegerEmitAndValidate(t *testing.T) {
 		Body uint16 `binary:"uint16,endian=little"`
 	}
 	// Emit-only: leave Sig at zero; const must still write the magic.
-	blob, err := Marshal(&Hdr{Body: 0x1122}, BigEndian)
+	blob, err := NewMarshalerOrder(BigEndian).Marshal(&Hdr{Body: 0x1122})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestConst_IntegerEmitAndValidate(t *testing.T) {
 
 	// Decode validates: correct magic passes, the Go field is populated.
 	var out Hdr
-	if _, err := Unmarshal(blob, BigEndian, &out); err != nil {
+	if _, err := NewMarshalerOrder(BigEndian).Unmarshal(blob, &out); err != nil {
 		t.Fatalf("decode good: %v", err)
 	}
 	if out.Sig != 0x04034b50 {
@@ -38,7 +38,7 @@ func TestConst_IntegerEmitAndValidate(t *testing.T) {
 	bad := append([]byte{}, blob...)
 	bad[0] = 0xff
 	var out2 Hdr
-	if _, err := Unmarshal(bad, BigEndian, &out2); !errors.Is(err, ErrValidationError) {
+	if _, err := NewMarshalerOrder(BigEndian).Unmarshal(bad, &out2); !errors.Is(err, ErrValidationError) {
 		t.Fatalf("decode bad: want ErrValidationError, got %v", err)
 	}
 }
@@ -48,8 +48,8 @@ func TestConst_IntegerEndianSensitivity(t *testing.T) {
 	type H struct {
 		Sig uint32 `binary:"uint32,const=0x04034b50"`
 	}
-	le, _ := Marshal(&H{}, LittleEndian)
-	be, _ := Marshal(&H{}, BigEndian)
+	le, _ := NewMarshalerOrder(LittleEndian).Marshal(&H{})
+	be, _ := NewMarshalerOrder(BigEndian).Marshal(&H{})
 	if bytes.Equal(le, be) {
 		t.Fatalf("expected endian to affect integer const bytes")
 	}
@@ -68,7 +68,7 @@ func TestConst_ByteSequenceArray(t *testing.T) {
 		N     uint8   `binary:"uint8"`
 	}
 	for _, order := range []ByteOrder{LittleEndian, BigEndian} {
-		blob, err := Marshal(&H{N: 7}, order)
+		blob, err := NewMarshalerOrder(order).Marshal(&H{N: 7})
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
@@ -77,7 +77,7 @@ func TestConst_ByteSequenceArray(t *testing.T) {
 			t.Fatalf("order %v: got %x want %x", order, blob, want)
 		}
 		var out H
-		if _, err := Unmarshal(blob, order, &out); err != nil {
+		if _, err := NewMarshalerOrder(order).Unmarshal(blob, &out); err != nil {
 			t.Fatalf("decode good: %v", err)
 		}
 		if out.Magic != [4]byte{0x50, 0x4b, 0x03, 0x04} {
@@ -87,7 +87,7 @@ func TestConst_ByteSequenceArray(t *testing.T) {
 	// Wrong magic rejected.
 	bad := []byte{0x50, 0x4b, 0x03, 0xff, 0x07}
 	var out H
-	if _, err := Unmarshal(bad, LittleEndian, &out); !errors.Is(err, ErrValidationError) {
+	if _, err := NewMarshalerOrder(LittleEndian).Unmarshal(bad, &out); !errors.Is(err, ErrValidationError) {
 		t.Fatalf("decode bad: want ErrValidationError, got %v", err)
 	}
 }
@@ -96,7 +96,7 @@ func TestConst_StringSized(t *testing.T) {
 	type H struct {
 		Magic string `binary:"string(4),const=0x25504446"` // %PDF
 	}
-	blob, err := Marshal(&H{}, BigEndian)
+	blob, err := NewMarshalerOrder(BigEndian).Marshal(&H{})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestConst_StringSized(t *testing.T) {
 		t.Fatalf("got %q want %q", blob, "%PDF")
 	}
 	var out H
-	if _, err := Unmarshal(blob, BigEndian, &out); err != nil {
+	if _, err := NewMarshalerOrder(BigEndian).Unmarshal(blob, &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if out.Magic != "%PDF" {
@@ -140,7 +140,7 @@ func TestConst_MetadataErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := Marshal(c.val, BigEndian)
+			_, err := NewMarshalerOrder(BigEndian).Marshal(c.val)
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", c.want)
 			}

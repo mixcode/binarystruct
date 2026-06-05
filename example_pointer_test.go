@@ -37,7 +37,7 @@ func Example_pointers() {
 
 	// marshalling a struct to []byte
 	// pointers and interfaces are traversed when marshaled
-	data, err := binarystruct.Marshal(&src, binarystruct.LittleEndian)
+	data, err := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Marshal(&src)
 	if err != nil {
 		panic(err)
 	}
@@ -57,7 +57,7 @@ func Example_pointers() {
 		P3: nil,          // structs are also allocated
 		I:  &subStruct{}, // Interfaces must be pre-set to be unmarshaled
 	}
-	readsz, err := binarystruct.Unmarshal(data, binarystruct.LittleEndian, &restored)
+	readsz, err := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Unmarshal(data, &restored)
 	if err != nil {
 		panic(err)
 	}

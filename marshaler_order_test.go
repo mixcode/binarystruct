@@ -20,7 +20,7 @@ type orderProbe struct {
 func TestNewMarshaler_MatchesPackageFunc(t *testing.T) {
 	in := orderProbe{V: 0x0102}
 
-	be, err := NewMarshaler(BigEndian).Marshal(&in)
+	be, err := NewMarshalerOrder(BigEndian).Marshal(&in)
 	if err != nil {
 		t.Fatalf("NewMarshaler(BigEndian).Marshal: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestNewMarshaler_MatchesPackageFunc(t *testing.T) {
 		t.Errorf("big-endian: got %x, want %x", be, want)
 	}
 
-	le, err := NewMarshaler(LittleEndian).Marshal(&in)
+	le, err := NewMarshalerOrder(LittleEndian).Marshal(&in)
 	if err != nil {
 		t.Fatalf("NewMarshaler(LittleEndian).Marshal: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestNewMarshaler_MatchesPackageFunc(t *testing.T) {
 	}
 
 	// The order-free instance method must match the order-taking package func.
-	pkg, _ := Marshal(&in, BigEndian)
+	pkg, _ := NewMarshalerOrder(BigEndian).Marshal(&in)
 	if !bytes.Equal(be, pkg) {
 		t.Errorf("instance vs package mismatch: %x vs %x", be, pkg)
 	}
@@ -50,18 +50,18 @@ func TestAppend(t *testing.T) {
 	in := orderProbe{V: 0x0102}
 	prefix := []byte{0xaa, 0xbb}
 
-	got, err := Append(prefix, BigEndian, &in)
+	got, err := NewMarshalerOrder(BigEndian).Append(prefix, &in)
 	if err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	enc, _ := Marshal(&in, BigEndian)
+	enc, _ := NewMarshalerOrder(BigEndian).Marshal(&in)
 	want := append(append([]byte{}, prefix...), enc...)
 	if !bytes.Equal(got, want) {
 		t.Errorf("Append: got %x, want %x", got, want)
 	}
 
 	// A nil buffer yields exactly the encoded bytes.
-	got2, err := NewMarshaler(BigEndian).Append(nil, &in)
+	got2, err := NewMarshalerOrder(BigEndian).Append(nil, &in)
 	if err != nil {
 		t.Fatalf("Append(nil): %v", err)
 	}
@@ -70,9 +70,11 @@ func TestAppend(t *testing.T) {
 	}
 }
 
-// TestMarshaler_NoOrder_FailsLoud verifies that a zero-value Marshaler (Order
-// left nil, e.g. by skipping NewMarshaler) fails with a clear error on every
-// order-free entry point instead of panicking deep in a scalar write.
+// TestMarshaler_NoOrder_FailsLoud verifies that a Marshaler with no order (Order
+// nil) and a value that declares none fails with a clear error when encoding or
+// decoding a multi-byte value, instead of panicking on a nil ByteOrder. (Inspect
+// is diagnostic and tolerates a missing order — it renders the endian as "?" —
+// so it is intentionally not in this set.)
 func TestMarshaler_NoOrder_FailsLoud(t *testing.T) {
 	in := orderProbe{V: 1}
 	blob := []byte{0, 1}
@@ -89,7 +91,6 @@ func TestMarshaler_NoOrder_FailsLoud(t *testing.T) {
 			_, err := ms.Read(bytes.NewReader(blob), &out)
 			return err
 		}},
-		{"Inspect", func(ms *Marshaler) error { _, err := ms.Inspect(&in); return err }},
 	}
 	for _, c := range checks {
 		var ms Marshaler // Order is nil

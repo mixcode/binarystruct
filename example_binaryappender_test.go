@@ -32,15 +32,15 @@ type wirePixelLayout WirePixel
 
 // The byte order is baked in here, because the stdlib interfaces carry none.
 func (p *WirePixel) MarshalBinary() ([]byte, error) {
-	return binarystruct.Marshal((*wirePixelLayout)(p), binarystruct.BigEndian)
+	return binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal((*wirePixelLayout)(p))
 }
 
 func (p *WirePixel) AppendBinary(b []byte) ([]byte, error) {
-	return binarystruct.Append(b, binarystruct.BigEndian, (*wirePixelLayout)(p))
+	return binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Append(b, (*wirePixelLayout)(p))
 }
 
 func (p *WirePixel) UnmarshalBinary(data []byte) error {
-	_, err := binarystruct.Unmarshal(data, binarystruct.BigEndian, (*wirePixelLayout)(p))
+	_, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Unmarshal(data, (*wirePixelLayout)(p))
 	return err
 }
 

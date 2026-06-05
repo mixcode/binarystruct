@@ -38,13 +38,13 @@ func TestEOF(t *testing.T) {
 	var v1 s1
 
 	zeroData := make([]byte, 0)
-	_, e := bst.Unmarshal(zeroData, bst.LittleEndian, &v1)
+	_, e := bst.NewMarshalerOrder(bst.LittleEndian).Unmarshal(zeroData, &v1)
 	if e != io.EOF {
 		t.Fatal("EOF at the first element must return io.EOF")
 	}
 
 	oneData := make([]byte, 1)
-	_, e = bst.Unmarshal(oneData, bst.LittleEndian, &v1)
+	_, e = bst.NewMarshalerOrder(bst.LittleEndian).Unmarshal(oneData, &v1)
 	if e == io.EOF || errors.Unwrap(e) != io.EOF {
 		t.Fatal("EOF after the first element must return wrapped io.EOF")
 	}
@@ -58,11 +58,11 @@ func TestEOF(t *testing.T) {
 	}
 	var v2 s2
 
-	_, e = bst.Unmarshal(zeroData, bst.LittleEndian, &v2)
+	_, e = bst.NewMarshalerOrder(bst.LittleEndian).Unmarshal(zeroData, &v2)
 	if e != io.EOF {
 		t.Fatal("EOF at the non-ignoring first element must return io.EOF")
 	}
-	_, e = bst.Unmarshal(oneData, bst.LittleEndian, &v2)
+	_, e = bst.NewMarshalerOrder(bst.LittleEndian).Unmarshal(oneData, &v2)
 	if e == io.EOF || errors.Unwrap(e) != io.EOF {
 		t.Fatal("EOF after the first element must return wrapped io.EOF")
 	}
@@ -77,7 +77,7 @@ func TestStruct(test *testing.T) {
 	encodeCompare := func(data interface{}, desired []byte, endian bst.ByteOrder) {
 		res = nil
 		var e error
-		res, e = bst.Marshal(data, endian)
+		res, e = bst.NewMarshalerOrder(endian).Marshal(data)
 		if e != nil {
 			test.Error(e)
 			return
@@ -96,7 +96,7 @@ func TestStruct(test *testing.T) {
 
 	// dfunctions to compare decoded data
 	decodeCompare := func(data []byte, out interface{}, endian bst.ByteOrder, original interface{}) {
-		n, err := bst.Unmarshal(data, endian, out)
+		n, err := bst.NewMarshalerOrder(endian).Unmarshal(data, out)
 		if err != nil {
 			test.Error(err)
 			return
@@ -328,7 +328,7 @@ func TestStruct(test *testing.T) {
 		out := struct {
 			S string `binary:"string(5)"`
 		}{}
-		_, e := bst.Unmarshal(exp, bst.LittleEndian, &out)
+		_, e := bst.NewMarshalerOrder(bst.LittleEndian).Unmarshal(exp, &out)
 		if e != nil {
 			test.Error(e)
 			return
@@ -650,7 +650,7 @@ func ExampleMarshal() {
 		ValueUint16  int    `binary:"uint16"`  // marshaled to two bytes
 		ValueDword32 int    `binary:"dword"`   // marshaled to four bytes
 	}{"abcd", 1, 2, 3}
-	blob, err := bst.Marshal(strc, bst.BigEndian)
+	blob, err := bst.NewMarshalerOrder(bst.BigEndian).Marshal(strc)
 
 	if err != nil {
 		panic(err)
@@ -678,7 +678,7 @@ func ExampleUnmarshal() {
 		ValueUint16  int    `binary:"uint16"`  // marshaled to two bytes
 		ValueDword32 int    `binary:"dword"`   // marshaled to four bytes
 	}{}
-	readsz, err := bst.Unmarshal(blob, bst.BigEndian, &strc)
+	readsz, err := bst.NewMarshalerOrder(bst.BigEndian).Unmarshal(blob, &strc)
 
 	if err != nil {
 		panic(err)
@@ -693,7 +693,7 @@ func TestMarshalAs(t *testing.T) {
 	// 1. Scalar types
 	{
 		val := int(12345)
-		blob, err := bst.MarshalAs(val, "uint16", bst.LittleEndian)
+		blob, err := bst.NewMarshalerOrder(bst.LittleEndian).MarshalAs(val, "uint16")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -702,7 +702,7 @@ func TestMarshalAs(t *testing.T) {
 		}
 
 		var out int
-		n, err := bst.UnmarshalAs(blob, "uint16", bst.LittleEndian, &out)
+		n, err := bst.NewMarshalerOrder(bst.LittleEndian).UnmarshalAs(blob, "uint16", &out)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -717,7 +717,7 @@ func TestMarshalAs(t *testing.T) {
 	// 2. String/slice types
 	{
 		val := "hello"
-		blob, err := bst.MarshalAs(val, "[8]byte", bst.LittleEndian)
+		blob, err := bst.NewMarshalerOrder(bst.LittleEndian).MarshalAs(val, "[8]byte")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -727,7 +727,7 @@ func TestMarshalAs(t *testing.T) {
 		}
 
 		var out string
-		n, err := bst.UnmarshalAs(blob, "[8]byte", bst.LittleEndian, &out)
+		n, err := bst.NewMarshalerOrder(bst.LittleEndian).UnmarshalAs(blob, "[8]byte", &out)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -755,7 +755,7 @@ func TestEndianTags(t *testing.T) {
 
 	// Case A: Marshal with LittleEndian
 	{
-		blob, err := bst.Marshal(in, bst.LittleEndian)
+		blob, err := bst.NewMarshalerOrder(bst.LittleEndian).Marshal(in)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -772,7 +772,7 @@ func TestEndianTags(t *testing.T) {
 		}
 
 		var out structEndian
-		_, err = bst.Unmarshal(blob, bst.LittleEndian, &out)
+		_, err = bst.NewMarshalerOrder(bst.LittleEndian).Unmarshal(blob, &out)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -783,7 +783,7 @@ func TestEndianTags(t *testing.T) {
 
 	// Case B: Marshal with BigEndian
 	{
-		blob, err := bst.Marshal(in, bst.BigEndian)
+		blob, err := bst.NewMarshalerOrder(bst.BigEndian).Marshal(in)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -800,7 +800,7 @@ func TestEndianTags(t *testing.T) {
 		}
 
 		var out structEndian
-		_, err = bst.Unmarshal(blob, bst.BigEndian, &out)
+		_, err = bst.NewMarshalerOrder(bst.BigEndian).Unmarshal(blob, &out)
 		if err != nil {
 			t.Fatal(err)
 		}

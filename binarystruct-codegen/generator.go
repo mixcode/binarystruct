@@ -348,7 +348,7 @@ func (g *Generator) bytelenExpr(arg string, fi cgFieldInfo, fields map[string]cg
 		if isPtr {
 			// A nil pointer encodes to zero bytes; mirror the write's nil guard.
 			// Passing the pointer matches the write's binarystruct.Write(&*ptr).
-			pre = fmt.Sprintf("\tvar %s int\n\tif s.%s != nil {\n\t\t%s, err = binarystruct.Write(io.Discard, order, s.%s)\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n", tmp, arg, tmp, arg)
+			pre = fmt.Sprintf("\tvar %s int\n\tif s.%s != nil {\n\t\t%s, err = binarystruct.NewMarshalerOrder(order).Write(io.Discard, s.%s)\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n", tmp, arg, tmp, arg)
 			return tmp, pre, nil
 		}
 		if fi.isArray {
@@ -361,12 +361,12 @@ func (g *Generator) bytelenExpr(arg string, fi cgFieldInfo, fields map[string]cg
 			if sizeExpr == "" {
 				sizeExpr = fmt.Sprintf("len(s.%s)", arg)
 			}
-			pre = fmt.Sprintf("\tvar %s int\n\t{\n\t\tlimit := int(%s)\n\t\tfor i := 0; i < limit; i++ {\n\t\t\tvar mm int\n\t\t\tmm, err = binarystruct.Write(io.Discard, order, &s.%s[i])\n\t\t\tif err != nil {\n\t\t\t\treturn n, err\n\t\t\t}\n\t\t\t%s += mm\n\t\t}\n\t}\n", tmp, sizeExpr, arg, tmp)
+			pre = fmt.Sprintf("\tvar %s int\n\t{\n\t\tlimit := int(%s)\n\t\tfor i := 0; i < limit; i++ {\n\t\t\tvar mm int\n\t\t\tmm, err = binarystruct.NewMarshalerOrder(order).Write(io.Discard, &s.%s[i])\n\t\t\tif err != nil {\n\t\t\t\treturn n, err\n\t\t\t}\n\t\t\t%s += mm\n\t\t}\n\t}\n", tmp, sizeExpr, arg, tmp)
 			return tmp, pre, nil
 		}
 		// A single struct value, or a Go-native slice/array of structs written as
 		// a whole value: the write path encodes it with one binarystruct.Write.
-		pre = fmt.Sprintf("\tvar %s int\n\t%s, err = binarystruct.Write(io.Discard, order, &s.%s)\n\tif err != nil {\n\t\treturn n, err\n\t}\n", tmp, tmp, arg)
+		pre = fmt.Sprintf("\tvar %s int\n\t%s, err = binarystruct.NewMarshalerOrder(order).Write(io.Discard, &s.%s)\n\tif err != nil {\n\t\treturn n, err\n\t}\n", tmp, tmp, arg)
 		return tmp, pre, nil
 	}
 
@@ -949,7 +949,7 @@ func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binTyp
 		buf.WriteString("\t}\n")
 	default:
 		// Nested struct or fallback
-		fmt.Fprintf(buf, "\t{\n\t\tm, err = binarystruct.Write(w, order, &%s)\n", accessor)
+		fmt.Fprintf(buf, "\t{\n\t\tm, err = binarystruct.NewMarshalerOrder(order).Write(w, &%s)\n", accessor)
 		buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
 	}
 
@@ -1044,7 +1044,7 @@ func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType
 			buf.WriteString("\t}\n")
 		default:
 			// Nested struct
-			fmt.Fprintf(buf, "\t{\n\t\tm, err = binarystruct.Read(r, order, &%s)\n", accessor)
+			fmt.Fprintf(buf, "\t{\n\t\tm, err = binarystruct.NewMarshalerOrder(order).Read(r, &%s)\n", accessor)
 			buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
 		}
 	}

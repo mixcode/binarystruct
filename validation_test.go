@@ -16,7 +16,7 @@ func TestValidation_Range(t *testing.T) {
 	{
 		buf := []byte{0x00, 0x32} // 50
 		var p Packet
-		_, err := Unmarshal(buf, BigEndian, &p)
+		_, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatalf("unexpected error for valid value: %v", err)
 		}
@@ -29,7 +29,7 @@ func TestValidation_Range(t *testing.T) {
 	{
 		buf := []byte{0x00, 0xc8} // 200
 		var p Packet
-		_, err := Unmarshal(buf, BigEndian, &p)
+		_, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err == nil {
 			t.Fatal("expected validation error, got nil")
 		}
@@ -55,7 +55,7 @@ func TestValidation_OpenRange(t *testing.T) {
 	{
 		buf := []byte{10}
 		var p Packet
-		_, err := Unmarshal(buf, BigEndian, &p)
+		_, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -68,7 +68,7 @@ func TestValidation_OpenRange(t *testing.T) {
 	{
 		buf := []byte{0xf6} // -10
 		var p Packet
-		_, err := Unmarshal(buf, BigEndian, &p)
+		_, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -88,7 +88,7 @@ func TestValidation_RegexMatch(t *testing.T) {
 	{
 		buf := []byte("ABCD")
 		var p Packet
-		_, err := Unmarshal(buf, BigEndian, &p)
+		_, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -101,7 +101,7 @@ func TestValidation_RegexMatch(t *testing.T) {
 	{
 		buf := []byte("abcd")
 		var p Packet
-		_, err := Unmarshal(buf, BigEndian, &p)
+		_, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -121,7 +121,7 @@ func TestValidation_Array(t *testing.T) {
 	{
 		buf := []byte{1, 5, 10}
 		var p Packet
-		_, err := Unmarshal(buf, BigEndian, &p)
+		_, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -131,7 +131,7 @@ func TestValidation_Array(t *testing.T) {
 	{
 		buf := []byte{1, 15, 10}
 		var p Packet
-		_, err := Unmarshal(buf, BigEndian, &p)
+		_, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}

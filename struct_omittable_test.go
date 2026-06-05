@@ -17,7 +17,7 @@ func TestOmittable_EOF_Scalar(t *testing.T) {
 	{
 		buf := []byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x02}
 		var p Packet
-		n, err := Unmarshal(buf, BigEndian, &p)
+		n, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -33,7 +33,7 @@ func TestOmittable_EOF_Scalar(t *testing.T) {
 	{
 		buf := []byte{0x00, 0x01}
 		var p Packet
-		n, err := Unmarshal(buf, BigEndian, &p)
+		n, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,7 +49,7 @@ func TestOmittable_EOF_Scalar(t *testing.T) {
 	{
 		buf := []byte{0x00, 0x01, 0x00, 0x00}
 		var p Packet
-		_, err := Unmarshal(buf, BigEndian, &p)
+		_, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err == nil {
 			t.Fatal("expected error on partial read of optional field")
 		}
@@ -66,7 +66,7 @@ func TestOmittable_EOF_Pointer(t *testing.T) {
 	{
 		buf := []byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x02}
 		var p Packet
-		n, err := Unmarshal(buf, BigEndian, &p)
+		n, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +82,7 @@ func TestOmittable_EOF_Pointer(t *testing.T) {
 	{
 		buf := []byte{0x00, 0x01}
 		var p Packet
-		n, err := Unmarshal(buf, BigEndian, &p)
+		n, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +111,7 @@ func TestOmittable_Expression(t *testing.T) {
 			0x00, 0x00, 0x00, 0x02, // Extra1 (should be ignored)
 		}
 		var p Packet
-		n, err := Unmarshal(buf, BigEndian, &p)
+		n, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,7 +132,7 @@ func TestOmittable_Expression(t *testing.T) {
 			0x00, 0x00, 0x00, 0x03, // Extra2 (should be ignored)
 		}
 		var p Packet
-		n, err := Unmarshal(buf, BigEndian, &p)
+		n, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +153,7 @@ func TestOmittable_Expression(t *testing.T) {
 			0x00, 0x00, 0x00, 0x03, // Extra2
 		}
 		var p Packet
-		n, err := Unmarshal(buf, BigEndian, &p)
+		n, err := NewMarshalerOrder(BigEndian).Unmarshal(buf, &p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -183,7 +183,7 @@ func TestOmittable_Marshal(t *testing.T) {
 			Extra1:    extra1,
 			Extra2:    nil,
 		}
-		blob, err := Marshal(p, BigEndian)
+		blob, err := NewMarshalerOrder(BigEndian).Marshal(p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -206,7 +206,7 @@ func TestOmittable_Marshal(t *testing.T) {
 			Extra1:    2,
 			Extra2:    &extra2,
 		}
-		blob, err := Marshal(p, BigEndian)
+		blob, err := NewMarshalerOrder(BigEndian).Marshal(p)
 		if err != nil {
 			t.Fatal(err)
 		}

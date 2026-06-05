@@ -13,38 +13,44 @@ import (
 	"golang.org/x/text/encoding"
 )
 
-// Marshal encodes a go value into binary data and return it as []byte.
-func Marshal(govalue interface{}, order ByteOrder) (encoded []byte, err error) {
-	return NewMarshaler(order).Marshal(govalue)
+// Marshal encodes a go value into binary data and returns it as []byte. The byte
+// order comes from the value's struct-level `endian=` declaration; for a value
+// that declares none (e.g. a bare scalar), use NewMarshalerOrder(order).Marshal.
+func Marshal(govalue interface{}) (encoded []byte, err error) {
+	return NewMarshaler().Marshal(govalue)
 }
 
-// Write encodes a go value into binary stream and writes to w.
-func Write(w io.Writer, order ByteOrder, govalue interface{}) (n int, err error) {
-	return NewMarshaler(order).Write(w, govalue)
+// Write encodes a go value into a binary stream and writes it to w. See Marshal
+// on where the byte order comes from.
+func Write(w io.Writer, govalue interface{}) (n int, err error) {
+	return NewMarshaler().Write(w, govalue)
 }
 
 // MarshalAs encodes a go value into binary data using the supplied tag and returns it as []byte.
-func MarshalAs(govalue interface{}, tag string, order ByteOrder) (encoded []byte, err error) {
-	return NewMarshaler(order).MarshalAs(govalue, tag)
+func MarshalAs(govalue interface{}, tag string) (encoded []byte, err error) {
+	return NewMarshaler().MarshalAs(govalue, tag)
 }
 
 // WriteAs encodes a go value into a binary stream using the supplied tag and writes it to w.
-func WriteAs(w io.Writer, tag string, order ByteOrder, govalue interface{}) (n int, err error) {
-	return NewMarshaler(order).WriteAs(w, tag, govalue)
+func WriteAs(w io.Writer, tag string, govalue interface{}) (n int, err error) {
+	return NewMarshaler().WriteAs(w, tag, govalue)
 }
 
 // Append encodes a go value and appends the binary data to buf, returning the
 // extended slice (mirroring encoding/binary.Append and the encoding.BinaryAppender idiom).
-func Append(buf []byte, order ByteOrder, govalue interface{}) (out []byte, err error) {
-	return NewMarshaler(order).Append(buf, govalue)
+func Append(buf []byte, govalue interface{}) (out []byte, err error) {
+	return NewMarshaler().Append(buf, govalue)
 }
 
-// Marshaler is go-type to binary-type encoder/decoder with environmental values.
-// The byte order is part of the Marshaler: set it with NewMarshaler (or the Order
-// field) once, and the Marshal/Unmarshal/Write/Read methods no longer take an
-// order argument. A per-field `endian=` tag still overrides it for that field.
+// Marshaler is a go-type to binary-type encoder/decoder with environmental values.
+// The byte order is normally declared on the struct itself (a blank `_ struct{}`
+// field tagged `binary:"endian=…"`, or inherited from an embedded struct). Order
+// resolution, most specific first: a per-field `endian=` tag, then the struct's
+// declaration, then the Marshaler's Order field (set via NewMarshalerOrder), and
+// if none of those supply an order, encoding/decoding a multi-byte value fails
+// with a clear error.
 type Marshaler struct {
-	Order               ByteOrder                    // byte order used by the methods; set via NewMarshaler
+	Order               ByteOrder                    // fallback byte order for values that declare none; see NewMarshalerOrder
 	TextEncoding        map[string]encoding.Encoding // map[encodingName]Encoding
 	DefaultTextEncoding string                       // default text encoding name
 	codecs              map[string]Codec             // registered custom codecs
@@ -53,19 +59,18 @@ type Marshaler struct {
 	decoderCache map[string]*encoding.Decoder // cache of encoding.NewDecoder()
 }
 
-// NewMarshaler returns a Marshaler that encodes and decodes using the given byte
-// order. The order may be overridden per field with the `endian=` struct tag.
-func NewMarshaler(order ByteOrder) *Marshaler {
-	return &Marshaler{Order: order}
+// NewMarshaler returns a Marshaler with no fallback byte order: values must
+// declare their own order (struct-level `endian=` or a per-field override).
+// Use NewMarshalerOrder to supply a fallback order for undeclared values.
+func NewMarshaler() *Marshaler {
+	return &Marshaler{}
 }
 
-// effectiveOrder returns the Marshaler's byte order, or an error if none was set
-// (e.g. a zero-value Marshaler{} that skipped NewMarshaler and left Order nil).
-func (ms *Marshaler) effectiveOrder() (ByteOrder, error) {
-	if ms.Order == nil {
-		return nil, fmt.Errorf("binarystruct: no byte order set; use NewMarshaler(order) or set the Marshaler.Order field")
-	}
-	return ms.Order, nil
+// NewMarshalerOrder returns a Marshaler whose Order field supplies a fallback byte
+// order for values that declare none. A struct-level or per-field `endian=` still
+// takes precedence over it.
+func NewMarshalerOrder(order ByteOrder) *Marshaler {
+	return &Marshaler{Order: order}
 }
 
 // AddTextEncoding set a new text encoder to a Marshaler.
@@ -131,21 +136,15 @@ func (ms *Marshaler) MarshalAs(govalue interface{}, tag string) (encoded []byte,
 	return b.Bytes(), err
 }
 
-// Marshaler.Write() encodes a go value into a binary stream using the Marshaler's byte order.
+// Marshaler.Write() encodes a go value into a binary stream. The byte order comes
+// from the value's declaration, falling back to the Marshaler's Order field.
 func (ms *Marshaler) Write(w io.Writer, data interface{}) (n int, err error) {
-	order, err := ms.effectiveOrder()
-	if err != nil {
-		return 0, err
-	}
-	return ms.writeValue(w, order, reflect.ValueOf(data))
+	return ms.writeValue(w, ms.Order, reflect.ValueOf(data))
 }
 
-// Marshaler.WriteAs() encodes a go value into a binary stream using the supplied tag and the Marshaler's byte order.
+// Marshaler.WriteAs() encodes a go value into a binary stream using the supplied tag.
 func (ms *Marshaler) WriteAs(w io.Writer, tag string, data interface{}) (n int, err error) {
-	order, err := ms.effectiveOrder()
-	if err != nil {
-		return 0, err
-	}
+	order := ms.Order
 	v := reflect.ValueOf(data)
 	t := v.Type()
 	k := t.Kind()
@@ -880,6 +879,9 @@ func (ms *Marshaler) writeScalar(w io.Writer, order ByteOrder, v reflect.Value, 
 func writeU64(w io.Writer, order ByteOrder, u64 uint64, bytesize int) (n int, err error) {
 	var buf [8]byte
 	b := buf[:bytesize]
+	if bytesize > 1 && order == nil {
+		return 0, errNoByteOrder
+	}
 	switch bytesize {
 	case 1:
 		b[0] = byte(u64)

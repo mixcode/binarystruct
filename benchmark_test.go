@@ -26,7 +26,7 @@ func BenchmarkMarshal(b *testing.B) {
 	in := benchStruct{1, 2, 3, 4, -1, -2, -3, -4, 0.9, 1.1, "hello"}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := bst.Marshal(in, bst.LittleEndian)
+		_, err := bst.NewMarshalerOrder(bst.LittleEndian).Marshal(in)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -35,14 +35,14 @@ func BenchmarkMarshal(b *testing.B) {
 
 func BenchmarkUnmarshal(b *testing.B) {
 	in := benchStruct{1, 2, 3, 4, -1, -2, -3, -4, 0.9, 1.1, "hello"}
-	blob, err := bst.Marshal(in, bst.LittleEndian)
+	blob, err := bst.NewMarshalerOrder(bst.LittleEndian).Marshal(in)
 	if err != nil {
 		b.Fatal(err)
 	}
 	var out benchStruct
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := bst.Unmarshal(blob, bst.LittleEndian, &out)
+		_, err := bst.NewMarshalerOrder(bst.LittleEndian).Unmarshal(blob, &out)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -61,7 +61,7 @@ func BenchmarkMarshalSliceNative(b *testing.B) {
 	in := sliceBenchStruct{Data: data}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := bst.Marshal(in, bst.LittleEndian)
+		_, err := bst.NewMarshalerOrder(bst.LittleEndian).Marshal(in)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -76,7 +76,7 @@ func BenchmarkMarshalSliceSwap(b *testing.B) {
 	in := sliceBenchStruct{Data: data}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := bst.Marshal(in, bst.BigEndian)
+		_, err := bst.NewMarshalerOrder(bst.BigEndian).Marshal(in)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -89,14 +89,14 @@ func BenchmarkUnmarshalSliceNative(b *testing.B) {
 		data[i] = uint32(i)
 	}
 	in := sliceBenchStruct{Data: data}
-	blob, err := bst.Marshal(in, bst.LittleEndian)
+	blob, err := bst.NewMarshalerOrder(bst.LittleEndian).Marshal(in)
 	if err != nil {
 		b.Fatal(err)
 	}
 	var out sliceBenchStruct
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := bst.Unmarshal(blob, bst.LittleEndian, &out)
+		_, err := bst.NewMarshalerOrder(bst.LittleEndian).Unmarshal(blob, &out)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -109,14 +109,14 @@ func BenchmarkUnmarshalSliceSwap(b *testing.B) {
 		data[i] = uint32(i)
 	}
 	in := sliceBenchStruct{Data: data}
-	blob, err := bst.Marshal(in, bst.BigEndian)
+	blob, err := bst.NewMarshalerOrder(bst.BigEndian).Marshal(in)
 	if err != nil {
 		b.Fatal(err)
 	}
 	var out sliceBenchStruct
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := bst.Unmarshal(blob, bst.BigEndian, &out)
+		_, err := bst.NewMarshalerOrder(bst.BigEndian).Unmarshal(blob, &out)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -153,14 +153,14 @@ type benchValidationRegexStruct struct {
 
 func BenchmarkUnmarshal_RangeValidation(b *testing.B) {
 	in := benchValidationRangeStruct{1, 2, 3, 4, -1, -2, -3, -4, 0.9, 1.1, "hello"}
-	blob, err := bst.Marshal(in, bst.LittleEndian)
+	blob, err := bst.NewMarshalerOrder(bst.LittleEndian).Marshal(in)
 	if err != nil {
 		b.Fatal(err)
 	}
 	var out benchValidationRangeStruct
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := bst.Unmarshal(blob, bst.LittleEndian, &out)
+		_, err := bst.NewMarshalerOrder(bst.LittleEndian).Unmarshal(blob, &out)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -169,14 +169,14 @@ func BenchmarkUnmarshal_RangeValidation(b *testing.B) {
 
 func BenchmarkUnmarshal_RegexValidation(b *testing.B) {
 	in := benchValidationRegexStruct{1, 2, 3, 4, -1, -2, -3, -4, 0.9, 1.1, "hello"}
-	blob, err := bst.Marshal(in, bst.LittleEndian)
+	blob, err := bst.NewMarshalerOrder(bst.LittleEndian).Marshal(in)
 	if err != nil {
 		b.Fatal(err)
 	}
 	var out benchValidationRegexStruct
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := bst.Unmarshal(blob, bst.LittleEndian, &out)
+		_, err := bst.NewMarshalerOrder(bst.LittleEndian).Unmarshal(blob, &out)
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -73,7 +73,7 @@ func TestArrayPointer(t *testing.T) {
 	blob := []byte{0x03, 0x01, 0x02, 0x03}
 
 	var out st
-	sz, err := Unmarshal(blob, LittleEndian, &out)
+	sz, err := NewMarshalerOrder(LittleEndian).Unmarshal(blob, &out)
 	if err != nil {
 		t.Error(err)
 	}
@@ -92,7 +92,7 @@ func TestMiscStruct(t *testing.T) {
 	blob := []byte{0x01}
 
 	var out st
-	sz, err := Unmarshal(blob, LittleEndian, &out)
+	sz, err := NewMarshalerOrder(LittleEndian).Unmarshal(blob, &out)
 	if err != nil {
 		t.Error(err)
 	}

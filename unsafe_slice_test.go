@@ -50,13 +50,13 @@ func TestUnsafeSliceFastPath(t *testing.T) {
 	}
 
 	// 1. Native / Little Endian (Direct copy)
-	blobLE, err := Marshal(&in, LittleEndian)
+	blobLE, err := NewMarshalerOrder(LittleEndian).Marshal(&in)
 	if err != nil {
 		t.Fatalf("Marshal LE failed: %v", err)
 	}
 
 	var outLE testStruct
-	_, err = Unmarshal(blobLE, LittleEndian, &outLE)
+	_, err = NewMarshalerOrder(LittleEndian).Unmarshal(blobLE, &outLE)
 	if err != nil {
 		t.Fatalf("Unmarshal LE failed: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestUnsafeSliceFastPath(t *testing.T) {
 	}
 
 	// 2. Non-Native / Big Endian (Swap bytes)
-	blobBE, err := Marshal(&in, BigEndian)
+	blobBE, err := NewMarshalerOrder(BigEndian).Marshal(&in)
 	if err != nil {
 		t.Fatalf("Marshal BE failed: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestUnsafeSliceFastPath(t *testing.T) {
 	}
 
 	var outBE testStruct
-	_, err = Unmarshal(blobBE, BigEndian, &outBE)
+	_, err = NewMarshalerOrder(BigEndian).Unmarshal(blobBE, &outBE)
 	if err != nil {
 		t.Fatalf("Unmarshal BE failed: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestUnsafeSlicePaddingAndGrowing(t *testing.T) {
 		Slice: []uint16{0x1122, 0x3344},
 	}
 
-	blob, err := Marshal(&in, LittleEndian)
+	blob, err := NewMarshalerOrder(LittleEndian).Marshal(&in)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestUnsafeSlicePaddingAndGrowing(t *testing.T) {
 
 	// Unmarshal into a nil slice (must allocate 6 elements)
 	var outNil testStruct
-	_, err = Unmarshal(blob, LittleEndian, &outNil)
+	_, err = NewMarshalerOrder(LittleEndian).Unmarshal(blob, &outNil)
 	if err != nil {
 		t.Fatalf("Unmarshal into nil failed: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestUnsafeSlicePaddingAndGrowing(t *testing.T) {
 	outSmall := testStruct{
 		Slice: make([]uint16, 2),
 	}
-	_, err = Unmarshal(blob, LittleEndian, &outSmall)
+	_, err = NewMarshalerOrder(LittleEndian).Unmarshal(blob, &outSmall)
 	if err != nil {
 		t.Fatalf("Unmarshal into small slice failed: %v", err)
 	}

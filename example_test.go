@@ -79,7 +79,7 @@ func Example() {
 	}
 
 	// marshalling a struct to []byte
-	data, err := binarystruct.Marshal(&header, binarystruct.BigEndian)
+	data, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(&header)
 	if err != nil {
 		panic(err)
 	}
@@ -96,7 +96,7 @@ func Example() {
 
 	// unmarshalling []byte to struct
 	restored := Header{}
-	readsz, err := binarystruct.Unmarshal(data, binarystruct.BigEndian, &restored)
+	readsz, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Unmarshal(data, &restored)
 	if err != nil {
 		panic(err)
 	}
@@ -110,7 +110,7 @@ func Example() {
 
 func ExampleMarshalAs() {
 	val := int(12345)
-	blob, err := binarystruct.MarshalAs(val, "uint16", binarystruct.LittleEndian)
+	blob, err := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).MarshalAs(val, "uint16")
 	if err != nil {
 		panic(err)
 	}
@@ -123,7 +123,7 @@ func ExampleMarshalAs() {
 func ExampleUnmarshalAs() {
 	blob := []byte{0x39, 0x30}
 	var out int
-	_, err := binarystruct.UnmarshalAs(blob, "uint16", binarystruct.LittleEndian, &out)
+	_, err := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).UnmarshalAs(blob, "uint16", &out)
 	if err != nil {
 		panic(err)
 	}

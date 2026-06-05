@@ -21,7 +21,7 @@ func TestInspect_Basic(t *testing.T) {
 		Value:   0xabcdef00,
 	}
 
-	layout, err := Inspect(pkt, BigEndian)
+	layout, err := NewMarshalerOrder(BigEndian).Inspect(pkt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestInspect_Dynamic(t *testing.T) {
 		Data:       []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, // size: 4*2 + 6 = 14
 	}
 
-	layout, err := Inspect(pkt, BigEndian)
+	layout, err := NewMarshalerOrder(BigEndian).Inspect(pkt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestInspect_Omittable(t *testing.T) {
 		Extra1:    2,
 		Extra2:    &extra2Val,
 	}
-	layoutFull, err := Inspect(pktFull, BigEndian)
+	layoutFull, err := NewMarshalerOrder(BigEndian).Inspect(pktFull)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestInspect_Omittable(t *testing.T) {
 		Extra1:    2,
 		Extra2:    nil,
 	}
-	layoutOmitted, err := Inspect(pktOmitted, BigEndian)
+	layoutOmitted, err := NewMarshalerOrder(BigEndian).Inspect(pktOmitted)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestInspect_Nested(t *testing.T) {
 		},
 	}
 
-	layout, err := Inspect(pkt, BigEndian)
+	layout, err := NewMarshalerOrder(BigEndian).Inspect(pkt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestInspect_CustomFormatter(t *testing.T) {
 		ID uint16
 	}
 	s := Simple{ID: 255}
-	layout, _ := Inspect(s, BigEndian)
+	layout, _ := NewMarshalerOrder(BigEndian).Inspect(s)
 
 	// Decimal format
 	decStr := layout.String()
@@ -190,7 +190,7 @@ func TestInspect_ToJSON(t *testing.T) {
 		ID uint16 `binary:"uint16"`
 	}
 	s := Simple{ID: 255}
-	layout, err := Inspect(s, BigEndian)
+	layout, err := NewMarshalerOrder(BigEndian).Inspect(s)
 	if err != nil {
 		t.Fatal(err)
 	}

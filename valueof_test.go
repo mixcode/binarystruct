@@ -26,7 +26,7 @@ func TestValueof_RoundTrip(t *testing.T) {
 		Name:    []byte("hello.txt"),
 		Items:   []byte{1, 2, 3},
 	}
-	blob, err := Marshal(&in, BigEndian)
+	blob, err := NewMarshalerOrder(BigEndian).Marshal(&in)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestValueof_RoundTrip(t *testing.T) {
 	}
 
 	var out vfBasic
-	if _, err := Unmarshal(blob, BigEndian, &out); err != nil {
+	if _, err := NewMarshalerOrder(BigEndian).Unmarshal(blob, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 	if out.NameLen != 9 || out.Count != 4 || string(out.Name) != "hello.txt" || !bytes.Equal(out.Items, []byte{1, 2, 3}) {
@@ -57,7 +57,7 @@ type vfStr struct {
 
 func TestValueof_StringBytelen(t *testing.T) {
 	in := vfStr{Text: "binary"}
-	blob, err := Marshal(&in, LittleEndian)
+	blob, err := NewMarshalerOrder(LittleEndian).Marshal(&in)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestValueof_StringBytelen(t *testing.T) {
 		t.Fatalf("len prefix = % x, want 06 00", blob[:2])
 	}
 	var out vfStr
-	if _, err := Unmarshal(blob, LittleEndian, &out); err != nil {
+	if _, err := NewMarshalerOrder(LittleEndian).Unmarshal(blob, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 	if out.Len != 6 || out.Text != "binary" {
@@ -124,7 +124,7 @@ type vfNested struct {
 
 func TestValueof_NestedStructBytelen(t *testing.T) {
 	in := vfNested{Body: vfInner{A: 0x1122, B: 0x33}, Tail: 0x99}
-	blob, err := Marshal(&in, BigEndian)
+	blob, err := NewMarshalerOrder(BigEndian).Marshal(&in)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestValueof_NestedStructBytelen(t *testing.T) {
 		t.Fatalf("size = % x, want 00 03", blob[:2])
 	}
 	var out vfNested
-	if _, err := Unmarshal(blob, BigEndian, &out); err != nil {
+	if _, err := NewMarshalerOrder(BigEndian).Unmarshal(blob, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 	if out.Size != 3 || out.Body != in.Body || out.Tail != 0x99 {

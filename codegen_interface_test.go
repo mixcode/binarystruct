@@ -37,7 +37,7 @@ func (m *mockGeneratedStruct) ReadBinary(r io.Reader, order bst.ByteOrder) (int,
 
 func TestCodegenInterface_FastPath(t *testing.T) {
 	s := mockGeneratedStruct{Val: 0xDEADBEEF}
-	blob, err := bst.Marshal(&s, bst.BigEndian)
+	blob, err := bst.NewMarshalerOrder(bst.BigEndian).Marshal(&s)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestCodegenInterface_FastPath(t *testing.T) {
 	}
 
 	var s2 mockGeneratedStruct
-	_, err = bst.Unmarshal(blob, bst.BigEndian, &s2)
+	_, err = bst.NewMarshalerOrder(bst.BigEndian).Unmarshal(blob, &s2)
 	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
@@ -86,7 +86,7 @@ func (m *mockContextStruct) ReadBinaryWithMarshaler(ms *bst.Marshaler, r io.Read
 
 func TestCodegenContextInterface_FastPath(t *testing.T) {
 	s := mockContextStruct{Val: "hello"}
-	blob, err := bst.Marshal(&s, bst.BigEndian)
+	blob, err := bst.NewMarshalerOrder(bst.BigEndian).Marshal(&s)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestCodegenContextInterface_FastPath(t *testing.T) {
 	}
 
 	var s2 mockContextStruct
-	_, err = bst.Unmarshal(blob, bst.BigEndian, &s2)
+	_, err = bst.NewMarshalerOrder(bst.BigEndian).Unmarshal(blob, &s2)
 	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}

@@ -29,7 +29,7 @@ func Example_padding() {
 	}
 
 	// Marshal structural data
-	blob, err := binarystruct.Marshal(in, binarystruct.BigEndian)
+	blob, err := binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Marshal(in)
 	if err != nil {
 		panic(err)
 	}
@@ -42,7 +42,7 @@ func Example_padding() {
 
 	var restored PaddedPacket
 	restored.LocalOnly = "preserved value"
-	_, err = binarystruct.Unmarshal(blob, binarystruct.BigEndian, &restored)
+	_, err = binarystruct.NewMarshalerOrder(binarystruct.BigEndian).Unmarshal(blob, &restored)
 	if err != nil {
 		panic(err)
 	}

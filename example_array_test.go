@@ -57,7 +57,7 @@ func Example_arrays() {
 	}
 
 	// marshalling a struct to []byte
-	data, err := binarystruct.Marshal(&src, binarystruct.LittleEndian)
+	data, err := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Marshal(&src)
 	if err != nil {
 		panic(err)
 	}
@@ -74,7 +74,7 @@ func Example_arrays() {
 
 	// unmarshalling []byte to a struct
 	restored := exampleStruct{}
-	_, err = binarystruct.Unmarshal(data, binarystruct.LittleEndian, &restored)
+	_, err = binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Unmarshal(data, &restored)
 	if err != nil {
 		panic(err)
 	}

@@ -62,7 +62,10 @@ Configures the text encoding for string conversion.
 
 ### Struct-level options: the `_ struct{}` sentinel
 Declare struct-wide options once with a **blank `_ struct{}` sentinel field**. It
-encodes to **zero bytes** (it is metadata, not a field). Two options are supported:
+encodes to **zero bytes** (it is metadata, not a field). The type must be `struct{}`
+— a `_` field of any other type carrying these options is rejected (it would
+otherwise be encoded as data and the option silently dropped). Two options are
+supported:
 
 * **`endian=big|little`** — the struct's byte order, so `Marshal`/`Unmarshal`/… need
   no order argument.

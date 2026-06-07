@@ -110,6 +110,43 @@ func TestStructLevelEndian_UnknownOptionError(t *testing.T) {
 	}
 }
 
+// TestStructSentinel_BotchedNonStructErrors: a blank `_` field whose tag starts
+// with a struct-scope option but whose type is not struct{} is a mistake (the
+// option would be silently dropped and the field encoded as data), so it errors.
+func TestStructSentinel_BotchedNonStructErrors(t *testing.T) {
+	type badInt struct {
+		_ uint32 `binary:"endian=big"`
+		V uint16 `binary:"uint16"`
+	}
+	type badAny struct {
+		_ any    `binary:"endian=big"`
+		V uint16 `binary:"uint16"`
+	}
+	type badArr struct {
+		_ [0]byte `binary:"encoding=sjis"`
+		V uint16  `binary:"uint16"`
+	}
+	for _, v := range []any{badInt{}, badAny{}, badArr{}} {
+		if _, err := getStructMetadata(reflect.TypeOf(v)); err == nil {
+			t.Errorf("%T: expected an error for a non-struct{} `_` sentinel, got nil", v)
+		}
+	}
+}
+
+// TestStructSentinel_ReservedFieldOK: a blank `_ <type>` reserved/padding field
+// with a normal type tag is not a sentinel attempt and must be accepted.
+func TestStructSentinel_ReservedFieldOK(t *testing.T) {
+	type S struct {
+		_ struct{} `binary:"endian=big"`
+		A uint16   `binary:"uint16"`
+		_ uint32   `binary:"uint32"` // legitimate reserved field
+		B uint16   `binary:"uint16"`
+	}
+	if _, err := getStructMetadata(reflect.TypeOf(S{})); err != nil {
+		t.Fatalf("a reserved `_ uint32` field must be accepted, got: %v", err)
+	}
+}
+
 // --- F2: the declared order is actually applied by the runtime ---
 // (these run under both the default unsafe path and `-tags safe_binarystruct`.)
 

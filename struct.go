@@ -715,6 +715,21 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 			continue
 		}
 
+		// Guard a botched sentinel: a blank `_` field whose tag *starts* with a
+		// struct-scope option (endian=/encoding=) but whose type is not struct{}.
+		// It would otherwise silently drop the option (it isn't recognized as a
+		// sentinel) and encode the field as data — a silent wrong-output bug. A
+		// blank `_ <type>` reserved/padding field with a normal type tag (e.g.
+		// `binary:"uint32"`) is fine and is not flagged.
+		if field.Name == "_" {
+			if tagStr := field.Tag.Get(tagName); tagStr != "" {
+				first := strings.TrimSpace(strings.SplitN(tagStr, ",", 2)[0])
+				if strings.HasPrefix(first, "endian=") || strings.HasPrefix(first, "encoding=") {
+					return nil, fmt.Errorf("struct-level options (endian=/encoding=) must be on a blank `_ struct{}` field, but field %d is `_ %s`; change its type to struct{}", i, fType)
+				}
+			}
+		}
+
 		// A value-embedded struct that declares its own order propagates it to this
 		// struct (D4). Pointer-embedded structs are skipped to avoid metadata cycles
 		// (value embedding cannot form a cycle, so the recursion always terminates).

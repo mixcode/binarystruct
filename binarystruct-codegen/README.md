@@ -82,12 +82,20 @@ The binarystruct-codegen tool supports the full `binary:"..."` tag syntax includ
 - Custom codecs (`custom,codec=NAME`)
 - Nested structs
 
+**Custom `valueof` evaluators** (e.g. `valueof=CRC32(Type, Data)`, registered on a
+Marshaler with `AddValueOf`) are supported when **every referenced field is a
+byte-region field** — a `[]byte`/`[N]byte`, a raw `string`, or a fixed `string(N)`
+with a constant size and no text encoding; a transformed arg (text-encoded string,
+multibyte scalar, prefixed/terminated string, nested struct) fails generation. Like
+`codec=`, they need a non-nil Marshaler, so use `WriteBinaryWithMarshaler` (the
+no-arg `MarshalBinary` errors). Decode-time validation is opt-in via
+`-valueof-validate` (default off / encode-only).
+
 **Not supported by codegen** (generation errors with a clear message — use the
 runtime interpreter): struct-level `endian=inverse`, byte-order/encoding
 inheritance via embedding, a self-referential `valueof=bytelen(F)` where `F`
-is `string(thatVeryField)`, and **custom `valueof` evaluators** (registered on a
-Marshaler at run time, so they cannot be embedded in standalone code). Per-field
-`endian=inverse` and per-field `encoding=` are supported.
+is `string(thatVeryField)`, and a custom `valueof` evaluator over a non-byte-region
+arg. Per-field `endian=inverse` and per-field `encoding=` are supported.
 
 For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the parent project.
 

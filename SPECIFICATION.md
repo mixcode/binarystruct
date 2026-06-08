@@ -81,7 +81,7 @@ Examples: `valueof=bytelen(Name)`, `valueof=bytelen(Payload)+2`, `valueof=count(
 | Path | Mapping |
 | :--- | :--- |
 | **Runtime** (`marshal.go`, `unsafe_io.go`) | Before writing the field, if `valueofExpr` is set, evaluate it with the context-carrying value evaluator (Marshaler + byte order + struct metadata) and write the resulting integer in place of the field value. The unsafe path routes `valueof` fields through the reflection writer (rare fields; negligible cost). A custom evaluator is dispatched to its registered `ValueOfFunc` instead (`evalCustomValueof`), and is re-run on decode for validation (`validateCustomValueofs`, a post-decode pass in both `readStruct` and `unsafeReadStruct`). |
-| **Codegen** (`generator.go`) | Emit the value computation inline before the integer write. `count(F)` → `len(s.F)`. `bytelen(F)` is resolved for nearly every field shape: byte slices/arrays and raw `string` (`len`), fixed `string(N)` buffers (the buffer width), all length-prefixed/null-terminated string variants (`prefix + content + terminator`), text-encoded strings (an `ms`-guarded `EncodeText` measurement matching the encode path), fixed-width scalars and scalar arrays (`width × count`), and nested structs / tag-counted arrays-of-structs / pointer-to-struct (a byte-exact runtime measurement via `binarystruct.Write(io.Discard, …)` that mirrors the encode path; a `nil` pointer contributes `0`). Still rejected at generation time (`bytelenExpr` returns an error → use the runtime interpreter): `bytelen` of a **pointer-element struct array** or a **pointer scalar field**, a `valueof` expression that references another `valueof` field, and any **custom evaluator** (registered at run time, so it cannot be embedded in standalone code). |
+| **Codegen** (`generator.go`) | Emit the value computation inline before the integer write. `count(F)` → `len(s.F)`. `bytelen(F)` is resolved for nearly every field shape: byte slices/arrays and raw `string` (`len`), fixed `string(N)` buffers (the buffer width), all length-prefixed/null-terminated string variants (`prefix + content + terminator`), text-encoded strings (an `ms`-guarded `EncodeText` measurement matching the encode path), fixed-width scalars and scalar arrays (`width × count`), and nested structs / tag-counted arrays-of-structs / pointer-to-struct (a byte-exact runtime measurement via `binarystruct.Write(io.Discard, …)` that mirrors the encode path; a `nil` pointer contributes `0`). Still rejected at generation time (`bytelenExpr` returns an error → use the runtime interpreter): `bytelen` of a **pointer-element struct array** or a **pointer scalar field**, and a `valueof` expression that references another `valueof` field. A **custom evaluator** is supported when every referenced field is a *byte-region* field (see below); a transformed arg fails generation. |
 
 #### Custom valueof evaluators (checksums, CRCs)
 
@@ -135,8 +135,20 @@ type Chunk struct {
   stays streaming. The cost is a possible re-encode of covered fields (CPU, not
   RAM); a raw-bytes fast path and a capturing writer are possible future
   optimizations.
-- **Codegen does not support custom evaluators** (they are registered at run
-  time) — generation fails loud and the struct must use the runtime interpreter.
+- **Codegen support (byte-region args only).** The static generator supports a
+  custom evaluator when **every referenced field is a byte-region field** — a
+  `[]byte`/`[N]byte`, a raw `string`, or a fixed `string(N)` with a constant size
+  and no text encoding — because those have no byte-order/encoding transform, so
+  the generated `Args[].Bytes` match the runtime exactly. A transformed arg
+  (text-encoded string, multibyte scalar, prefixed/terminated string, nested
+  struct) **fails generation** with a clear message → use the runtime interpreter.
+  Generated encode requires a non-nil Marshaler (like `codec=`; the no-arg
+  `MarshalBinary` passes `nil` and errors at run time — call
+  `WriteBinaryWithMarshaler` with a Marshaler that has the evaluator registered).
+  Decode-time validation is **opt-in** via the `-valueof-validate` codegen flag
+  (default off / encode-only); when off, generated decode reads the field as a
+  plain scalar and does **not** verify it (a divergence from the runtime, which
+  always validates).
 
 **Validation (at `getStructMetadata`):** a function name other than `bytelen`/`count`
 marks a custom evaluator; the whole expression must then be a single such call,

@@ -50,6 +50,7 @@ var (
 	includeTests = flag.Bool("tests", false, "include test files (*_test.go) when parsing the package")
 	jsonOutput   = flag.Bool("json", false, "generate JSON representation of the struct layout instead of Go source code")
 	endian       = flag.String("endian", "", "fallback byte order `big|little` baked into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods; optional when the struct declares its own order via a blank _ struct{} endian= field")
+	valueofValid = flag.Bool("valueof-validate", false, "for custom valueof evaluators (e.g. valueof=CRC32(...)), also emit decode-time validation that recomputes the value and errors on mismatch; default off (encode-only, like the field is read as a plain scalar)")
 )
 
 // orderLiteral maps the -endian flag to the binarystruct byte-order expression
@@ -84,9 +85,10 @@ Arguments:
 Generated code implements encoding.BinaryMarshaler and encoding.BinaryUnmarshaler
 interfaces, producing optimized static methods that bypass runtime reflection.
 
-If the struct uses runtime-dependent features (text encodings, custom codecs),
-context-aware methods (WriteBinaryWithMarshaler/ReadBinaryWithMarshaler) are also
-generated, allowing the Marshaler to pass through encodings and codecs.
+If the struct uses runtime-dependent features (text encodings, custom codecs, or
+custom valueof evaluators such as valueof=CRC32(...)), context-aware methods
+(WriteBinaryWithMarshaler/ReadBinaryWithMarshaler) are also generated, allowing the
+Marshaler to pass through encodings, codecs, and registered valueof evaluators.
 
 See https://github.com/mixcode/binarystruct for the full library documentation.
 `)
@@ -134,9 +136,10 @@ func main() {
 	}
 
 	g := Generator{
-		Dir:          absDir,
-		Types:        types,
-		IncludeTests: *includeTests,
+		Dir:             absDir,
+		Types:           types,
+		IncludeTests:    *includeTests,
+		ValueofValidate: *valueofValid,
 	}
 
 	if *jsonOutput {

@@ -322,7 +322,7 @@ blob, _ := ms.Marshal(&Chunk{Type: "IHDR", Data: payload})
 * **Validated on decode.** Unlike the encode-only built-ins, a custom evaluator also runs on decode (over the decoded fields) and the result is compared to the value read; a mismatch is a `DecodeError` wrapping `ErrValidationError`. Validation is a post-decode pass, so a checksum may reference fields declared after it.
 * **Must be the whole expression** — `valueof=CRC32(Type, Data)`; it cannot be mixed with arithmetic in this version.
 
-> **Codegen note:** the static code generator resolves `count(F)` and `bytelen(F)` for nearly every field shape (scalars and scalar arrays, byte slices/arrays, all string variants including text-encoded, nested structs, tag-counted arrays of structs, and pointer-to-struct). It does **not** support **custom valueof evaluators** (registered at run time) — those, like `endian=inverse` and embedding-inherited order, fail generation with a clear message; use the runtime interpreter for those structs.
+> **Codegen note:** the static code generator resolves `count(F)` and `bytelen(F)` for nearly every field shape (scalars and scalar arrays, byte slices/arrays, all string variants including text-encoded, nested structs, tag-counted arrays of structs, and pointer-to-struct). It also supports **custom valueof evaluators** when every referenced field is a *byte-region* field (`[]byte`/`[N]byte`, raw `string`, or fixed `string(N)` with a constant size and no text encoding); a transformed arg fails generation (use the runtime). Generated code needs a non-nil Marshaler (call `WriteBinaryWithMarshaler`), and decode-time validation is opt-in via the `-valueof-validate` flag (default off / encode-only).
 
 ---
 

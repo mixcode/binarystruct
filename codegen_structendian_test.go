@@ -70,6 +70,32 @@ func TestCodegen_StructEncoding_Applied(t *testing.T) {
 	genBytelenCase(t, "p", typesSrc, "Msg", testSrc)
 }
 
+// TestCodegen_Validation_DecodeError verifies generated const/range validation
+// failures surface as a *binarystruct.DecodeError with the field name and the
+// field's START byte offset — matching the runtime interpreter (errors.As and
+// the Offset/Field accessors behave identically across paths).
+func TestCodegen_Validation_DecodeError(t *testing.T) {
+	typesSrc := "type Rec struct {\n" +
+		"\t_   struct{} `binary:\"endian=big\"`\n" +
+		"\tSig [4]byte  `binary:\"[4]byte,const=0x89504e47\"`\n" +
+		"\tN   uint16   `binary:\"uint16,range=1..100\"`\n}\n"
+	testSrc := "import (\n\t\"errors\"\n\t\"testing\"\n\n\t\"github.com/mixcode/binarystruct\"\n)\n\n" +
+		"func TestDecErr(t *testing.T) {\n" +
+		"\tvar de *binarystruct.DecodeError\n" +
+		"\t// wrong magic → const mismatch at the Sig field (offset 0)\n" +
+		"\tvar r Rec\n" +
+		"\terr := r.UnmarshalBinary([]byte{0, 0, 0, 0, 0, 5})\n" +
+		"\tif !errors.As(err, &de) || !errors.Is(err, binarystruct.ErrValidationError) {\n\t\tt.Fatalf(\"const: want *DecodeError wrapping ErrValidationError, got %v\", err)\n\t}\n" +
+		"\tif de.Field != \"Sig\" || de.Offset != 0 {\n\t\tt.Errorf(\"const: Field=%q Offset=%d, want Sig/0\", de.Field, de.Offset)\n\t}\n" +
+		"\t// good magic, out-of-range N → range error at N (offset 4)\n" +
+		"\tvar r2 Rec\n" +
+		"\terr = r2.UnmarshalBinary([]byte{0x89, 0x50, 0x4e, 0x47, 0, 0})\n" +
+		"\tif !errors.As(err, &de) || !errors.Is(err, binarystruct.ErrValidationError) {\n\t\tt.Fatalf(\"range: want *DecodeError wrapping ErrValidationError, got %v\", err)\n\t}\n" +
+		"\tif de.Field != \"N\" || de.Offset != 4 {\n\t\tt.Errorf(\"range: Field=%q Offset=%d, want N/4\", de.Field, de.Offset)\n\t}\n" +
+		"}\n"
+	genBytelenCase(t, "p", typesSrc, "Rec", testSrc)
+}
+
 // TestCodegen_StructEndian_NoFlag generates code for a struct that declares its
 // byte order via the `_` sentinel WITHOUT passing -endian, and verifies the
 // generated methods bake that order — including that binarystruct.Marshal(v),

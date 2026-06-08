@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   encode-only); when on, a mismatch returns a `*DecodeError` wrapping
   `ErrValidationError` (offset + field), matching the runtime interpreter.
 
+### Fixed
+- **Codegen validation errors now match the runtime's type.** Generated
+  `const`/`range`/`match` and custom-`valueof` decode-validation failures return a
+  `*DecodeError{Offset, Field}` wrapping `ErrValidationError` (previously a plain
+  `fmt.Errorf`), so `errors.As(&DecodeError)` and the `Offset`/`Field` accessors
+  behave the same whether a value is decoded by the interpreter or by generated
+  code. Inline checks report the field's start offset, as the runtime does.
+
 ### Limitations
 - Codegen rejects a custom `valueof` evaluator whose referenced arg is neither a
   byte region nor a fixed-width integer scalar (text-encoded or prefixed/terminated

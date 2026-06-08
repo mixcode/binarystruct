@@ -1043,15 +1043,28 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 				}
 			}
 
+			// Capture the field's start offset before reading it, so a validation
+			// failure reports the same byte offset as the runtime interpreter
+			// (which records n before advancing past the field). Only emitted for
+			// fields that actually validate, to avoid an unused variable.
+			offExpr := "n"
+			_, hasConst := parsedTag.options["const"]
+			_, hasRange := parsedTag.options["range"]
+			_, hasMatch := parsedTag.options["match"]
+			if hasConst || hasRange || hasMatch {
+				offExpr = "voff" + fieldName
+				fmt.Fprintf(buf, "\t%s := n\n", offExpr)
+			}
+
 			if parsedTag.isArray {
-				g.generateArrayRead(buf, fieldName, goType, binType, parsedTag, typeName)
+				g.generateArrayRead(buf, fieldName, goType, binType, parsedTag, typeName, offExpr)
 			} else {
-				g.generateFieldRead(buf, "s."+fieldName, goType, binType, parsedTag, typeName, fieldName)
+				g.generateFieldRead(buf, "s."+fieldName, goType, binType, parsedTag, typeName, fieldName, offExpr)
 			}
 
 			// const: validate the field equals its fixed value after reading.
 			if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
-				if err := g.generateConstValidate(buf, fieldName, goType, binType, cexpr); err != nil {
+				if err := g.generateConstValidate(buf, fieldName, goType, binType, cexpr, offExpr); err != nil {
 					return fmt.Errorf("field %s: %w", fieldName, err)
 				}
 			}
@@ -1149,9 +1162,19 @@ func (g *Generator) generateConstWrite(buf *bytes.Buffer, goType, binType string
 	return g.generateFieldWrite(buf, "("+cexpr+")", goType, binType, parsedTag, fields)
 }
 
+// cgValidationErr formats a `return n, &binarystruct.DecodeError{...}` statement
+// that mirrors the runtime interpreter's validation failures: a *DecodeError with
+// the field's start offset (offExpr) and field name, wrapping an inner error that
+// itself wraps ErrValidationError. inner is the Go expression for that inner error
+// (e.g. `fmt.Errorf("const mismatch: %w", binarystruct.ErrValidationError)`).
+func cgValidationErr(offExpr, fieldName, inner string) string {
+	return fmt.Sprintf("\t\treturn n, &binarystruct.DecodeError{Offset: %s, Field: %q, Err: %s}\n", offExpr, fieldName, inner)
+}
+
 // generateConstValidate emits a post-read check that the field equals its const.
-func (g *Generator) generateConstValidate(buf *bytes.Buffer, fieldName, goType, binType, cexpr string) error {
+func (g *Generator) generateConstValidate(buf *bytes.Buffer, fieldName, goType, binType, cexpr, offExpr string) error {
 	accessor := "s." + fieldName
+	inner := `fmt.Errorf("const mismatch: %w", binarystruct.ErrValidationError)`
 	if isCgBytesConst(goType, binType) {
 		b, err := parseCgConstBytes(cexpr)
 		if err != nil {
@@ -1165,11 +1188,13 @@ func (g *Generator) generateConstValidate(buf *bytes.Buffer, fieldName, goType, 
 			got = accessor + "[:]"
 		}
 		fmt.Fprintf(buf, "\tif !bytes.Equal(%s, %s) {\n", got, goByteSliceLiteral(b))
-		fmt.Fprintf(buf, "\t\treturn n, fmt.Errorf(\"field %s: const mismatch: %%w\", binarystruct.ErrValidationError)\n\t}\n", fieldName)
+		buf.WriteString(cgValidationErr(offExpr, fieldName, inner))
+		buf.WriteString("\t}\n")
 		return nil
 	}
 	fmt.Fprintf(buf, "\tif %s != (%s) {\n", accessor, cexpr)
-	fmt.Fprintf(buf, "\t\treturn n, fmt.Errorf(\"field %s: const mismatch: %%w\", binarystruct.ErrValidationError)\n\t}\n", fieldName)
+	buf.WriteString(cgValidationErr(offExpr, fieldName, inner))
+	buf.WriteString("\t}\n")
 	return nil
 }
 
@@ -1354,7 +1379,7 @@ func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binTyp
 	return nil
 }
 
-func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType string, parsedTag parsedFieldTag, typeName, fieldName string) {
+func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType string, parsedTag parsedFieldTag, typeName, fieldName, offExpr string) {
 	isPtr := strings.HasPrefix(goType, "*")
 	accessor := target
 	if isPtr {
@@ -1452,11 +1477,13 @@ func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType
 			maxStr := strings.TrimSpace(bounds[1])
 			if minStr != "" {
 				fmt.Fprintf(buf, "\tif %s < %s {\n", accessor, minStr)
-				fmt.Fprintf(buf, "\t\treturn n, fmt.Errorf(\"field %s: value %%v is out of range [%s..%s]: %%w\", %s, binarystruct.ErrValidationError)\n\t}\n", fieldName, minStr, maxStr, accessor)
+				buf.WriteString(cgValidationErr(offExpr, fieldName, fmt.Sprintf("fmt.Errorf(\"value %%v is out of range [%s..%s]: %%w\", %s, binarystruct.ErrValidationError)", minStr, maxStr, accessor)))
+				buf.WriteString("\t}\n")
 			}
 			if maxStr != "" {
 				fmt.Fprintf(buf, "\tif %s > %s {\n", accessor, maxStr)
-				fmt.Fprintf(buf, "\t\treturn n, fmt.Errorf(\"field %s: value %%v is out of range [%s..%s]: %%w\", %s, binarystruct.ErrValidationError)\n\t}\n", fieldName, minStr, maxStr, accessor)
+				buf.WriteString(cgValidationErr(offExpr, fieldName, fmt.Sprintf("fmt.Errorf(\"value %%v is out of range [%s..%s]: %%w\", %s, binarystruct.ErrValidationError)", minStr, maxStr, accessor)))
+				buf.WriteString("\t}\n")
 			}
 		}
 	}
@@ -1464,7 +1491,8 @@ func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType
 	// Apply regex match check
 	if _, ok := parsedTag.options["match"]; ok {
 		fmt.Fprintf(buf, "\tif !regex_%s_%s.MatchString(%s) {\n", typeName, fieldName, accessor)
-		fmt.Fprintf(buf, "\t\treturn n, fmt.Errorf(\"field %s: value %%q does not match pattern: %%w\", %s, binarystruct.ErrValidationError)\n\t}\n", fieldName, accessor)
+		buf.WriteString(cgValidationErr(offExpr, fieldName, fmt.Sprintf("fmt.Errorf(\"value %%q does not match pattern: %%w\", %s, binarystruct.ErrValidationError)", accessor)))
+		buf.WriteString("\t}\n")
 	}
 
 	if isPtr {
@@ -1511,7 +1539,7 @@ func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, bin
 	return nil
 }
 
-func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag, typeName string) {
+func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag, typeName, offExpr string) {
 	sizeExpr := translateExpression(parsedTag.arrayLenExpr)
 	if sizeExpr == "" {
 		buf.WriteString("\treturn n, errors.New(\"unknown array size expression\")\n")
@@ -1541,7 +1569,7 @@ func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binT
 		}
 		elemType := goType[strings.IndexByte(goType, ']')+1:]
 		fmt.Fprintf(buf, "\tfor i := 0; i < len(s.%s); i++ {\n", fieldName)
-		g.generateFieldRead(buf, fmt.Sprintf("s.%s[i]", fieldName), elemType, binType, parsedTag, typeName, fmt.Sprintf("%s[i]", fieldName))
+		g.generateFieldRead(buf, fmt.Sprintf("s.%s[i]", fieldName), elemType, binType, parsedTag, typeName, fmt.Sprintf("%s[i]", fieldName), offExpr)
 		buf.WriteString("\t}\n")
 		return
 	}
@@ -1558,7 +1586,7 @@ func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binT
 	}
 
 	buf.WriteString("\t\tfor i := 0; i < readLen; i++ {\n")
-	g.generateFieldRead(buf, fmt.Sprintf("s.%s[i]", fieldName), strings.TrimPrefix(goType, "[]"), binType, parsedTag, typeName, fmt.Sprintf("%s[i]", fieldName))
+	g.generateFieldRead(buf, fmt.Sprintf("s.%s[i]", fieldName), strings.TrimPrefix(goType, "[]"), binType, parsedTag, typeName, fmt.Sprintf("%s[i]", fieldName), offExpr)
 	buf.WriteString("\t\t}\n\t}\n")
 }
 

@@ -191,7 +191,7 @@ fmt.Println(layout.Format(format))
 +0x07(0x02) [2]byte Data = [170 187]
 ```
 
-> **注意**: 構造体にカスタムコーデックやエンコーディングを使用している場合は、パッケージレベルの `binarystruct.Inspect(&pkt, order)` ではなく、設定済みの Marshaler インスタンス（バイトオーダーは `NewMarshaler` で構築時に設定）の `ms.Inspect(&pkt)` を使用してください。これにより、検証時にカスタム設定が正しく認識されます。
+> **注意**: 構造体にカスタムコーデックやエンコーディングを使用している場合は、パッケージレベルの `binarystruct.Inspect(&pkt)` ではなく、マーシャルに使用したものと同じ設定済みの `Marshaler` インスタンスで `ms.Inspect(&pkt)` を呼び出してください。これにより、検証時にカスタム設定が正しく認識されます。
 
 ### レイアウトのJSON出力
 

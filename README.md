@@ -190,7 +190,7 @@ Output:
 +0x07(0x02) [2]byte Data = [170 187]
 ```
 
-> **Note**: If your structure contains custom codecs or encodings, use `ms.Inspect(&pkt)` on your custom-configured `Marshaler` instance (its byte order is set at construction via `NewMarshaler`) instead of the package-level `binarystruct.Inspect(&pkt, order)`, to ensure custom options are correctly recognized during inspection.
+> **Note**: If your structure contains custom codecs or encodings, call `ms.Inspect(&pkt)` on the same custom-configured `Marshaler` instance you marshal with, instead of the package-level `binarystruct.Inspect(&pkt)`, so those custom options are recognized during inspection.
 
 ### Exporting Layout to JSON
 

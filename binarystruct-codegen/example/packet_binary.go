@@ -100,6 +100,7 @@ func (s *Packet) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader
 		return n, err
 	}
 	s.Seq = uint32(order.Uint32(tmp[:4]))
+	voffVersion := n
 	m, err = io.ReadFull(r, tmp[:1])
 	n += m
 	if err != nil {
@@ -107,10 +108,10 @@ func (s *Packet) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader
 	}
 	s.Version = uint8(tmp[0])
 	if s.Version < 1 {
-		return n, fmt.Errorf("field Version: value %v is out of range [1..10]: %w", s.Version, binarystruct.ErrValidationError)
+		return n, &binarystruct.DecodeError{Offset: voffVersion, Field: "Version", Err: fmt.Errorf("value %v is out of range [1..10]: %w", s.Version, binarystruct.ErrValidationError)}
 	}
 	if s.Version > 10 {
-		return n, fmt.Errorf("field Version: value %v is out of range [1..10]: %w", s.Version, binarystruct.ErrValidationError)
+		return n, &binarystruct.DecodeError{Offset: voffVersion, Field: "Version", Err: fmt.Errorf("value %v is out of range [1..10]: %w", s.Version, binarystruct.ErrValidationError)}
 	}
 	{
 		readLen := int(8)

@@ -36,6 +36,7 @@ binarystruct-codegen -type TypeName[,TypeName2,...] [flags] [directory]
 | `-output` | Output file name (default: `<first_type>_binary.go` or `<first_type>.json` if `-json` is set). |
 | `-json` | Export parsed struct layout metadata to JSON instead of generating Go code. |
 | `-tests` | Include test files (`*_test.go`) when parsing package files. |
+| `-no-validate` | Strip **all** decode-time validation from the generated read methods — the `const`/`range`/`match` checks and custom-`valueof` recompute-and-compare. Default off: the generated decode validates everything, matching the runtime interpreter. Set this for trusted-input / hot-path decoding. |
 
 ### Arguments
 
@@ -103,8 +104,8 @@ signed, and `byte`/`word`/`dword`/`qword`); a shape the generator can't encode
 standalone (text-encoded string, prefixed/terminated string, nested struct,
 floating-point or array scalar) fails generation. Like `codec=`, they need a
 non-nil Marshaler, so use `WriteBinaryWithMarshaler` (the no-arg `MarshalBinary`
-errors). Decode-time validation is opt-in via `-valueof-validate` (default off /
-encode-only).
+errors). Decode-time validation is **on by default** (generated decode recomputes
+and verifies the value, matching the runtime interpreter); see `-no-validate` below.
 
 **Not supported by codegen** (generation errors with a clear message — use the
 runtime interpreter): struct-level `endian=inverse`, byte-order/encoding

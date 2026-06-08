@@ -14,9 +14,10 @@ import (
 // genCustomValueofCase generates code for a struct using a custom valueof
 // evaluator, drops in a test file that registers the evaluator on a Marshaler and
 // drives the generated WithMarshaler methods, and runs `go test` over the temp
-// package. validate toggles the -valueof-validate flag (decode-time checking).
+// package. noValidate toggles the -no-validate flag (strips decode-time checking;
+// by default the generated decode validates, matching the runtime interpreter).
 // The struct declares its own endian, so no -endian flag is passed.
-func genCustomValueofCase(t *testing.T, typesSrc, typeList, testSrc string, validate bool) {
+func genCustomValueofCase(t *testing.T, typesSrc, typeList, testSrc string, noValidate bool) {
 	t.Helper()
 	t.Parallel()
 
@@ -31,8 +32,8 @@ func genCustomValueofCase(t *testing.T, typesSrc, typeList, testSrc string, vali
 	}
 
 	args := []string{"-type", typeList}
-	if validate {
-		args = append(args, "-valueof-validate")
+	if noValidate {
+		args = append(args, "-no-validate")
 	}
 	args = append(args, tmpDir)
 	var genStderr bytes.Buffer
@@ -84,9 +85,9 @@ func crcMarshaler() *binarystruct.Marshaler {
 `
 
 // TestCodegen_CustomValueof_RoundTrip: generated encode computes the CRC (matching
-// an independent hash/crc32) and the round trip recovers the struct. Default
-// (no -valueof-validate), so a corrupted CRC decodes WITHOUT error — documenting
-// the encode-only default.
+// an independent hash/crc32) and the round trip recovers the struct. By default
+// (no -no-validate) the generated decode validates the CRC, matching the runtime
+// interpreter, so a corrupted CRC is rejected.
 func TestCodegen_CustomValueof_RoundTrip(t *testing.T) {
 	testSrc := `
 import (
@@ -120,21 +121,22 @@ func TestRT(t *testing.T) {
 	if out.Type != "IHDR" || !bytes.Equal(out.Data, in.Data) {
 		t.Fatalf("round trip mismatch: %+v", out)
 	}
-	// Default build does NOT verify on decode: a corrupted CRC still decodes.
+	// Default build verifies on decode (parity with the runtime): a corrupted CRC errors.
 	bad := append([]byte(nil), blob...)
 	bad[len(bad)-1] ^= 0xff
 	var out2 Chunk
-	if _, err := out2.ReadBinaryWithMarshaler(ms, bytes.NewReader(bad), binarystruct.BigEndian); err != nil {
-		t.Fatalf("without -valueof-validate, a bad CRC should decode without error, got: %v", err)
+	if _, err := out2.ReadBinaryWithMarshaler(ms, bytes.NewReader(bad), binarystruct.BigEndian); err == nil {
+		t.Fatal("default build should verify the CRC on decode; a corrupted CRC must error")
 	}
 }
 `
 	genCustomValueofCase(t, cvChunkSrc, "Chunk", testSrc, false)
 }
 
-// TestCodegen_CustomValueof_Validate: with -valueof-validate, generated decode
-// recomputes the CRC and rejects a corrupted one with ErrValidationError, while a
-// clean stream decodes fine.
+// TestCodegen_CustomValueof_Validate: by default the generated decode recomputes
+// the CRC and rejects a corrupted one with a *DecodeError wrapping
+// ErrValidationError (parity with the runtime interpreter), while a clean stream
+// decodes fine.
 func TestCodegen_CustomValueof_Validate(t *testing.T) {
 	testSrc := `
 import (
@@ -175,6 +177,41 @@ func TestValidate(t *testing.T) {
 	}
 	if de.Field != "CRC" {
 		t.Fatalf("DecodeError.Field = %q, want CRC", de.Field)
+	}
+}
+`
+	genCustomValueofCase(t, cvChunkSrc, "Chunk", testSrc, false)
+}
+
+// TestCodegen_CustomValueof_NoValidate: with -no-validate, the generated decode
+// skips the CRC recompute, so a corrupted CRC decodes WITHOUT error (the opt-out
+// for trusted-input / hot-path decoding).
+func TestCodegen_CustomValueof_NoValidate(t *testing.T) {
+	testSrc := `
+import (
+	"bytes"
+	"hash/crc32"
+	"testing"
+
+	"github.com/mixcode/binarystruct"
+)
+` + cvHelperSrc + `
+func TestNoValidate(t *testing.T) {
+	ms := crcMarshaler()
+	in := Chunk{Type: "IHDR", Data: []byte{9, 8, 7}}
+	var b bytes.Buffer
+	if _, err := in.WriteBinaryWithMarshaler(ms, &b, binarystruct.BigEndian); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	blob := b.Bytes()
+	bad := append([]byte(nil), blob...)
+	bad[len(bad)-1] ^= 0xff
+	var out Chunk
+	if _, err := out.ReadBinaryWithMarshaler(ms, bytes.NewReader(bad), binarystruct.BigEndian); err != nil {
+		t.Fatalf("with -no-validate, a corrupted CRC must decode without error, got: %v", err)
+	}
+	if out.Type != "IHDR" || !bytes.Equal(out.Data, in.Data) {
+		t.Fatalf("decode mismatch: %+v", out)
 	}
 }
 `

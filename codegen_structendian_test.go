@@ -96,6 +96,55 @@ func TestCodegen_Validation_DecodeError(t *testing.T) {
 	genBytelenCase(t, "p", typesSrc, "Rec", testSrc)
 }
 
+// TestCodegen_NoValidate_StripsBuiltins verifies the -no-validate flag strips the
+// const/range/match decode checks from the generated read methods: a stream that
+// violates both a const magic and a range bound decodes WITHOUT error (the opt-out
+// for trusted-input / hot-path decoding). The default-on behavior is covered by
+// TestCodegen_Validation_DecodeError.
+func TestCodegen_NoValidate_StripsBuiltins(t *testing.T) {
+	t.Parallel()
+	tmpDir, err := os.MkdirTemp(".", "tmp-bs-noval-")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	typesSrc := "package p\n\n" +
+		"type Rec struct {\n" +
+		"\t_   struct{} `binary:\"endian=big\"`\n" +
+		"\tSig [4]byte  `binary:\"[4]byte,const=0x89504e47\"`\n" +
+		"\tN   uint16   `binary:\"uint16,range=1..100\"`\n}\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "types.go"), []byte(typesSrc), 0o644); err != nil {
+		t.Fatalf("write types.go: %v", err)
+	}
+
+	gen := exec.Command(sharedCodegenBin, "-type", "Rec", "-no-validate", tmpDir)
+	var stderr bytes.Buffer
+	gen.Stderr = &stderr
+	if err := gen.Run(); err != nil {
+		t.Fatalf("codegen -no-validate failed: %v\n%s", err, stderr.String())
+	}
+
+	// Wrong magic AND out-of-range N: with -no-validate both checks are gone, so
+	// UnmarshalBinary must succeed and populate the raw decoded values.
+	testSrc := "package p\n\n" +
+		"import (\n\t\"testing\"\n)\n\n" +
+		"func TestNoVal(t *testing.T) {\n" +
+		"\tvar r Rec\n" +
+		"\tif err := r.UnmarshalBinary([]byte{0, 0, 0, 0, 0, 0}); err != nil {\n" +
+		"\t\tt.Fatalf(\"-no-validate should skip const+range checks, got: %v\", err)\n\t}\n" +
+		"\tif r.N != 0 {\n\t\tt.Fatalf(\"N = %d, want raw 0 (range check skipped)\", r.N)\n\t}\n" +
+		"}\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "types_test.go"), []byte(testSrc), 0o644); err != nil {
+		t.Fatalf("write types_test.go: %v", err)
+	}
+
+	out, err := exec.Command("go", "test", "./"+tmpDir).CombinedOutput()
+	if err != nil {
+		t.Errorf("generated tests failed: %v\n%s", err, out)
+	}
+}
+
 // TestCodegen_StructEndian_NoFlag generates code for a struct that declares its
 // byte order via the `_` sentinel WITHOUT passing -endian, and verifies the
 // generated methods bake that order — including that binarystruct.Marshal(v),

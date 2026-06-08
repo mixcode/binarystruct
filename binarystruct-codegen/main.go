@@ -50,7 +50,7 @@ var (
 	includeTests = flag.Bool("tests", false, "include test files (*_test.go) when parsing the package")
 	jsonOutput   = flag.Bool("json", false, "generate JSON representation of the struct layout instead of Go source code")
 	endian       = flag.String("endian", "", "fallback byte order `big|little` baked into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods; optional when the struct declares its own order via a blank _ struct{} endian= field")
-	valueofValid = flag.Bool("valueof-validate", false, "for custom valueof evaluators (e.g. valueof=CRC32(...)), also emit decode-time validation that recomputes the value and errors on mismatch; default off (encode-only, like the field is read as a plain scalar)")
+	noValidate   = flag.Bool("no-validate", false, "strip ALL decode-time validation from the generated read methods (const/range/match checks and custom valueof recompute-and-compare); default off (the generated decode validates everything, matching the runtime interpreter). Set for trusted-input / hot-path decoding")
 )
 
 // orderLiteral maps the -endian flag to the binarystruct byte-order expression
@@ -136,10 +136,10 @@ func main() {
 	}
 
 	g := Generator{
-		Dir:             absDir,
-		Types:           types,
-		IncludeTests:    *includeTests,
-		ValueofValidate: *valueofValid,
+		Dir:          absDir,
+		Types:        types,
+		IncludeTests: *includeTests,
+		NoValidate:   *noValidate,
 	}
 
 	if *jsonOutput {

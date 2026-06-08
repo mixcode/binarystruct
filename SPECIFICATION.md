@@ -148,10 +148,11 @@ type Chunk struct {
   Generated encode requires a non-nil Marshaler (like `codec=`; the no-arg
   `MarshalBinary` passes `nil` and errors at run time — call
   `WriteBinaryWithMarshaler` with a Marshaler that has the evaluator registered).
-  Decode-time validation is **opt-in** via the `-valueof-validate` codegen flag
-  (default off / encode-only); when off, generated decode reads the field as a
-  plain scalar and does **not** verify it (a divergence from the runtime, which
-  always validates).
+  Decode-time validation is **on by default** — generated decode recomputes the
+  evaluator and verifies it, matching the runtime interpreter. The `-no-validate`
+  codegen flag strips **all** decode validation (this custom check plus the
+  built-in `const`/`range`/`match` checks); with it set, the field is read as a
+  plain scalar and not verified.
 
 **Validation (at `getStructMetadata`):** a function name other than `bytelen`/`count`
 marks a custom evaluator; the whole expression must then be a single such call,
@@ -173,7 +174,7 @@ The `const` option pins a field to a fixed value: **emitted on encode** (the Go 
 | Path | Mapping |
 | :--- | :--- |
 | **Runtime** (`marshal.go`, `unsafe_io.go`) | On encode, substitute the field value with the constant (`synthIntValue`/`synthBytesValue`) and write normally — the unsafe path routes through the reflection writer like `valueof`. On decode, `validateField` → `validateConst` compares the read value (integer equality or `bytes.Equal`) and returns `ErrValidationError` on mismatch. |
-| **Codegen** (`generator.go`) | Encode: integer → write the constant expression via the scalar writer (honors endian); byte sequence → `w.Write([]byte{…})`. Decode: read the field, then emit `if v != EXPR` (integer) or `if !bytes.Equal(v, []byte{…})` (bytes) returning `ErrValidationError`. Both shapes supported. |
+| **Codegen** (`generator.go`) | Encode: integer → write the constant expression via the scalar writer (honors endian); byte sequence → `w.Write([]byte{…})`. Decode: read the field, then emit `if v != EXPR` (integer) or `if !bytes.Equal(v, []byte{…})` (bytes) returning a `*DecodeError` wrapping `ErrValidationError` (offset + field, matching the runtime). Both shapes supported. The `-no-validate` flag strips this decode check (along with `range`/`match` and custom-`valueof` validation). |
 
 ---
 

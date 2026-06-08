@@ -30,11 +30,13 @@ type Generator struct {
 	// flag; required when generating Go code.
 	Endian string
 
-	// ValueofValidate, when true, makes the generated decode methods verify
-	// custom valueof evaluators (recompute and compare, erroring on mismatch).
-	// Default false = encode-only (the field is read as a plain scalar on decode).
-	// Set from the -valueof-validate flag.
-	ValueofValidate bool
+	// NoValidate, when true, strips ALL decode-time validation from the generated
+	// read methods: const/range/match checks and custom valueof recompute-and-compare.
+	// Default false = the generated decode validates everything, matching the runtime
+	// interpreter exactly (full parity); set -no-validate to skip the checks for
+	// trusted-input / hot-path decoding. Encode emission is unaffected (const still
+	// writes its magic, valueof still computes its value). Set from the -no-validate flag.
+	NoValidate bool
 
 	// structs holds every struct type parsed from the target package, keyed by
 	// name. Populated by Generate; used to recognize nested-struct fields when
@@ -737,14 +739,15 @@ func (g *Generator) Generate(outPath string) error {
 			if binType == "float32" || binType == "float64" {
 				needMath = true
 			}
-			if _, ok := parsedTag.options["match"]; ok {
+			// const/range/match decode validation is emitted unless -no-validate.
+			if _, ok := parsedTag.options["match"]; ok && !g.NoValidate {
 				needRegexp = true
 				needFmt = true
 			}
-			if _, ok := parsedTag.options["range"]; ok {
+			if _, ok := parsedTag.options["range"]; ok && !g.NoValidate {
 				needFmt = true
 			}
-			if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
+			if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" && !g.NoValidate {
 				needFmt = true
 			}
 			if val, ok := parsedTag.options["codec"]; ok && val != "" {
@@ -795,7 +798,7 @@ func (g *Generator) Generate(outPath string) error {
 			}
 			fieldName := field.Names[0].Name
 			parsedTag := parseFieldTag(field.Tag)
-			if pattern, ok := parsedTag.options["match"]; ok {
+			if pattern, ok := parsedTag.options["match"]; ok && !g.NoValidate {
 				fmt.Fprintf(&buf, "var regex_%s_%s = regexp.MustCompile(`%s`)\n", typeName, fieldName, pattern)
 			}
 		}
@@ -1048,12 +1051,14 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 			// (which records n before advancing past the field). Only emitted for
 			// fields that actually validate, to avoid an unused variable.
 			offExpr := "n"
-			_, hasConst := parsedTag.options["const"]
-			_, hasRange := parsedTag.options["range"]
-			_, hasMatch := parsedTag.options["match"]
-			if hasConst || hasRange || hasMatch {
-				offExpr = "voff" + fieldName
-				fmt.Fprintf(buf, "\t%s := n\n", offExpr)
+			if !g.NoValidate {
+				_, hasConst := parsedTag.options["const"]
+				_, hasRange := parsedTag.options["range"]
+				_, hasMatch := parsedTag.options["match"]
+				if hasConst || hasRange || hasMatch {
+					offExpr = "voff" + fieldName
+					fmt.Fprintf(buf, "\t%s := n\n", offExpr)
+				}
 			}
 
 			if parsedTag.isArray {
@@ -1062,18 +1067,19 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 				g.generateFieldRead(buf, "s."+fieldName, goType, binType, parsedTag, typeName, fieldName, offExpr)
 			}
 
-			// const: validate the field equals its fixed value after reading.
-			if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" {
+			// const: validate the field equals its fixed value after reading
+			// (unless -no-validate strips decode validation).
+			if cexpr, ok := parsedTag.options["const"]; ok && cexpr != "" && !g.NoValidate {
 				if err := g.generateConstValidate(buf, fieldName, goType, binType, cexpr, offExpr); err != nil {
 					return fmt.Errorf("field %s: %w", fieldName, err)
 				}
 			}
 		}
-		// Post-decode validation of custom valueof evaluators (opt-in via
-		// -valueof-validate). Run after all fields are read so a checksum may
-		// reference fields declared after it. Without the flag, the field was
-		// already read as a plain scalar and is left unverified.
-		if g.ValueofValidate {
+		// Post-decode validation of custom valueof evaluators. Run after all
+		// fields are read so a checksum may reference fields declared after it.
+		// Stripped by -no-validate, in which case the field was already read as a
+		// plain scalar and is left unverified.
+		if !g.NoValidate {
 			for _, field := range st.Fields.List {
 				if len(field.Names) == 0 || field.Names[0].Name == "_" {
 					continue
@@ -1224,8 +1230,8 @@ func (g *Generator) generateCustomValueofWrite(buf *bytes.Buffer, fieldName, evn
 // generateCustomValueofValidate emits a post-decode check that recomputes the
 // custom evaluator over the decoded fields and compares it to the value read
 // from the stream, erroring (wrapping ErrValidationError) on mismatch. Emitted
-// only when -valueof-validate is set; otherwise the field is read as a plain
-// scalar with no verification.
+// by default (parity with the runtime); -no-validate strips it, in which case the
+// field is read as a plain scalar with no verification.
 func (g *Generator) generateCustomValueofValidate(buf *bytes.Buffer, fieldName, evname string, args []string, goType string, fields map[string]cgFieldInfo) error {
 	fmt.Fprintf(buf, "\tif ms == nil {\n\t\treturn n, errors.New(\"marshaler required for valueof %s\")\n\t}\n", evname)
 	buf.WriteString("\t{\n")
@@ -1469,8 +1475,8 @@ func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType
 		}
 	}
 
-	// Apply range check if specified
-	if rangeOpt, ok := parsedTag.options["range"]; ok {
+	// Apply range check if specified (unless -no-validate strips decode validation)
+	if rangeOpt, ok := parsedTag.options["range"]; ok && !g.NoValidate {
 		bounds := strings.Split(rangeOpt, "..")
 		if len(bounds) == 2 {
 			minStr := strings.TrimSpace(bounds[0])
@@ -1488,8 +1494,8 @@ func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType
 		}
 	}
 
-	// Apply regex match check
-	if _, ok := parsedTag.options["match"]; ok {
+	// Apply regex match check (unless -no-validate strips decode validation)
+	if _, ok := parsedTag.options["match"]; ok && !g.NoValidate {
 		fmt.Fprintf(buf, "\tif !regex_%s_%s.MatchString(%s) {\n", typeName, fieldName, accessor)
 		buf.WriteString(cgValidationErr(offExpr, fieldName, fmt.Sprintf("fmt.Errorf(\"value %%q does not match pattern: %%w\", %s, binarystruct.ErrValidationError)", accessor)))
 		buf.WriteString("\t}\n")

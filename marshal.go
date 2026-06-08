@@ -54,6 +54,7 @@ type Marshaler struct {
 	TextEncoding        map[string]encoding.Encoding // map[encodingName]Encoding
 	DefaultTextEncoding string                       // default text encoding name
 	codecs              map[string]Codec             // registered custom codecs
+	valueofs            map[string]ValueOfFunc       // registered custom valueof evaluators
 
 	encoderCache map[string]*encoding.Encoder // cache of encoding.NewEncoder()
 	decoderCache map[string]*encoding.Decoder // cache of encoding.NewDecoder()
@@ -117,6 +118,35 @@ func (ms *Marshaler) GetCodec(name string) Codec {
 	if ms.codecs != nil {
 		if s, ok := ms.codecs[name]; ok {
 			return s
+		}
+	}
+	return nil
+}
+
+// AddValueOf registers a custom valueof evaluator with a Marshaler. The name may
+// then be used in struct field tags, like `binary:"uint32,valueof=name(Field, ...)"`,
+// to compute the field's serialized value (e.g. a CRC over other fields). The
+// name must not collide with the built-ins bytelen or count.
+func (ms *Marshaler) AddValueOf(name string, fn ValueOfFunc) {
+	if ms.valueofs == nil {
+		ms.valueofs = make(map[string]ValueOfFunc)
+	}
+	ms.valueofs[name] = fn
+}
+
+// RemoveValueOf removes a registered custom valueof evaluator.
+func (ms *Marshaler) RemoveValueOf(name string) {
+	if ms.valueofs != nil {
+		delete(ms.valueofs, name)
+	}
+}
+
+// GetValueOf returns a registered custom valueof evaluator by name, or nil if
+// not found.
+func (ms *Marshaler) GetValueOf(name string) ValueOfFunc {
+	if ms.valueofs != nil {
+		if fn, ok := ms.valueofs[name]; ok {
+			return fn
 		}
 	}
 	return nil
@@ -454,12 +484,21 @@ func (ms *Marshaler) writeStruct(w io.Writer, order ByteOrder, strc reflect.Valu
 		// valueof: replace the field's value with one computed from other
 		// fields (emit-only; the source struct is never modified).
 		if fMeta.valueofExpr != "" {
-			computed, errV := ms.evalValueof(order, strc, meta, fMeta.valueofExpr)
-			if errV != nil {
-				err = wErr(fMeta.index, errV)
-				return
+			if fMeta.valueofCustomName != "" {
+				computed, errV := ms.evalCustomValueof(order, strc, meta, fMeta, false)
+				if errV != nil {
+					err = wErr(fMeta.index, errV)
+					return
+				}
+				fieldVal = synthIntValue(fieldVal, int(computed))
+			} else {
+				computed, errV := ms.evalValueof(order, strc, meta, fMeta.valueofExpr)
+				if errV != nil {
+					err = wErr(fMeta.index, errV)
+					return
+				}
+				fieldVal = synthIntValue(fieldVal, computed)
 			}
-			fieldVal = synthIntValue(fieldVal, computed)
 		}
 
 		// const: emit the fixed value, ignoring the struct field (emit-only).
@@ -587,8 +626,8 @@ func (ms *Marshaler) evalValueof(order ByteOrder, strc reflect.Value, meta *stru
 		tokens:       tokens,
 		strc:         strc,
 		resolveIdent: fieldValueResolver(strc),
-		callFunc: func(fn, arg string) (int, error) {
-			return ms.evalValueofFunc(order, strc, meta, fn, arg)
+		callFunc: func(fn string, args []string) (int, error) {
+			return ms.evalValueofFunc(order, strc, meta, fn, args)
 		},
 	}
 	v, err := p.parseExpr()
@@ -601,8 +640,14 @@ func (ms *Marshaler) evalValueof(order ByteOrder, strc reflect.Value, meta *stru
 	return v, nil
 }
 
-// evalValueofFunc computes bytelen(field) or count(field).
-func (ms *Marshaler) evalValueofFunc(order ByteOrder, strc reflect.Value, meta *structMetadata, fn, arg string) (int, error) {
+// evalValueofFunc computes the built-in bytelen(field) or count(field). Only
+// these two single-argument built-ins flow through here; custom multi-argument
+// evaluators are dispatched separately (see evalCustomValueof).
+func (ms *Marshaler) evalValueofFunc(order ByteOrder, strc reflect.Value, meta *structMetadata, fn string, args []string) (int, error) {
+	if len(args) != 1 {
+		return 0, fmt.Errorf("%s() takes exactly one field-name argument", fn)
+	}
+	arg := args[0]
 	fMeta, ok := meta.fieldByName(arg)
 	if !ok {
 		return 0, fmt.Errorf("valueof: no field named %s", arg)
@@ -626,11 +671,22 @@ func (ms *Marshaler) evalValueofFunc(order ByteOrder, strc reflect.Value, meta *
 }
 
 // fieldEncodedSize returns the number of bytes the field would occupy when
-// encoded. It measures by encoding into a scratch buffer using the same logic
-// as the real write, so it is exact for text-encoded strings and nested
-// structs. (A fast path for fixed-width fields is a possible future
-// optimization; correctness is preferred here over avoiding the second encode.)
+// encoded.
 func (ms *Marshaler) fieldEncodedSize(order ByteOrder, strc, fieldVal reflect.Value, fMeta structFieldMetadata) (int, error) {
+	b, err := ms.fieldEncodedBytes(order, strc, fieldVal, fMeta)
+	if err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
+
+// fieldEncodedBytes returns the exact bytes the field would occupy when encoded.
+// It measures by encoding into a scratch buffer using the same logic as the real
+// write, so it is exact for text-encoded strings and nested structs (the bytes a
+// checksum must operate on). A fast path for fixed-width / raw-byte fields is a
+// possible future optimization; correctness is preferred here over avoiding the
+// second encode.
+func (ms *Marshaler) fieldEncodedBytes(order ByteOrder, strc, fieldVal reflect.Value, fMeta structFieldMetadata) ([]byte, error) {
 	// Measurement strategy: honor constant sizes (e.g. string(16), [4]byte) but
 	// use the value's own length for field-referencing expressions. This makes
 	// bytelen() measure the field's actual content and avoids infinite recursion
@@ -660,14 +716,56 @@ func (ms *Marshaler) fieldEncodedSize(order ByteOrder, strc, fieldVal reflect.Va
 	}
 	naturalType, option, err := ms.resolveFieldEncoding(fieldVal, fMeta, naturalEval)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	var buf bytes.Buffer
-	n, err := ms.writeMain(&buf, order, fieldVal, naturalType, option, strc, fMeta.index)
-	if err != nil {
-		return 0, err
+	if _, err := ms.writeMain(&buf, order, fieldVal, naturalType, option, strc, fMeta.index); err != nil {
+		return nil, err
 	}
-	return n, nil
+	return buf.Bytes(), nil
+}
+
+// evalCustomValueof computes a custom valueof field's value: it materializes the
+// encoded bytes (and Go value) of each referenced field, then invokes the
+// evaluator registered on the Marshaler. The same evaluator runs on encode
+// (decoding=false) to produce the value to write and on decode (decoding=true)
+// to recompute it for validation.
+func (ms *Marshaler) evalCustomValueof(order ByteOrder, strc reflect.Value, meta *structMetadata, fMeta structFieldMetadata, decoding bool) (uint64, error) {
+	fn := ms.GetValueOf(fMeta.valueofCustomName)
+	if fn == nil {
+		return 0, fmt.Errorf("valueof: no evaluator named %q registered on the Marshaler (use AddValueOf)", fMeta.valueofCustomName)
+	}
+	args := make([]ValueOfArg, 0, len(fMeta.valueofCustomArgs))
+	for _, name := range fMeta.valueofCustomArgs {
+		af, ok := meta.fieldByName(name)
+		if !ok {
+			return 0, fmt.Errorf("valueof %s(): no field named %s", fMeta.valueofCustomName, name)
+		}
+		fieldVal := strc.Field(af.index)
+		b, err := ms.fieldEncodedBytes(order, strc, fieldVal, af)
+		if err != nil {
+			return 0, fmt.Errorf("valueof %s(): encoding field %s: %w", fMeta.valueofCustomName, name, err)
+		}
+		var val interface{}
+		if fieldVal.CanInterface() {
+			val = fieldVal.Interface()
+		}
+		args = append(args, ValueOfArg{Name: name, Bytes: b, Value: val})
+	}
+	var structPtr interface{}
+	if strc.CanAddr() {
+		structPtr = strc.Addr().Interface()
+	} else {
+		cp := reflect.New(strc.Type())
+		cp.Elem().Set(strc)
+		structPtr = cp.Interface()
+	}
+	return fn(ValueOfContext{
+		Struct:   structPtr,
+		Target:   fMeta.name,
+		Args:     args,
+		Decoding: decoding,
+	})
 }
 
 // synthIntValue builds a reflect.Value holding v, typed like orig when orig is

@@ -294,9 +294,35 @@ type Record struct {
 * **emit-only（書き戻しなし）。** 計算値はストリームに書き込まれますが、Go の構造体フィールドは変更されません（エンコードを副作用のない読み取りに保つため）。計算値を Go 側で取得するには `Marshal`/`Unmarshal`（または `Write`/`Read`）のラウンドトリップを行ってください。
 * **整数・ビットマップ型のフィールドのみ。** 他の型に使用するとコンパイル時エラーになります。`bytelen`/`count` は `valueof` 内でのみ使用できます。
 * **前方参照が可能。** デコード側のサイズ式は前方のフィールドのみ参照できますが、`valueof` はエンコード時に全フィールドを参照できます。
-* **適用範囲。** `valueof` が自動計算するのは `bytelen`/`count` によるフィールドの長さ・要素数のみです。CRC チェックサム、圧縮後サイズ、オフセットなどの派生値は自動計算されないため、通常どおり値を設定してください。
+* **組み込み関数の適用範囲。** `bytelen`/`count` が計算するのはフィールドの長さ・要素数のみです。CRC チェックサムや圧縮後サイズなどの派生値は、登録した**カスタム評価関数**で計算します（下記参照）。
 
-> **コード生成に関する注意:** 静的コードジェネレータは `count(F)` と、バイトスライス・バイト配列・非エンコード文字列に対する `bytelen(F)` をサポートします。ネスト構造体やテキストエンコードされた文字列の `bytelen` は未対応のため、それらの構造体ではランタイムインタプリタを使用してください。
+### カスタム `valueof` 評価関数（チェックサム・CRC）
+
+名前付きの評価関数を Marshaler に登録し、`valueof=NAME(field, …)` タグから参照すると、任意の値 —— よくあるのは先行フィールドのチェックサム —— を計算できます。
+
+```go
+ms := binarystruct.NewMarshaler()
+ms.AddValueOf("CRC32", func(c binarystruct.ValueOfContext) (uint64, error) {
+    h := crc32.NewIEEE()
+    for _, a := range c.Args { h.Write(a.Bytes) } // エンコード後のバイト列をハッシュ
+    return uint64(h.Sum32()), nil
+})
+
+type Chunk struct {
+    _      struct{} `binary:"endian=big"`
+    Length uint32   `binary:"uint32,valueof=bytelen(Data)"`
+    Type   string   `binary:"string(4)"`
+    Data   []byte   `binary:"[Length]byte"`
+    CRC    uint32   `binary:"uint32,valueof=CRC32(Type, Data)"`
+}
+```
+
+* **Marshaler ごとの登録**（カスタム `Codec` と同様）。パッケージレベル関数ではなく `ms.Marshal`/`ms.Unmarshal` を使用してください。`AddValueOf`/`RemoveValueOf`/`GetValueOf` でレジストリを管理し、未登録の名前は明示的なエラーになります。名前に `bytelen`/`count` は使えません。
+* **Go の値ではなくエンコード後のバイト列をハッシュします。** 各 `ValueOfContext.Args[i]` は `Bytes`（バイトオーダーやテキストエンコーディングを反映した、ストリームに書き込まれる／読み込まれるバイト列）と `Value`（Go のフィールド値）を持ちます。チェックサムは `Bytes` を使ってください。
+* **デコード時に検証されます。** エンコード専用の組み込み関数と異なり、カスタム評価関数はデコード時にも（デコード済みフィールドに対して）実行され、読み込んだ値と比較されます。不一致は `ErrValidationError` をラップした `DecodeError` になります。検証はデコード後の一括パスで行われるため、後方に宣言されたフィールドも参照できます。
+* **式全体である必要があります** —— `valueof=CRC32(Type, Data)`。本バージョンでは算術式と組み合わせることはできません。
+
+> **コード生成に関する注意:** 静的コードジェネレータは `count(F)` と、ほぼすべてのフィールド形状に対する `bytelen(F)`（スカラー・スカラー配列、バイトスライス・配列、テキストエンコードを含む全文字列バリアント、ネスト構造体、タグ計数の構造体配列、構造体ポインタ）をサポートします。一方、**カスタム `valueof` 評価関数**（実行時に登録される）は、`endian=inverse` や埋め込み継承と同様にサポートされず、生成時に明示的なエラーになります。それらの構造体ではランタイムインタプリタを使用してください。
 
 ---
 

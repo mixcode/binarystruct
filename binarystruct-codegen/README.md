@@ -84,9 +84,10 @@ The binarystruct-codegen tool supports the full `binary:"..."` tag syntax includ
 
 **Not supported by codegen** (generation errors with a clear message — use the
 runtime interpreter): struct-level `endian=inverse`, byte-order/encoding
-inheritance via embedding, and a self-referential `valueof=bytelen(F)` where `F`
-is `string(thatVeryField)`. Per-field `endian=inverse` and per-field `encoding=`
-are supported.
+inheritance via embedding, a self-referential `valueof=bytelen(F)` where `F`
+is `string(thatVeryField)`, and **custom `valueof` evaluators** (registered on a
+Marshaler at run time, so they cannot be embedded in standalone code). Per-field
+`endian=inverse` and per-field `encoding=` are supported.
 
 For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the parent project.
 

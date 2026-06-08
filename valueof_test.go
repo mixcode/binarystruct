@@ -161,10 +161,10 @@ func TestValueof_MetadataErrors(t *testing.T) {
 		{"unknown field", reflect.TypeOf(struct {
 			L uint16 `binary:"uint16,valueof=bytelen(Nope)"`
 		}{}), "unknown field"},
-		{"bad function", reflect.TypeOf(struct {
-			L uint16 `binary:"uint16,valueof=widthof(X)"`
+		{"custom valueof with arithmetic", reflect.TypeOf(struct {
+			L uint16 `binary:"uint16,valueof=widthof(X)+1"`
 			X []byte `binary:"[L]byte"`
-		}{}), "unknown function"},
+		}{}), "entire expression"},
 		{"function in decode expr", reflect.TypeOf(struct {
 			L uint16 `binary:"uint16"`
 			X []byte `binary:"[bytelen(X)]byte"`

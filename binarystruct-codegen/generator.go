@@ -67,7 +67,7 @@ func parseFieldTag(tag *ast.BasicLit) parsedFieldTag {
 		tagStr = m[1]
 	}
 
-	tags := strings.Split(tagStr, ",")
+	tags := splitTagOptions(tagStr)
 	if len(tags) == 0 || tags[0] == "" {
 		return res
 	}
@@ -233,7 +233,36 @@ type cgFieldInfo struct {
 var (
 	cgValueofFuncRe = regexp.MustCompile(`s\.(bytelen|count)\(s\.([a-zA-Z_][a-zA-Z0-9_]*)\)`)
 	cgIdentRe       = regexp.MustCompile(`s\.([a-zA-Z_][a-zA-Z0-9_]*)`)
+	// cgValueofCallRe matches a function call's name in a raw valueof expression
+	// (an identifier immediately followed by '('), used to reject custom
+	// evaluators the generator cannot resolve statically.
+	cgValueofCallRe = regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
 )
+
+// splitTagOptions splits a binary-tag option list on commas, ignoring commas
+// nested inside parentheses. Mirrors the runtime parser so a multi-argument
+// valueof such as CRC32(Type, Data) stays a single option (backward-compatible:
+// no existing tag carries a comma inside parentheses).
+func splitTagOptions(s string) []string {
+	var out []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(out, s[start:])
+}
 
 // isByteSequence reports whether goType is a byte-like slice or array, whose
 // element count equals its encoded byte length.
@@ -329,6 +358,16 @@ func stringTermWidth(binType string) int {
 // variable strings, slice/array of structs, a reference to another valueof
 // field) return a generation-time error rather than emitting wrong code.
 func (g *Generator) translateValueof(expr string, fields map[string]cgFieldInfo, visiting map[string]bool) (pre string, out string, err error) {
+	// Custom valueof evaluators are registered on a Marshaler at run time and
+	// cannot be embedded in standalone generated code. Reject them with a clear
+	// message (like endian=inverse and embedding-inherited order) so the struct
+	// falls back to the runtime interpreter rather than emitting a call to a
+	// nonexistent method.
+	for _, fm := range cgValueofCallRe.FindAllStringSubmatch(expr, -1) {
+		if fm[1] != "bytelen" && fm[1] != "count" {
+			return "", "", fmt.Errorf("codegen does not support custom valueof evaluators (%s()); use the runtime interpreter for this struct", fm[1])
+		}
+	}
 	prefixed := translateExpression(expr) // e.g. s.bytelen(s.Name)+2
 	var ferr error
 	var preBuf bytes.Buffer

@@ -90,7 +90,7 @@ The valueof option computes an integer field's serialized value from other field
 
 valueof expressions may use the functions bytelen(F) (total encoded byte length of any field F) and count(F) (element count of an array or slice field F; not valid for strings — use bytelen for a string's byte length), combined with +, -, *, / and parentheses. valueof is evaluated only when encoding; on decode the field is read normally. It is emit-only: the computed value is written to the stream but the Go field is not modified (encoding stays a pure read). To obtain the computed values in Go, perform a Marshal/Unmarshal round trip.
 
-valueof only derives field lengths and counts. Other derived values, such as CRC checksums, compressed sizes, or offsets, are not computed for you and must be assigned normally.
+The built-in bytelen/count derive field lengths and counts. Other derived values — CRC checksums, compressed sizes, offsets — are computed by custom evaluators registered with Marshaler.AddValueOf and referenced as valueof=NAME(field, ...) (for example valueof=CRC32(Type, Data)). Such an evaluator receives each referenced field's encoded bytes, produces the value on encode, and re-runs on decode to validate it (a mismatch is a DecodeError wrapping ErrValidationError). It requires a configured Marshaler (like custom codecs) and is not supported by the code generator. See STRUCT_TAGS.md for details.
 
 # Fixed and Magic Values
 

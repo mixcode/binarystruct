@@ -108,7 +108,7 @@ A `valueof` value is a full [expression](STRUCT_TAGS.md#5-expressions) (arithmet
 * **`bytelen(F)`** — total encoded byte length of any field `F` (honors text encodings, length prefixes, arrays, and nested structs, not just `len()`).
 * **`count(F)`** — element count of an array or slice field `F` (not valid for strings; use `bytelen` for a string's byte length).
 
-`valueof` is **encode-only and emit-only**: the computed value is written to the stream, but your Go struct field is never modified. To read the computed values back into Go, do a `Marshal`/`Unmarshal` round trip. It derives only lengths and counts — other values such as CRC checksums, compressed sizes, or offsets are not computed for you. See the [Struct Tag Reference](STRUCT_TAGS.md#8-computed-field-values-valueof) for full details.
+`valueof` with the built-in `bytelen`/`count` is **encode-only and emit-only**: the computed value is written to the stream, but your Go struct field is never modified. To read the computed values back into Go, do a `Marshal`/`Unmarshal` round trip. For other derived values — CRC checksums, compressed sizes, offsets — register a **custom evaluator** with `Marshaler.AddValueOf` and reference it as `valueof=CRC32(Type, Data)`; it computes the value on encode and **validates it on decode**. See the [Struct Tag Reference](STRUCT_TAGS.md#8-computed-field-values-valueof) for full details.
 
 ### Recipe: variable-length records
 

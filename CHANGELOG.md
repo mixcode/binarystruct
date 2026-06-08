@@ -5,6 +5,30 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Custom `valueof` evaluators** for derived fields the built-ins can't express
+  (checksums, CRCs, computed trailers). Register a named evaluator on a Marshaler
+  with `AddValueOf(name, func(ValueOfContext) (uint64, error))` and reference it
+  from a tag — `valueof=CRC32(Type, Data)`. The evaluator receives each referenced
+  field's **encoded bytes** (and Go value) via `ValueOfContext`, runs on encode to
+  produce the value, and **re-runs on decode to validate** it (mismatch →
+  `DecodeError` wrapping `ErrValidationError`, naming the field; a post-decode pass,
+  so a checksum may reference later fields). New API: `Marshaler.AddValueOf` /
+  `RemoveValueOf` / `GetValueOf`, and the `ValueOfFunc` / `ValueOfContext` /
+  `ValueOfArg` types. Registration is per-Marshaler (like custom `Codec`s), so the
+  package-level functions don't see it; an unregistered name fails loud.
+- The `valueof` tag now accepts **multi-argument** function calls; the binary-tag
+  option splitter is parenthesis-aware, so commas inside a call's argument list no
+  longer split the option list. (The built-in `bytelen`/`count` remain single-arg.)
+
+### Limitations
+- Codegen does **not** support custom `valueof` evaluators (registered at run time,
+  so they can't be embedded in standalone code) — generation fails loud; use the
+  runtime interpreter for those structs. (Joins the existing codegen exclusions:
+  struct-level `endian=inverse` and order/encoding inheritance via embedding.)
+
 ## [0.3.0] - 2026-06-08
 
 A naming/API cleanup that aligns the package with Go standard-library

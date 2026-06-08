@@ -30,7 +30,7 @@ This document contains rules, syntax constraints, and patterns to help LLM agent
 * `omittable[=Expression]`: Marks a trailing field as optional (suppresses `io.EOF` errors at start of field or skips based on struct byte-offset check).
 * `range=min..max`: Enforces range check validation on integers and float values (e.g. `range=1..100`, open ranges `range=0..` or `range=..100`).
 * `match=pattern`: Enforces regex match validation on string values (e.g. `match=^[A-Z0-9]+$`).
-* `valueof=Expr`: (encode-only) Auto-computes an integer field's serialized value from other fields, using arithmetic plus the functions `bytelen(F)` (encoded byte length of any field F) and `count(F)` (element count of an array/slice field F). Emit-only — the Go field is NOT modified. See Section 7.
+* `valueof=Expr`: Auto-computes an integer field's serialized value from other fields, using arithmetic plus the built-ins `bytelen(F)` (encoded byte length of any field F) and `count(F)` (element count of an array/slice field F) — encode-only, emit-only. Custom multi-arg evaluators registered with `Marshaler.AddValueOf` (e.g. `valueof=CRC32(Type, Data)`) also validate on decode. See Section 7.
 * `const=Value`: (encode + decode) Emits a fixed value on encode (ignoring the Go field) and validates it on decode (`ErrValidationError` on mismatch) — ideal for magic numbers/signatures. Integer target: `const=0x04034b50` (an integer expression; **endian-sensitive** — see §8). Byte-sequence target `[N]byte`/`string(N)`: `const=0x89504e470d0a1a0a` (hex blob, natural byte order, endian-independent). See Section 8.
 
 ---
@@ -283,13 +283,37 @@ type Record struct {
 // (Emit-only: rec.NameLen is still 0 in memory after Marshal — round-trip via Unmarshal to populate.)
 ```
 
-**Scope:** `valueof` derives only field lengths/counts via `bytelen`/`count`. Other derived values (CRC checksums, compressed sizes, offsets) are NOT auto-computed — set them normally.
+**Scope of the built-ins:** `bytelen`/`count` derive only field lengths/counts. Other derived values — CRC checksums, compressed sizes, offsets — are computed by **custom evaluators** you register (next).
+
+### Recipe: checksums / CRCs (custom valueof evaluators)
+The other common derived field is a checksum over preceding bytes, which `bytelen` cannot express. Register a named evaluator on the Marshaler and reference it from `valueof=NAME(field, …)`. **You must use a configured Marshaler** (`ms.Marshal`/`ms.Unmarshal`), not the package-level functions, exactly like custom codecs:
+
+```go
+ms := binarystruct.NewMarshaler()
+ms.AddValueOf("CRC32", func(c binarystruct.ValueOfContext) (uint64, error) {
+	h := crc32.NewIEEE()
+	for _, a := range c.Args { h.Write(a.Bytes) } // hash the ENCODED bytes, not the Go values
+	return uint64(h.Sum32()), nil
+})
+
+type Chunk struct {
+	_      struct{} `binary:"endian=big"`
+	Length uint32   `binary:"uint32,valueof=bytelen(Data)"`
+	Type   string   `binary:"string(4)"`
+	Data   []byte   `binary:"[Length]byte"`
+	CRC    uint32   `binary:"uint32,valueof=CRC32(Type, Data)"` // computed on encode; validated on decode
+}
+blob, _ := ms.Marshal(&Chunk{Type: "IHDR", Data: payload})
+```
+* **Hash `Args[i].Bytes`, not `Args[i].Value`** — `Bytes` is what actually hits the stream (byte order / text encoding / width applied); the Go value can differ. The context also gives `Target` (field name) and `Struct` (pointer to the struct).
+* **Validated on decode** (unlike encode-only `bytelen`): the same evaluator re-runs over the decoded fields and the result is compared to the value read; a mismatch is a `DecodeError` wrapping `ErrValidationError`. It's a post-decode pass, so a checksum may reference fields declared after it.
+* **Must be the whole expression** — `valueof=CRC32(Type, Data)`; cannot be mixed with arithmetic in this version. An unregistered name fails loud.
 
 ### Rules
-* **Encode-only.** On decode the field is read normally; size the target with a decode-side `[len]` expression.
+* **Encode-only (built-ins).** On decode the field is read normally; size the target with a decode-side `[len]` expression. (Custom evaluators additionally validate on decode — above.)
 * **Emit-only (no write-back), by design.** The computed value is written to the stream but your Go struct field is left unchanged — this keeps encoding a pure, side-effect-free read (safe for concurrent marshalling). **To obtain the computed values in Go, do a `Marshal`/`Unmarshal` (or `Write`/`Read`) round trip.** A write-back mode will not be added.
 * **Integer/bitmap fields only**; other field types are a compile-time error. `bytelen`/`count` are valid only inside `valueof`.
-* **Codegen support**: the static code generator resolves `count(F)` and `bytelen(F)` for nearly every field shape — fixed-width scalars and scalar arrays, byte slices/arrays, fixed `string(N)` and all length-prefixed/null-terminated string variants (including text-encoded, via an `ms`-guarded `EncodeText` measurement), nested structs, tag-counted arrays of structs, and pointer-to-struct. It still rejects (generation-time error → use the runtime interpreter for that struct) `bytelen` of a **pointer-element struct array** or a **pointer scalar field**.
+* **Codegen support**: the static code generator resolves `count(F)` and `bytelen(F)` for nearly every field shape — fixed-width scalars and scalar arrays, byte slices/arrays, fixed `string(N)` and all length-prefixed/null-terminated string variants (including text-encoded, via an `ms`-guarded `EncodeText` measurement), nested structs, tag-counted arrays of structs, and pointer-to-struct. It rejects (generation-time error → use the runtime interpreter for that struct) `bytelen` of a **pointer-element struct array** or a **pointer scalar field**, and **custom valueof evaluators** (registered at run time, so they cannot be embedded in standalone code).
 
 ---
 

@@ -43,6 +43,36 @@ func TestCodegen_BytelenCycle_Errors(t *testing.T) {
 	}
 }
 
+// TestCodegen_CustomValueof_Errors verifies the generator fails loud (rather than
+// emitting a call to a nonexistent method) on a custom valueof evaluator, which
+// is registered on a Marshaler at run time and cannot be embedded in standalone
+// generated code. The struct must fall back to the runtime interpreter.
+func TestCodegen_CustomValueof_Errors(t *testing.T) {
+	t.Parallel()
+	tmpDir, err := os.MkdirTemp(".", "tmp-bs-customvalueof-")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	src := "package p\n\ntype Chunk struct {\n" +
+		"\t_    struct{} `binary:\"endian=big\"`\n" +
+		"\tType string   `binary:\"string(4)\"`\n" +
+		"\tData []byte   `binary:\"[4]byte\"`\n" +
+		"\tCRC  uint32   `binary:\"uint32,valueof=CRC32(Type, Data)\"`\n}\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "t.go"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write t.go: %v", err)
+	}
+
+	out, err := exec.Command(sharedCodegenBin, "-type", "Chunk", tmpDir).CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected a clean error for a custom valueof evaluator; output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "custom valueof") || !strings.Contains(string(out), "CRC32") {
+		t.Errorf("error should name the unsupported custom evaluator; got:\n%s", out)
+	}
+}
+
 // TestCodegen_StructEncoding_Applied verifies generated code honors a struct-level
 // `encoding=` default for a string field that declares none of its own — the
 // generated methods, driven through a configured Marshaler, encode/decode the

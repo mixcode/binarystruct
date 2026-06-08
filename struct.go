@@ -18,38 +18,46 @@ const (
 )
 
 type structFieldMetadata struct {
-	index         int
-	name          string
-	offset        uintptr
-	hasTag        bool
-	encodeType    eType
-	isArray       bool
-	arrayLenExpr  string
-	bufLenExpr    string
-	valueofExpr   string
-	encoding      string
-	endian        endianOverride
-	codec         string
-	ignore        bool
-	unexported    bool
-	fieldErr      error
-	omittable     bool
-	omittableExpr string
-	naturalType   eType
-	option        typeOption
-	hasRange      bool
-	rangeMin      float64
-	rangeMax      float64
-	hasRangeMin   bool
-	hasRangeMax   bool
-	hasMatch      bool
-	matchPattern  string
-	matchRegexp   *regexp.Regexp
-	hasConst      bool
-	constExpr     string // raw const= text, kept for codegen and error messages
-	constIsBytes  bool   // target is a byte sequence (vs an integer/bitmap)
-	constInt      int64  // integer target: the constant value to emit/validate
-	constBytes    []byte // byte-sequence target: the constant bytes to emit/validate
+	index        int
+	name         string
+	offset       uintptr
+	hasTag       bool
+	encodeType   eType
+	isArray      bool
+	arrayLenExpr string
+	bufLenExpr   string
+	valueofExpr  string
+	// valueofCustom* hold a custom valueof evaluator parsed from a
+	// `valueof=NAME(field, ...)` tag whose NAME is not a built-in (bytelen,
+	// count). Empty name means the valueof (if any) is a built-in/arithmetic
+	// expression handled by evalValueof. The evaluator is looked up by name on
+	// the Marshaler at run time (not validated at parse time, since metadata is
+	// cached per type while evaluators are registered per Marshaler).
+	valueofCustomName string
+	valueofCustomArgs []string
+	encoding          string
+	endian            endianOverride
+	codec             string
+	ignore            bool
+	unexported        bool
+	fieldErr          error
+	omittable         bool
+	omittableExpr     string
+	naturalType       eType
+	option            typeOption
+	hasRange          bool
+	rangeMin          float64
+	rangeMax          float64
+	hasRangeMin       bool
+	hasRangeMax       bool
+	hasMatch          bool
+	matchPattern      string
+	matchRegexp       *regexp.Regexp
+	hasConst          bool
+	constExpr         string // raw const= text, kept for codegen and error messages
+	constIsBytes      bool   // target is a byte sequence (vs an integer/bitmap)
+	constInt          int64  // integer target: the constant value to emit/validate
+	constBytes        []byte // byte-sequence target: the constant bytes to emit/validate
 }
 
 type structMetadata struct {
@@ -99,6 +107,7 @@ const (
 	tokDiv
 	tokLParen
 	tokRParen
+	tokComma
 )
 
 type token struct {
@@ -146,6 +155,11 @@ func tokenize(expr string) ([]token, error) {
 			i++
 			continue
 		}
+		if c == ',' {
+			tokens = append(tokens, token{tokComma, ","})
+			i++
+			continue
+		}
 		if c >= '0' && c <= '9' {
 			start := i
 			if i+1 < n && expr[i] == '0' && (expr[i+1] == 'x' || expr[i+1] == 'X' || expr[i+1] == 'o' || expr[i+1] == 'O' || expr[i+1] == 'b' || expr[i+1] == 'B') {
@@ -180,10 +194,11 @@ type tagParser struct {
 	// resolveIdent resolves a bare field reference (e.g. "PayloadSize").
 	// When nil, bare field references are rejected.
 	resolveIdent func(name string) (int, error)
-	// callFunc resolves a function call such as bytelen(Name) or count(Items).
-	// When nil, function calls are rejected (the case for decode-side size
-	// expressions, where functions are not permitted).
-	callFunc func(funcName, argName string) (int, error)
+	// callFunc resolves a function call such as bytelen(Name) or count(Items),
+	// or a custom multi-argument evaluator such as CRC32(Type, Data). When nil,
+	// function calls are rejected (the case for decode-side size expressions,
+	// where functions are not permitted).
+	callFunc func(funcName string, args []string) (int, error)
 }
 
 func (p *tagParser) peek() token {
@@ -295,20 +310,30 @@ func (p *tagParser) parseFactor() (int, error) {
 	}
 	if t.typ == tokIdent {
 		p.consume()
-		// function call: IDENT '(' IDENT ')'
+		// function call: IDENT '(' IDENT (',' IDENT)* ')'
 		if p.peek().typ == tokLParen {
 			p.consume() // '('
+			var args []string
 			arg := p.consume()
 			if arg.typ != tokIdent {
-				return 0, fmt.Errorf("function %s() expects a field name argument", t.val)
+				return 0, fmt.Errorf("function %s() expects field-name arguments", t.val)
+			}
+			args = append(args, arg.val)
+			for p.peek().typ == tokComma {
+				p.consume() // ','
+				a := p.consume()
+				if a.typ != tokIdent {
+					return 0, fmt.Errorf("function %s() expects field-name arguments", t.val)
+				}
+				args = append(args, a.val)
 			}
 			if p.consume().typ != tokRParen {
-				return 0, fmt.Errorf("missing closing parenthesis in %s(%s", t.val, arg.val)
+				return 0, fmt.Errorf("missing closing parenthesis in %s(...)", t.val)
 			}
 			if p.callFunc == nil {
 				return 0, fmt.Errorf("function %s() is not allowed here (functions are valid only in valueof)", t.val)
 			}
-			return p.callFunc(t.val, arg.val)
+			return p.callFunc(t.val, args)
 		}
 		if p.resolveIdent == nil {
 			return 0, fmt.Errorf("field reference %s is not allowed here", t.val)
@@ -487,8 +512,60 @@ func fieldValueResolver(strc reflect.Value) func(string) (int, error) {
 }
 
 type exprFuncCall struct {
-	name string // "bytelen" or "count"
-	arg  string // referenced field name
+	name string   // "bytelen", "count", or a custom evaluator name
+	args []string // referenced field names
+}
+
+// parseSingleCustomCall recognizes an expression that is exactly one function
+// call of the form NAME(field, field, ...), returning the function name and its
+// field-name arguments. ok is false for anything else — arithmetic, multiple
+// calls, or bare references — so a custom valueof evaluator is required to be
+// the entire expression (it cannot be combined with arithmetic in this version).
+func parseSingleCustomCall(expr string) (name string, args []string, ok bool) {
+	toks, err := tokenize(expr)
+	if err != nil {
+		return "", nil, false
+	}
+	i := 0
+	next := func() token {
+		if i < len(toks) {
+			t := toks[i]
+			i++
+			return t
+		}
+		return token{tokEOF, ""}
+	}
+	t := next()
+	if t.typ != tokIdent {
+		return "", nil, false
+	}
+	name = t.val
+	if next().typ != tokLParen {
+		return "", nil, false
+	}
+	a := next()
+	if a.typ != tokIdent {
+		return "", nil, false
+	}
+	args = append(args, a.val)
+	for {
+		t := next()
+		if t.typ == tokComma {
+			a := next()
+			if a.typ != tokIdent {
+				return "", nil, false
+			}
+			args = append(args, a.val)
+		} else if t.typ == tokRParen {
+			break
+		} else {
+			return "", nil, false
+		}
+	}
+	if next().typ != tokEOF {
+		return "", nil, false
+	}
+	return name, args, true
 }
 
 // exprReferences parses expr WITHOUT evaluating it, returning the field names
@@ -505,9 +582,9 @@ func exprReferences(expr string) (refs []string, funcs []exprFuncCall, err error
 			refs = append(refs, name)
 			return 0, nil
 		},
-		callFunc: func(fn, arg string) (int, error) {
-			funcs = append(funcs, exprFuncCall{name: fn, arg: arg})
-			refs = append(refs, arg)
+		callFunc: func(fn string, args []string) (int, error) {
+			funcs = append(funcs, exprFuncCall{name: fn, args: args})
+			refs = append(refs, args...)
 			return 0, nil
 		},
 	}
@@ -520,13 +597,40 @@ func exprReferences(expr string) (refs []string, funcs []exprFuncCall, err error
 	return refs, funcs, nil
 }
 
+// splitTagOptions splits a binary-tag option list on commas, ignoring commas
+// nested inside parentheses. This keeps a multi-argument valueof evaluator such
+// as `CRC32(Type, Data)` as a single option, while the common single-arg forms
+// (`string(StrLen+2)`, `bytelen(Name)`) split exactly as a plain comma split
+// would (no existing tag carries a comma inside parentheses, so this is
+// backward-compatible).
+func splitTagOptions(s string) []string {
+	var out []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(out, s[start:])
+}
+
 // parse tag string directly
 func parseTagString(tagStr string, strc reflect.Value, naturalType eType, naturalOption typeOption, fieldErr error) (encodeType eType, option typeOption, err error) {
 	encodeType = naturalType
 	option = naturalOption
 
 	// read the tag
-	tags := strings.Split(tagStr, ",")
+	tags := splitTagOptions(tagStr)
 	if len(tags) == 0 || tags[0] == "" {
 		// no tags to process
 		if fieldErr != nil {
@@ -643,7 +747,7 @@ func parseEndianValue(s string) (endianOverride, error) {
 // encoding= (its default text encoding).
 func parseStructSentinel(tagStr string) (eo endianOverride, encoding string, err error) {
 	eo = endianNone
-	for _, seg := range strings.Split(tagStr, ",") {
+	for _, seg := range splitTagOptions(tagStr) {
 		seg = strings.TrimSpace(seg)
 		if seg == "" {
 			continue
@@ -760,7 +864,7 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 		}
 
 		tagStr := field.Tag.Get(tagName)
-		tags := strings.Split(tagStr, ",")
+		tags := splitTagOptions(tagStr)
 
 		meta := structFieldMetadata{
 			index:    i,
@@ -954,21 +1058,40 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 				if errRef != nil {
 					return nil, fmt.Errorf("field %s: invalid valueof expression: %w", field.Name, errRef)
 				}
+				// A function name that is not a built-in marks a custom
+				// evaluator. It is dispatched at run time against the Marshaler's
+				// registry (not validated here — see valueofCustom* docs).
+				custom := false
 				for _, fn := range fns {
 					if fn.name != "bytelen" && fn.name != "count" {
-						return nil, fmt.Errorf("field %s: unknown function %s() in valueof (use bytelen or count)", field.Name, fn.name)
+						custom = true
+						break
 					}
-					// count() is element count, valid only for slices/arrays.
-					// Strings have no unambiguous element count under text
-					// encodings — use bytelen for a string's byte length.
-					if fn.name == "count" {
-						if sf, ok := structType.FieldByName(fn.arg); ok {
-							ft := sf.Type
-							for ft.Kind() == reflect.Ptr {
-								ft = ft.Elem()
-							}
-							if ft.Kind() != reflect.Slice && ft.Kind() != reflect.Array {
-								return nil, fmt.Errorf("field %s: count(%s) requires a slice or array field (use bytelen for a string's byte length)", field.Name, fn.arg)
+				}
+				if custom {
+					name, args, isCall := parseSingleCustomCall(meta.valueofExpr)
+					if !isCall {
+						return nil, fmt.Errorf("field %s: a custom valueof evaluator must be the entire expression, e.g. valueof=%s(Field, ...); it cannot be combined with arithmetic or other functions", field.Name, fns[0].name)
+					}
+					meta.valueofCustomName = name
+					meta.valueofCustomArgs = args
+				} else {
+					for _, fn := range fns {
+						if len(fn.args) != 1 {
+							return nil, fmt.Errorf("field %s: %s() takes exactly one field-name argument", field.Name, fn.name)
+						}
+						// count() is element count, valid only for slices/arrays.
+						// Strings have no unambiguous element count under text
+						// encodings — use bytelen for a string's byte length.
+						if fn.name == "count" {
+							if sf, ok := structType.FieldByName(fn.args[0]); ok {
+								ft := sf.Type
+								for ft.Kind() == reflect.Ptr {
+									ft = ft.Elem()
+								}
+								if ft.Kind() != reflect.Slice && ft.Kind() != reflect.Array {
+									return nil, fmt.Errorf("field %s: count(%s) requires a slice or array field (use bytelen for a string's byte length)", field.Name, fn.args[0])
+								}
 							}
 						}
 					}

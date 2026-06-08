@@ -18,6 +18,39 @@ type Codec interface {
 	Decode(r io.Reader, parentStruct reflect.Value, fieldIndex int, order ByteOrder) (value interface{}, n int, err error)
 }
 
+// ValueOfArg is one field referenced by a custom valueof evaluator (see
+// Marshaler.AddValueOf). Bytes holds the field's encoded bytes — exactly what is
+// written to (or was read from) the stream, honoring byte order and text
+// encoding — which is what a checksum must operate on (the in-memory Go value
+// can differ after byte-swapping or text encoding). Value holds the Go field
+// value, for evaluators that compute from the value directly (e.g. a sum of
+// integer fields).
+type ValueOfArg struct {
+	Name  string      // the referenced field's name
+	Bytes []byte      // the field's encoded bytes (byte order / text encoding honored)
+	Value interface{} // the Go field value
+}
+
+// ValueOfContext is passed to a custom valueof evaluator. The same evaluator
+// runs on encode (Decoding=false) to produce the value written to the target
+// field, and on decode (Decoding=true) to recompute the value and validate it
+// against what was read from the stream.
+type ValueOfContext struct {
+	Struct   interface{}  // pointer to the struct being (de)serialized
+	Target   string       // name of the field being computed (e.g. "CRC")
+	Args     []ValueOfArg // the referenced members, in tag order
+	Decoding bool         // false on encode, true on decode-side validation
+}
+
+// ValueOfFunc is a custom evaluator registered with Marshaler.AddValueOf and
+// referenced from a tag such as `binary:"uint32,valueof=CRC32(Type, Data)"`. It
+// returns the integer to write into the target field (written per the field's
+// declared binary type and byte order). On decode the returned value is compared
+// to the value read from the stream; a mismatch is reported as a validation
+// error (DecodeError wrapping ErrValidationError). The custom name must not be
+// a built-in (bytelen, count).
+type ValueOfFunc func(ctx ValueOfContext) (uint64, error)
+
 // type ByteOrder is an alias of encoding/binary.ByteOrder
 type ByteOrder = binary.ByteOrder
 

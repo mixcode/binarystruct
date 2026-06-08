@@ -70,18 +70,80 @@ Name    []byte `binary:"[NameLen]byte"`               // decode: sized from Name
 | **`bytelen(F)`** | Total **encoded byte size** of field `F` (exact: honors text encodings, length prefixes, arrays, and nested structs). Valid for any field. |
 | **`count(F)`** | **Element count** (`len(F)`) of an array or slice field `F`. Not valid for strings (no unambiguous element count under text encodings) — use `bytelen` for a string's byte length. |
 
-Examples: `valueof=bytelen(Name)`, `valueof=bytelen(Payload)+2`, `valueof=count(Items)`, `valueof=bytelen(A)+bytelen(B)`. (Functions take exactly one field-name argument in this version; multi-argument forms are reserved.)
+Examples: `valueof=bytelen(Name)`, `valueof=bytelen(Payload)+2`, `valueof=count(Items)`, `valueof=bytelen(A)+bytelen(B)`. The built-in `bytelen`/`count` take exactly one field-name argument. **Custom evaluators** (registered with `Marshaler.AddValueOf`) may take several — `valueof=CRC32(Type, Data)` — see [Custom valueof evaluators](#custom-valueof-evaluators-checksums-crcs) below. The option splitter is parenthesis-aware, so commas inside a function call's argument list do not split the tag's option list.
 
 **Reference scope (forward references permitted).** Because the entire Go value is available at encode time, a `valueof` expression may reference **any** field in the struct, including fields declared *after* it. This is the deliberate counterpart to decode-side `[arrayLen]`/`buf_len` expressions, which remain **arithmetic-only** and may reference only **preceding** fields. Function tokens (`bytelen`/`count`) are rejected outside `valueof`.
 
 **`bytelen()` evaluation.** Size is obtained by encoding `F` with the active Marshaler into a scratch buffer and counting the bytes — guaranteeing it equals what is actually written. (Raw `len()` is **not** used for strings, since text encodings such as Shift-JIS change the byte width.) Implementations may fast-path trivially-sized targets — byte slices, fixed-width scalars, and fixed arrays of scalars — with `len`/byte-width arithmetic to avoid a second encode.
 
-**Validation (at `getStructMetadata`):** the target is an integer/bitmap kind; the function name is `bytelen` or `count`; the argument names an existing field; a `count` argument is a slice or array field; reference cycles among `valueof` fields are rejected.
+**Validation (at `getStructMetadata`):** the target is an integer/bitmap kind; the argument names an existing field; for the built-ins, the function name is `bytelen` or `count` (one argument), and a `count` argument is a slice or array field; reference cycles among `valueof` fields are rejected. A non-built-in function name marks a custom evaluator (see below).
 
 | Path | Mapping |
 | :--- | :--- |
-| **Runtime** (`marshal.go`, `unsafe_io.go`) | Before writing the field, if `valueofExpr` is set, evaluate it with the context-carrying value evaluator (Marshaler + byte order + struct metadata) and write the resulting integer in place of the field value. The unsafe path routes `valueof` fields through the reflection writer (rare fields; negligible cost). |
-| **Codegen** (`generator.go`) | Emit the value computation inline before the integer write. `count(F)` → `len(s.F)`. `bytelen(F)` is resolved for nearly every field shape: byte slices/arrays and raw `string` (`len`), fixed `string(N)` buffers (the buffer width), all length-prefixed/null-terminated string variants (`prefix + content + terminator`), text-encoded strings (an `ms`-guarded `EncodeText` measurement matching the encode path), fixed-width scalars and scalar arrays (`width × count`), and nested structs / tag-counted arrays-of-structs / pointer-to-struct (a byte-exact runtime measurement via `binarystruct.Write(io.Discard, …)` that mirrors the encode path; a `nil` pointer contributes `0`). Still rejected at generation time (`bytelenExpr` returns an error → use the runtime interpreter): `bytelen` of a **pointer-element struct array** or a **pointer scalar field**, and a `valueof` expression that references another `valueof` field. |
+| **Runtime** (`marshal.go`, `unsafe_io.go`) | Before writing the field, if `valueofExpr` is set, evaluate it with the context-carrying value evaluator (Marshaler + byte order + struct metadata) and write the resulting integer in place of the field value. The unsafe path routes `valueof` fields through the reflection writer (rare fields; negligible cost). A custom evaluator is dispatched to its registered `ValueOfFunc` instead (`evalCustomValueof`), and is re-run on decode for validation (`validateCustomValueofs`, a post-decode pass in both `readStruct` and `unsafeReadStruct`). |
+| **Codegen** (`generator.go`) | Emit the value computation inline before the integer write. `count(F)` → `len(s.F)`. `bytelen(F)` is resolved for nearly every field shape: byte slices/arrays and raw `string` (`len`), fixed `string(N)` buffers (the buffer width), all length-prefixed/null-terminated string variants (`prefix + content + terminator`), text-encoded strings (an `ms`-guarded `EncodeText` measurement matching the encode path), fixed-width scalars and scalar arrays (`width × count`), and nested structs / tag-counted arrays-of-structs / pointer-to-struct (a byte-exact runtime measurement via `binarystruct.Write(io.Discard, …)` that mirrors the encode path; a `nil` pointer contributes `0`). Still rejected at generation time (`bytelenExpr` returns an error → use the runtime interpreter): `bytelen` of a **pointer-element struct array** or a **pointer scalar field**, a `valueof` expression that references another `valueof` field, and any **custom evaluator** (registered at run time, so it cannot be embedded in standalone code). |
+
+#### Custom valueof evaluators (checksums, CRCs)
+
+The built-in `bytelen`/`count` cover length and count fields. The other common
+*derived* field in real formats is a **checksum / CRC** over preceding bytes,
+which `bytelen` cannot express. Register a named evaluator on the Marshaler and
+reference it from a `valueof=NAME(field, …)` tag:
+
+```go
+ms := binarystruct.NewMarshaler()
+ms.AddValueOf("CRC32", func(c binarystruct.ValueOfContext) (uint64, error) {
+    h := crc32.NewIEEE()
+    for _, a := range c.Args { h.Write(a.Bytes) }
+    return uint64(h.Sum32()), nil
+})
+
+type Chunk struct {
+    _      struct{} `binary:"endian=big"`
+    Length uint32   `binary:"uint32,valueof=bytelen(Data)"`
+    Type   string   `binary:"string(4)"`
+    Data   []byte   `binary:"[Length]byte"`
+    CRC    uint32   `binary:"uint32,valueof=CRC32(Type, Data)"` // CRC over the two fields' encoded bytes
+}
+```
+
+- **Registration is per-Marshaler** (like custom `Codec`s, not a package global):
+  use a configured `Marshaler` — `ms.Marshal`/`ms.Unmarshal` — not the package-level
+  functions. An unregistered name fails loud (`AddValueOf` / `GetValueOf` /
+  `RemoveValueOf` manage the registry). The name must not be `bytelen` or `count`.
+- **The handler receives `ValueOfContext`** with, for each referenced field, its
+  **encoded bytes** (`Args[i].Bytes` — exactly what is written to / was read from
+  the stream, honoring byte order and text encoding) and its Go value
+  (`Args[i].Value`). **Compute checksums over `Bytes`, not `Value`** — byte order,
+  text encoding, and field width change what actually hits the stream. `Target`
+  names the field being computed; `Struct` is a pointer to the (de)serialized
+  struct. It returns the integer to write (per the target field's binary type).
+- **Encode + decode (unlike `bytelen`, which is encode-only).** On encode the
+  evaluator produces the value written to the target field (the Go field is
+  ignored — emit-only, no write-back, as above). On decode the *same* evaluator
+  runs again (`ValueOfContext.Decoding == true`) over the decoded fields and the
+  result is compared to the value read from the stream; a mismatch is reported as
+  `DecodeError` wrapping `ErrValidationError`, naming the field. Validation runs
+  as a **post-decode pass** over the whole struct, so a checksum may reference
+  fields declared after it.
+- **Grammar.** A custom evaluator must be the *entire* `valueof` expression —
+  `valueof=CRC32(Type, Data)` — and cannot be combined with arithmetic or other
+  functions in this version (e.g. `CRC32(Data)+1` is rejected at metadata time).
+- **Memory/CPU.** Each referenced field's bytes are materialized on demand with
+  the same scratch-encode `bytelen` uses, so peak memory is bounded by the
+  largest referenced field, not the struct or stream; the streaming `Write` path
+  stays streaming. The cost is a possible re-encode of covered fields (CPU, not
+  RAM); a raw-bytes fast path and a capturing writer are possible future
+  optimizations.
+- **Codegen does not support custom evaluators** (they are registered at run
+  time) — generation fails loud and the struct must use the runtime interpreter.
+
+**Validation (at `getStructMetadata`):** a function name other than `bytelen`/`count`
+marks a custom evaluator; the whole expression must then be a single such call,
+its target an integer/bitmap kind, and its arguments existing fields. The
+evaluator itself is looked up by name on the Marshaler at run time (metadata is
+cached per type, evaluators are registered per Marshaler), so an unregistered or
+misspelled name surfaces as a run-time error, not a parse-time one.
 
 ### Fixed / Magic Values: `const`
 

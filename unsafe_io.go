@@ -114,10 +114,21 @@ func (ms *Marshaler) unsafeWriteStruct(w io.Writer, order ByteOrder, strc reflec
 		// fields (emit-only). Route through the reflection writer with the
 		// computed value instead of the stale in-memory value.
 		if fMeta.valueofExpr != "" {
-			computed, errV := ms.evalValueof(order, strc, meta, fMeta.valueofExpr)
-			if errV != nil {
-				err = wErr(fMeta.index, errV)
-				return
+			var computed int
+			if fMeta.valueofCustomName != "" {
+				cv, errV := ms.evalCustomValueof(order, strc, meta, fMeta, false)
+				if errV != nil {
+					err = wErr(fMeta.index, errV)
+					return
+				}
+				computed = int(cv)
+			} else {
+				cv, errV := ms.evalValueof(order, strc, meta, fMeta.valueofExpr)
+				if errV != nil {
+					err = wErr(fMeta.index, errV)
+					return
+				}
+				computed = cv
 			}
 			syn := synthIntValue(strc.Field(fMeta.index), computed)
 			naturalType, option, errF := ms.resolveFieldEncoding(syn, fMeta, writeEval)
@@ -665,6 +676,9 @@ func (ms *Marshaler) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflect
 		}
 		n += m
 		firstElem = false
+	}
+	if err = ms.validateCustomValueofs(order, strc, meta, n, typ); err != nil {
+		return n, err
 	}
 	return
 }

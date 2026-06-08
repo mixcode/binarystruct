@@ -293,9 +293,36 @@ Examples: `valueof=bytelen(Name)`, `valueof=bytelen(Payload)+2`, `valueof=count(
 * **Integer/bitmap fields only.** Using `valueof` on any other field type is a compile-time error.
 * **Forward references allowed.** Unlike decode-side size expressions (which may reference only *preceding* fields), a `valueof` expression may reference any field, since the entire value is available at encode time.
 * `bytelen`/`count` are valid only inside `valueof`, not in `[len]` / `(buf_len)` size expressions.
-* **Scope.** `valueof` derives only lengths and counts of fields (via `bytelen`/`count`). Other derived values — CRC checksums, compressed sizes, offsets, etc. — are not computed for you and must be assigned normally.
+* **Scope of the built-ins.** `bytelen`/`count` derive only lengths and counts of fields. Other derived values — CRC checksums, compressed sizes, etc. — are computed by **custom evaluators** you register (see below).
 
-> **Codegen note:** the static code generator supports `count(F)`, and `bytelen(F)` of byte slices/arrays and non-encoded strings. `bytelen` of nested structs or text-encoded strings is not yet supported by codegen; use the runtime interpreter for those structs.
+### Custom valueof evaluators (checksums, CRCs)
+
+Register a named evaluator on the Marshaler and reference it from a `valueof=NAME(field, …)` tag to derive any value — the common case being a checksum over preceding fields:
+
+```go
+ms := binarystruct.NewMarshaler()
+ms.AddValueOf("CRC32", func(c binarystruct.ValueOfContext) (uint64, error) {
+    h := crc32.NewIEEE()
+    for _, a := range c.Args { h.Write(a.Bytes) } // hash the ENCODED bytes
+    return uint64(h.Sum32()), nil
+})
+
+type Chunk struct {
+    _      struct{} `binary:"endian=big"`
+    Length uint32   `binary:"uint32,valueof=bytelen(Data)"`
+    Type   string   `binary:"string(4)"`
+    Data   []byte   `binary:"[Length]byte"`
+    CRC    uint32   `binary:"uint32,valueof=CRC32(Type, Data)"`
+}
+blob, _ := ms.Marshal(&Chunk{Type: "IHDR", Data: payload})
+```
+
+* **Per-Marshaler registration** (like custom `Codec`s): use `ms.Marshal`/`ms.Unmarshal`, not the package-level functions. `AddValueOf`/`RemoveValueOf`/`GetValueOf` manage the registry; an unregistered name fails loud. The name must not be `bytelen`/`count`.
+* **Hash the encoded bytes**, not the Go values: each `ValueOfContext.Args[i]` carries `Bytes` (what is written to / read from the stream, honoring byte order and text encoding) and `Value` (the Go field value). A checksum must use `Bytes`.
+* **Validated on decode.** Unlike the encode-only built-ins, a custom evaluator also runs on decode (over the decoded fields) and the result is compared to the value read; a mismatch is a `DecodeError` wrapping `ErrValidationError`. Validation is a post-decode pass, so a checksum may reference fields declared after it.
+* **Must be the whole expression** — `valueof=CRC32(Type, Data)`; it cannot be mixed with arithmetic in this version.
+
+> **Codegen note:** the static code generator resolves `count(F)` and `bytelen(F)` for nearly every field shape (scalars and scalar arrays, byte slices/arrays, all string variants including text-encoded, nested structs, tag-counted arrays of structs, and pointer-to-struct). It does **not** support **custom valueof evaluators** (registered at run time) — those, like `endian=inverse` and embedding-inherited order, fail generation with a clear message; use the runtime interpreter for those structs.
 
 ---
 

@@ -586,6 +586,9 @@ func (ms *Marshaler) readStruct(r io.Reader, order ByteOrder, strc reflect.Value
 		n += m
 		firstElem = false
 	}
+	if err = ms.validateCustomValueofs(order, strc, meta, n, typ); err != nil {
+		return
+	}
 	return
 }
 
@@ -893,6 +896,41 @@ func validateConst(v reflect.Value, fMeta *structFieldMetadata) error {
 		}
 	default:
 		return fmt.Errorf("const validation not supported on type %s", v.Type().String())
+	}
+	return nil
+}
+
+// validateCustomValueofs runs after a struct is fully decoded: for every field
+// with a custom valueof evaluator it recomputes the value (Decoding=true) from
+// the decoded fields and checks it against what was read from the stream,
+// returning a DecodeError wrapping ErrValidationError on mismatch. Running it as
+// a post-decode pass (rather than inline) lets a checksum reference fields
+// declared after it. The comparison is done on the encoded wire bytes so it is
+// exact regardless of the target field's width, sign, or byte order. The decoded
+// field is never overwritten (valueof stays emit-only, like bytelen/const).
+func (ms *Marshaler) validateCustomValueofs(order ByteOrder, strc reflect.Value, meta *structMetadata, structEnd int, typ reflect.Type) error {
+	for _, fMeta := range meta.fields {
+		if fMeta.valueofCustomName == "" || fMeta.unexported || fMeta.ignore {
+			continue
+		}
+		mkErr := func(e error) error {
+			return &DecodeError{Offset: structEnd, Field: typ.Field(fMeta.index).Name, Err: e}
+		}
+		computed, err := ms.evalCustomValueof(order, strc, meta, fMeta, true)
+		if err != nil {
+			return mkErr(err)
+		}
+		wantBytes, err := ms.fieldEncodedBytes(order, strc, synthIntValue(strc.Field(fMeta.index), int(computed)), fMeta)
+		if err != nil {
+			return mkErr(err)
+		}
+		gotBytes, err := ms.fieldEncodedBytes(order, strc, strc.Field(fMeta.index), fMeta)
+		if err != nil {
+			return mkErr(err)
+		}
+		if !bytes.Equal(gotBytes, wantBytes) {
+			return mkErr(fmt.Errorf("valueof %s() mismatch: got %#x, want %#x: %w", fMeta.valueofCustomName, gotBytes, wantBytes, ErrValidationError))
+		}
 	}
 	return nil
 }

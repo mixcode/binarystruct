@@ -168,6 +168,14 @@ func TestValidate(t *testing.T) {
 	if !errors.Is(err, binarystruct.ErrValidationError) {
 		t.Fatalf("error %q does not wrap ErrValidationError", err)
 	}
+	// Parity with the runtime interpreter: a *DecodeError naming the field.
+	var de *binarystruct.DecodeError
+	if !errors.As(err, &de) {
+		t.Fatalf("error is not a *binarystruct.DecodeError: %v", err)
+	}
+	if de.Field != "CRC" {
+		t.Fatalf("DecodeError.Field = %q, want CRC", de.Field)
+	}
 }
 `
 	genCustomValueofCase(t, cvChunkSrc, "Chunk", testSrc, true)

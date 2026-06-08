@@ -30,7 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (verified byte-for-byte in tests). Generated code requires a non-nil Marshaler
   (like `codec=`; call `WriteBinaryWithMarshaler`). Decode-time validation is
   opt-in via the new **`-valueof-validate`** codegen flag (default off /
-  encode-only).
+  encode-only); when on, a mismatch returns a `*DecodeError` wrapping
+  `ErrValidationError` (offset + field), matching the runtime interpreter.
 
 ### Limitations
 - Codegen rejects a custom `valueof` evaluator whose referenced arg is neither a

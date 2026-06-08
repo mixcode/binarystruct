@@ -1213,7 +1213,11 @@ func (g *Generator) generateCustomValueofValidate(buf *bytes.Buffer, fieldName, 
 	fmt.Fprintf(buf, "\t\tvoVal, err = fn(binarystruct.ValueOfContext{Struct: s, Target: %q, Decoding: true, Args: []binarystruct.ValueOfArg{%s}})\n", fieldName, strings.Join(argExprs, ", "))
 	buf.WriteString("\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n")
 	fmt.Fprintf(buf, "\t\tif s.%s != %s(voVal) {\n", fieldName, strings.TrimPrefix(goType, "*"))
-	fmt.Fprintf(buf, "\t\t\treturn n, fmt.Errorf(\"field %s: valueof %s mismatch: %%w\", binarystruct.ErrValidationError)\n", fieldName, evname)
+	// Match the runtime's validateCustomValueofs: a *DecodeError whose Offset is
+	// the end of the struct (n here) and whose Err wraps ErrValidationError, so
+	// errors.As(&DecodeError) and errors.Is(ErrValidationError) both behave the
+	// same whether decoded via the interpreter or generated code.
+	fmt.Fprintf(buf, "\t\t\treturn n, &binarystruct.DecodeError{Offset: n, Field: %q, Err: fmt.Errorf(\"valueof %s() mismatch: %%w\", binarystruct.ErrValidationError)}\n", fieldName, evname)
 	buf.WriteString("\t\t}\n")
 	buf.WriteString("\t}\n")
 	return nil

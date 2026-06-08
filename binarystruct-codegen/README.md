@@ -8,6 +8,19 @@ Static code generator for [binarystruct](https://github.com/mixcode/binarystruct
 go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
 ```
 
+This is a **separate nested module** (its own `go.mod`), so it is not reachable by
+import path from a consumer module and is **not** covered by a `replace` directive
+on the parent `binarystruct` module. To run an **unreleased / local checkout** (e.g.
+a `replace`'d copy), build the tool directly from its directory instead of
+`go install`:
+
+```bash
+# from a local clone / replaced checkout of binarystruct:
+go build -o ./binarystruct-codegen ./binarystruct-codegen   # run from the repo root
+# or build straight from the nested module directory:
+cd path/to/binarystruct/binarystruct-codegen && go build -o /tmp/binarystruct-codegen .
+```
+
 ## Usage
 
 ```

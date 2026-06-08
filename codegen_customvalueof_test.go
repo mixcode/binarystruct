@@ -173,6 +173,51 @@ func TestValidate(t *testing.T) {
 	genCustomValueofCase(t, cvChunkSrc, "Chunk", testSrc, true)
 }
 
+// TestCodegen_CustomValueof_ScalarArg: a custom evaluator over a fixed-width
+// integer scalar (uint16) plus a byte slice. Asserts the generated output is
+// byte-identical to the runtime interpreter for the same value (three-path
+// parity) and that the CRC covers the scalar's big-endian wire bytes.
+func TestCodegen_CustomValueof_ScalarArg(t *testing.T) {
+	src := "type Frame struct {\n" +
+		"\t_    struct{} `binary:\"endian=big\"`\n" +
+		"\tVer  uint16   `binary:\"uint16\"`\n" +
+		"\tData []byte   `binary:\"[]byte\"`\n" +
+		"\tCRC  uint32   `binary:\"uint32,valueof=CRC32(Ver, Data)\"`\n}\n"
+	testSrc := `
+import (
+	"bytes"
+	"hash/crc32"
+	"testing"
+
+	"github.com/mixcode/binarystruct"
+)
+` + cvHelperSrc + `
+func TestScalarArg(t *testing.T) {
+	ms := crcMarshaler()
+	in := Frame{Ver: 0x0102, Data: []byte{0xaa, 0xbb, 0xcc}}
+	var b bytes.Buffer
+	if _, err := in.WriteBinaryWithMarshaler(ms, &b, binarystruct.BigEndian); err != nil {
+		t.Fatalf("codegen encode: %v", err)
+	}
+	gen := b.Bytes()
+	rt, err := ms.Marshal(&in) // runtime interpreter, same struct + evaluator
+	if err != nil {
+		t.Fatalf("runtime encode: %v", err)
+	}
+	if !bytes.Equal(gen, rt) {
+		t.Fatalf("codegen vs runtime differ:\n codegen=% x\n runtime=% x", gen, rt)
+	}
+	// CRC must cover Ver's big-endian bytes (01 02) followed by Data.
+	want := crc32.ChecksumIEEE([]byte{0x01, 0x02, 0xaa, 0xbb, 0xcc})
+	got := uint32(gen[len(gen)-4])<<24 | uint32(gen[len(gen)-3])<<16 | uint32(gen[len(gen)-2])<<8 | uint32(gen[len(gen)-1])
+	if got != want {
+		t.Fatalf("CRC = %#08x, want %#08x", got, want)
+	}
+}
+`
+	genCustomValueofCase(t, src, "Frame", testSrc, false)
+}
+
 // TestCodegen_CustomValueof_NonByteRegion_Errors: a custom evaluator over a
 // text-encoded (non-byte-region) field fails generation with a clear message.
 func TestCodegen_CustomValueof_NonByteRegion_Errors(t *testing.T) {

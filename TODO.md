@@ -19,4 +19,5 @@
 
 
 ## Pending / Future Ideas
+- [ ] **Codegen: guard self-referential `bytelen` cycle (clean-agent eval finding, 0.3.0)**: `binarystruct-codegen` **stack-overflows (fatal crash)** on `NameLen uint16 \`binary:"uint16,valueof=bytelen(Name)"\`` paired with `Name string \`binary:"string(NameLen)"\``. `bytelenExpr` resolves the `string(N)` size to its buffer width `N` (= `NameLen`), but `NameLen` is the `valueof` field, so `bytelenExpr` → `translateValueof` re-enters for the same field forever. The runtime interpreter handles this shape fine; only codegen crashes — and a crash (vs. a clean "unsupported" error) is the worst failure for an agent. Fix: detect the cycle in `translateValueof`/`bytelenExpr` and emit a clear generation error (or support it). The canonical `Name []byte \`binary:"[NameLen]byte"\`` shape is unaffected. Confirmed reproducible; stack trace: `bytelenExpr → translateValueof.func1 → bytelenExpr`.
 - [ ] **Multidimensional arrays (Low priority)**: Support tags like `[4][2][2]int8` for nested Go slices/arrays.

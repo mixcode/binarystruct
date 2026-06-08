@@ -4,6 +4,7 @@ package example
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/mixcode/binarystruct"
 	"io"
@@ -37,17 +38,13 @@ func (s *Packet) WriteBinary(w io.Writer, order binarystruct.ByteOrder) (int, er
 
 // WriteBinaryWithMarshaler implements binarystruct.MarshalerContextWriter.
 func (s *Packet) WriteBinaryWithMarshaler(ms *binarystruct.Marshaler, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {
+	order = binarystruct.BigEndian
 	var tmp [8]byte
 	var m int
-	{
-		writeLen := int(4)
-		strBytes := make([]byte, writeLen)
-		copy(strBytes, s.Magic)
-		m, err = w.Write(strBytes)
-		n += m
-		if err != nil {
-			return n, err
-		}
+	m, err = w.Write([]byte{0x50, 0x41, 0x4b, 0x31})
+	n += m
+	if err != nil {
+		return n, err
 	}
 	order.PutUint32(tmp[:4], uint32(s.Seq))
 	m, err = w.Write(tmp[:4])
@@ -79,20 +76,17 @@ func (s *Packet) ReadBinary(r io.Reader, order binarystruct.ByteOrder) (int, err
 
 // ReadBinaryWithMarshaler implements binarystruct.MarshalerContextReader.
 func (s *Packet) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {
+	order = binarystruct.BigEndian
 	var tmp [8]byte
 	var m int
-	{
-		readLen := int(4)
-		strBytes := make([]byte, readLen)
-		m, err = io.ReadFull(r, strBytes)
-		n += m
-		if err != nil {
-			return n, err
-		}
-		strlen := len(strBytes)
-		for ; strlen > 0 && strBytes[strlen-1] == 0; strlen-- {
-		}
-		s.Magic = string(strBytes[:strlen])
+	voffMagic := n
+	m, err = io.ReadFull(r, s.Magic[:])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	if !bytes.Equal(s.Magic[:], []byte{0x50, 0x41, 0x4b, 0x31}) {
+		return n, &binarystruct.DecodeError{Offset: voffMagic, Field: "Magic", Err: fmt.Errorf("const mismatch: %w", binarystruct.ErrValidationError)}
 	}
 	m, err = io.ReadFull(r, tmp[:4])
 	n += m
@@ -120,6 +114,154 @@ func (s *Packet) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader
 		n += m
 		if err != nil {
 			return n, err
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s *Chunk) MarshalBinary() ([]byte, error) {
+	var b bytes.Buffer
+	_, err := s.WriteBinary(&b, binarystruct.BigEndian)
+	return b.Bytes(), err
+}
+
+// AppendBinary implements encoding.BinaryAppender.
+func (s *Chunk) AppendBinary(b []byte) ([]byte, error) {
+	buf := bytes.NewBuffer(b)
+	_, err := s.WriteBinary(buf, binarystruct.BigEndian)
+	return buf.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *Chunk) UnmarshalBinary(data []byte) error {
+	r := bytes.NewReader(data)
+	_, err := s.ReadBinary(r, binarystruct.BigEndian)
+	return err
+}
+
+// WriteBinary implements binarystruct.BinaryWriter.
+func (s *Chunk) WriteBinary(w io.Writer, order binarystruct.ByteOrder) (int, error) {
+	return s.WriteBinaryWithMarshaler(nil, w, order)
+}
+
+// WriteBinaryWithMarshaler implements binarystruct.MarshalerContextWriter.
+func (s *Chunk) WriteBinaryWithMarshaler(ms *binarystruct.Marshaler, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {
+	order = binarystruct.BigEndian
+	var tmp [8]byte
+	var m int
+	order.PutUint32(tmp[:4], uint32((len(s.Data))))
+	m, err = w.Write(tmp[:4])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	{
+		strBytes := []byte(s.Type)
+		bufLen := int(4)
+		writeBytes := make([]byte, bufLen)
+		copy(writeBytes, strBytes)
+		m, err = w.Write(writeBytes)
+		n += m
+		if err != nil {
+			return n, err
+		}
+	}
+	{
+		writeLen := int((len(s.Data)))
+		m, err = w.Write(s.Data[:writeLen])
+		n += m
+		if err != nil {
+			return n, err
+		}
+	}
+	if ms == nil {
+		return n, errors.New("marshaler required for valueof CRC32")
+	}
+	{
+		fn := ms.GetValueOf("CRC32")
+		if fn == nil {
+			return n, fmt.Errorf("unknown valueof evaluator: %s", "CRC32")
+		}
+		voType := make([]byte, 4)
+		copy(voType, []byte(s.Type))
+		var voVal uint64
+		voVal, err = fn(binarystruct.ValueOfContext{Struct: s, Target: "CRC", Args: []binarystruct.ValueOfArg{{Name: "Type", Bytes: voType, Value: s.Type}, {Name: "Data", Bytes: s.Data, Value: s.Data}}})
+		if err != nil {
+			return n, err
+		}
+		order.PutUint32(tmp[:4], uint32(voVal))
+		m, err = w.Write(tmp[:4])
+		n += m
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+// ReadBinary implements binarystruct.BinaryReader.
+func (s *Chunk) ReadBinary(r io.Reader, order binarystruct.ByteOrder) (int, error) {
+	return s.ReadBinaryWithMarshaler(nil, r, order)
+}
+
+// ReadBinaryWithMarshaler implements binarystruct.MarshalerContextReader.
+func (s *Chunk) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {
+	order = binarystruct.BigEndian
+	var tmp [8]byte
+	var m int
+	m, err = io.ReadFull(r, tmp[:4])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	s.Length = uint32(order.Uint32(tmp[:4]))
+	{
+		var strBytes []byte
+		strLen := int(4)
+		strBytes = make([]byte, strLen)
+		m, err = io.ReadFull(r, strBytes)
+		n += m
+		if err != nil {
+			return n, err
+		}
+		strlen := len(strBytes)
+		for ; strlen > 0 && strBytes[strlen-1] == 0; strlen-- {
+		}
+		s.Type = string(strBytes[:strlen])
+	}
+	{
+		readLen := int(s.Length)
+		s.Data = make([]byte, readLen)
+		m, err = io.ReadFull(r, s.Data)
+		n += m
+		if err != nil {
+			return n, err
+		}
+	}
+	m, err = io.ReadFull(r, tmp[:4])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	s.CRC = uint32(order.Uint32(tmp[:4]))
+	if ms == nil {
+		return n, errors.New("marshaler required for valueof CRC32")
+	}
+	{
+		fn := ms.GetValueOf("CRC32")
+		if fn == nil {
+			return n, fmt.Errorf("unknown valueof evaluator: %s", "CRC32")
+		}
+		voType := make([]byte, 4)
+		copy(voType, []byte(s.Type))
+		var voVal uint64
+		voVal, err = fn(binarystruct.ValueOfContext{Struct: s, Target: "CRC", Decoding: true, Args: []binarystruct.ValueOfArg{{Name: "Type", Bytes: voType, Value: s.Type}, {Name: "Data", Bytes: s.Data, Value: s.Data}}})
+		if err != nil {
+			return n, err
+		}
+		if s.CRC != uint32(voVal) {
+			return n, &binarystruct.DecodeError{Offset: n, Field: "CRC", Err: fmt.Errorf("valueof CRC32() mismatch: %w", binarystruct.ErrValidationError)}
 		}
 	}
 	return n, nil

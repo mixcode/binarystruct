@@ -72,12 +72,12 @@ For each specified type, the tool generates (the no-arg methods bake the `-endia
 - `UnmarshalBinary(data []byte) error` — implements `encoding.BinaryUnmarshaler`
 - `WriteBinary(w io.Writer, order ByteOrder) (int, error)` / `ReadBinary(r io.Reader, order ByteOrder) (int, error)` — order-taking forms binarystruct dispatches to
 
-If the struct uses features requiring a `Marshaler` context (text encodings via `encoding=`, custom codecs via `codec=`), context-aware methods are also generated:
+Context-aware variants are **always** generated too (the no-arg forms above simply call them with a `nil` Marshaler):
 
 - `WriteBinaryWithMarshaler(ms *Marshaler, w io.Writer, order ByteOrder) (int, error)`
 - `ReadBinaryWithMarshaler(ms *Marshaler, r io.Reader, order ByteOrder) (int, error)`
 
-These implement `MarshalerContextWriter` / `MarshalerContextReader`, enabling the binarystruct runtime to dispatch directly to the generated code when called through a `Marshaler`.
+These implement `MarshalerContextWriter` / `MarshalerContextReader`, enabling the binarystruct runtime to dispatch directly to the generated code when called through a `Marshaler`. You **must** call these (not the no-arg `MarshalBinary`/`UnmarshalBinary`) when the struct relies on a `Marshaler` context — text encodings via `encoding=`, custom codecs via `codec=`, or custom `valueof` evaluators via `valueof=NAME(...)` — since the no-arg forms pass a `nil` Marshaler and return a clear error for those fields.
 
 ## Supported Tag Features
 
@@ -88,7 +88,8 @@ The binarystruct-codegen tool supports the full `binary:"..."` tag syntax includ
 - Arrays (`[N]type`, `[Expr]type`)
 - Padding (`pad(N)`)
 - Tag math expressions (e.g. `string(PayloadSize - 4)`)
-- Validation (`range=min..max`, `match=pattern`)
+- Validation (`range=min..max`, `match=pattern`, and `const=Value` magic/fixed values) — checked on decode by default; see `-no-validate`
+- Computed field values (`valueof=bytelen(F)`, `valueof=count(F)` with arithmetic, plus custom evaluators — see below)
 - Omittable fields (`omittable`)
 - Struct-level byte order (`binary:"endian=big|little"`) and struct-level default text encoding (`binary:"encoding=NAME"`) via the blank `_ struct{}` sentinel
 - Per-field endian override (`endian=big|little`)
@@ -119,8 +120,8 @@ For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the p
 ## Runnable Example
 
 A fully self-contained runnable example is provided in the [example](example) directory:
-- [types.go](example/types.go) — Defines a `Packet` struct with tag declarations and a `go:generate` directive.
-- [example_test.go](example/example_test.go) — Demonstrates marshaling and unmarshaling using the generated methods.
+- [types.go](example/types.go) — Defines a `Packet` (struct-level `endian=`, a `const` magic, and `range=` validation) and a `Chunk` (a PNG-chunk-style record using the built-in `bytelen()` plus a custom `valueof=CRC32(...)` evaluator), each with a `go:generate` directive.
+- [example_test.go](example/example_test.go) — Round-trips both: `Packet` via the no-arg `MarshalBinary`/`UnmarshalBinary`, and `Chunk` via `WriteBinaryWithMarshaler`/`ReadBinaryWithMarshaler` with a registered `CRC32` evaluator; also shows decode validation rejecting a bad value/CRC with a `*DecodeError`.
 
 ## Documentation
 

@@ -11,6 +11,38 @@ import (
 	"testing"
 )
 
+// TestCodegen_BytelenCycle_Errors verifies the generator emits a clean error
+// (rather than crashing with a stack overflow) on a self-referential bytelen
+// cycle: valueof=bytelen(Name) where Name is string(NameLen) and NameLen is that
+// very valueof field. (Surfaced by the 0.3.0 clean-agent evaluation.)
+func TestCodegen_BytelenCycle_Errors(t *testing.T) {
+	t.Parallel()
+	tmpDir, err := os.MkdirTemp(".", "tmp-bs-cycle-")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	src := "package p\n\ntype Rec struct {\n" +
+		"\t_       struct{} `binary:\"endian=little\"`\n" +
+		"\tNameLen uint16   `binary:\"uint16,valueof=bytelen(Name)\"`\n" +
+		"\tName    string   `binary:\"string(NameLen)\"`\n}\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "t.go"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write t.go: %v", err)
+	}
+
+	out, err := exec.Command(sharedCodegenBin, "-type", "Rec", "-endian", "little", tmpDir).CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected a clean error for the self-referential bytelen cycle; output:\n%s", out)
+	}
+	if strings.Contains(string(out), "stack overflow") {
+		t.Fatalf("generator crashed (stack overflow) instead of erroring cleanly:\n%s", out)
+	}
+	if !strings.Contains(string(out), "self-referential") {
+		t.Errorf("error should explain the cycle; got:\n%s", out)
+	}
+}
+
 // TestCodegen_StructEncoding_Errors verifies codegen fails loud (rather than
 // emitting silently-unencoded output) when a string field would rely on a
 // struct-level encoding= it cannot honor.

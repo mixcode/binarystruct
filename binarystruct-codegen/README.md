@@ -82,10 +82,11 @@ The binarystruct-codegen tool supports the full `binary:"..."` tag syntax includ
 - Custom codecs (`custom,codec=NAME`)
 - Nested structs
 
-**Not supported by codegen** (use the runtime interpreter): struct-level
-`endian=inverse`, byte-order inheritance via embedding, and a struct-level
-`encoding=` default (put `encoding=` on each string field instead — generation
-errors otherwise). Per-field `endian=inverse` and per-field `encoding=` are
+**Not supported by codegen** (generation errors with a clear message — use the
+runtime interpreter): struct-level `endian=inverse`, byte-order inheritance via
+embedding, a struct-level `encoding=` default (put `encoding=` on each string
+field instead), and a self-referential `valueof=bytelen(F)` where `F` is
+`string(thatVeryField)`. Per-field `endian=inverse` and per-field `encoding=` are
 supported.
 
 For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the parent project.

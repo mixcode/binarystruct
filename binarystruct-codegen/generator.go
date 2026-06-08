@@ -170,6 +170,16 @@ func isStringBinType(binType string) bool {
 	return false
 }
 
+// applyStructEncoding bakes the struct-level default text encoding into a string
+// field's parsed tag when the field declares no encoding= of its own — mirroring
+// the runtime, which bakes it into the field metadata. It mutates pt.options (a
+// reference), so downstream EncodeText/DecodeText/bytelen emitters pick it up.
+func applyStructEncoding(pt parsedFieldTag, structEnc string) {
+	if structEnc != "" && isStringBinType(pt.binaryType) && pt.options["encoding"] == "" {
+		pt.options["encoding"] = structEnc
+	}
+}
+
 func getGoTypeName(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:
@@ -695,20 +705,10 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 		return fmt.Errorf("type %s: no byte order — declare it on the struct (a blank `_ struct{}` field tagged `binary:\"endian=big|little\"`) or pass -endian", typeName)
 	}
 
-	// Struct-level default encoding is not supported by codegen: fail loud if a
-	// string field would rely on it (rather than generate silently-wrong, un-encoded
-	// output). The fix is to put encoding= on the field, or use the runtime interpreter.
-	if structEnc := structSentinelEncoding(st); structEnc != "" {
-		for _, field := range st.Fields.List {
-			if len(field.Names) == 0 || field.Names[0].Name == "_" {
-				continue
-			}
-			pt := parseFieldTag(field.Tag)
-			if isStringBinType(pt.binaryType) && pt.options["encoding"] == "" {
-				return fmt.Errorf("type %s: codegen does not support a struct-level encoding= for fields without their own encoding= (field %s); add encoding=%s to that field, or use the runtime interpreter", typeName, field.Names[0].Name, structEnc)
-			}
-		}
-	}
+	// Struct-level default text encoding (the `_` sentinel's encoding=): a string
+	// field that declares no encoding= of its own inherits it. Baked into each
+	// field's parsed tag below (applyStructEncoding), mirroring the runtime.
+	structEnc := structSentinelEncoding(st)
 
 	// Write standard helper functions. The no-arg stdlib encoding interfaces carry
 	// no byte order, so they bake bakedLit (the struct's declared order if any,
@@ -751,6 +751,7 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 			continue
 		}
 		pt := parseFieldTag(field.Tag)
+		applyStructEncoding(pt, structEnc)
 		vexpr, hasV := pt.options["valueof"]
 		goType := getGoTypeName(field.Type)
 		fieldInfo[field.Names[0].Name] = cgFieldInfo{
@@ -776,6 +777,7 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 			fieldName := field.Names[0].Name
 			goType := getGoTypeName(field.Type)
 			parsedTag := parseFieldTag(field.Tag)
+			applyStructEncoding(parsedTag, structEnc)
 
 			if _, ok := parsedTag.options["ignore"]; ok || parsedTag.binaryType == "-" {
 				continue
@@ -857,6 +859,7 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 			fieldName := field.Names[0].Name
 			goType := getGoTypeName(field.Type)
 			parsedTag := parseFieldTag(field.Tag)
+			applyStructEncoding(parsedTag, structEnc)
 
 			if _, ok := parsedTag.options["ignore"]; ok || parsedTag.binaryType == "-" {
 				continue

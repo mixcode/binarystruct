@@ -117,8 +117,9 @@ The `const` option pins a field to a fixed value: **emitted on encode** (the Go 
 > The same sentinel also carries **`encoding=`** (a default text encoding), parsed
 > into `structMetadata.defaultEncoding` and baked into each string field's metadata
 > that declares no `encoding=` of its own (so it sits between a per-field
-> `encoding=` and `Marshaler.DefaultTextEncoding`). Codegen does not support a
-> struct-level `encoding=` — it errors rather than emit un-encoded output.
+> `encoding=` and `Marshaler.DefaultTextEncoding`). Codegen mirrors this — it bakes
+> the struct-level encoding into each un-tagged string field's emitted
+> `EncodeText`/`DecodeText`; only inheritance via embedding is codegen-unsupported.
 
 ```mermaid
 graph TD

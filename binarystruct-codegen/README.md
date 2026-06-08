@@ -76,18 +76,17 @@ The binarystruct-codegen tool supports the full `binary:"..."` tag syntax includ
 - Tag math expressions (e.g. `string(PayloadSize - 4)`)
 - Validation (`range=min..max`, `match=pattern`)
 - Omittable fields (`omittable`)
-- Struct-level byte order via the blank `_ struct{}` `binary:"endian=big|little"` sentinel (supplies/overrides the baked order)
+- Struct-level byte order (`binary:"endian=big|little"`) and struct-level default text encoding (`binary:"encoding=NAME"`) via the blank `_ struct{}` sentinel
 - Per-field endian override (`endian=big|little`)
 - Text encoding (`encoding=NAME`)
 - Custom codecs (`custom,codec=NAME`)
 - Nested structs
 
 **Not supported by codegen** (generation errors with a clear message — use the
-runtime interpreter): struct-level `endian=inverse`, byte-order inheritance via
-embedding, a struct-level `encoding=` default (put `encoding=` on each string
-field instead), and a self-referential `valueof=bytelen(F)` where `F` is
-`string(thatVeryField)`. Per-field `endian=inverse` and per-field `encoding=` are
-supported.
+runtime interpreter): struct-level `endian=inverse`, byte-order/encoding
+inheritance via embedding, and a self-referential `valueof=bytelen(F)` where `F`
+is `string(thatVeryField)`. Per-field `endian=inverse` and per-field `encoding=`
+are supported.
 
 For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the parent project.
 

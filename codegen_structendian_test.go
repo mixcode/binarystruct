@@ -43,31 +43,31 @@ func TestCodegen_BytelenCycle_Errors(t *testing.T) {
 	}
 }
 
-// TestCodegen_StructEncoding_Errors verifies codegen fails loud (rather than
-// emitting silently-unencoded output) when a string field would rely on a
-// struct-level encoding= it cannot honor.
-func TestCodegen_StructEncoding_Errors(t *testing.T) {
-	t.Parallel()
-	tmpDir, err := os.MkdirTemp(".", "tmp-bs-structenc-")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	src := "package p\n\ntype T struct {\n" +
+// TestCodegen_StructEncoding_Applied verifies generated code honors a struct-level
+// `encoding=` default for a string field that declares none of its own — the
+// generated methods, driven through a configured Marshaler, encode/decode the
+// field with that encoding (matching the runtime). Round-tripped end to end.
+func TestCodegen_StructEncoding_Applied(t *testing.T) {
+	typesSrc := "type Msg struct {\n" +
 		"\t_ struct{} `binary:\"endian=big,encoding=sjis\"`\n" +
-		"\tS string   `binary:\"wstring\"`\n}\n"
-	if err := os.WriteFile(filepath.Join(tmpDir, "t.go"), []byte(src), 0o644); err != nil {
-		t.Fatalf("write t.go: %v", err)
-	}
-
-	out, err := exec.Command(sharedCodegenBin, "-type", "T", "-endian", "big", tmpDir).CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected generation to fail for a struct-level encoding on an un-tagged string field; output:\n%s", out)
-	}
-	if !strings.Contains(string(out), "struct-level encoding") {
-		t.Errorf("error should mention struct-level encoding; got:\n%s", out)
-	}
+		"\tS string   `binary:\"wstring\"` // no field encoding → struct default sjis\n}\n"
+	// "あ" is e3 81 82 in UTF-8 but 82 a0 in Shift-JIS; a wstring writes a 2-byte
+	// big-endian length prefix, so a correctly sjis-encoded result is 00 02 82 a0.
+	testSrc := "import (\n" +
+		"\t\"bytes\"\n\t\"testing\"\n\n" +
+		"\t\"github.com/mixcode/binarystruct\"\n" +
+		"\t\"golang.org/x/text/encoding/japanese\"\n)\n\n" +
+		"func TestStructEnc(t *testing.T) {\n" +
+		"\tms := binarystruct.NewMarshaler()\n" +
+		"\tms.AddTextEncoding(\"sjis\", japanese.ShiftJIS)\n" +
+		"\tgot, err := ms.Marshal(&Msg{S: \"あ\"}) // fast-paths to the generated method with ms set\n" +
+		"\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+		"\tif want := []byte{0x00, 0x02, 0x82, 0xa0}; !bytes.Equal(got, want) {\n" +
+		"\t\tt.Fatalf(\"encode: got %x, want %x (struct-level sjis via codegen)\", got, want)\n\t}\n" +
+		"\tvar out Msg\n" +
+		"\tif _, err := ms.Unmarshal(got, &out); err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+		"\tif out.S != \"あ\" {\n\t\tt.Fatalf(\"round-trip: got %q\", out.S)\n\t}\n}\n"
+	genBytelenCase(t, "p", typesSrc, "Msg", testSrc)
 }
 
 // TestCodegen_StructEndian_NoFlag generates code for a struct that declares its

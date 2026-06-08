@@ -48,7 +48,8 @@ conventions. **This release has breaking changes** — see Changed/Removed.
   value-embedding a declaring struct; conflicting inherited values are an error):
   `endian=` (the struct's byte order) and `encoding=` (a default text encoding for
   its string fields, between a per-field `encoding=` and `Marshaler.DefaultTextEncoding`).
-  Codegen supports struct-level `endian=` but not struct-level `encoding=`.
+  Codegen supports both struct-level `endian=` and `encoding=` (only inheritance
+  via embedding is codegen-unsupported).
 - **`Append`** — `binarystruct.Append(buf, v)` and `Marshaler.Append(buf, v)`
   encode a value and append it to a buffer (the `encoding/binary.Append` analog).
 - **Codegen emits `AppendBinary`** implementing `encoding.BinaryAppender` (Go 1.24).

@@ -87,9 +87,10 @@ type Header struct {
 * A value that declares no order (a bare scalar, a third-party struct) takes a
   fallback from `binarystruct.NewMarshalerOrder(order)`; otherwise encoding a
   multi-byte value fails with a clear error.
-* **Codegen:** the static generator supports struct-level `endian=` but **not**
-  struct-level `encoding=` — put `encoding=` on each string field, or use the runtime
-  interpreter.
+* **Codegen:** the static generator supports both struct-level `endian=` and
+  struct-level `encoding=` (it bakes the encoding into each un-tagged string field,
+  as the runtime does). Order/encoding *inheritance via embedding* is not supported
+  by codegen — declare them directly on the struct there.
 
 ### `endian=big|little|inverse`
 Per-field **override** of the struct's declared byte order.

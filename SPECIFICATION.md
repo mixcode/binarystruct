@@ -168,6 +168,14 @@ When a struct is passed to `Write`/`Read`, the runtime checks for these interfac
 
 When introducing a new binary type, tag option, or modifier, you **must** check off all of the following:
 
+> **Struct-scope options** (carried on the blank `_ struct{}` sentinel, e.g.
+> `endian=`/`encoding=`) need extra care beyond a normal field option: parse them
+> in `parseStructSentinel` and store on `structMetadata` (Step 2); seed/apply them
+> at every struct entry in all three paths (Step 3/4); and in codegen either
+> support them in `generateMethods` or **fail loud** (Step 5) — never emit code
+> that silently ignores the option. Mirror the resolution precedence and the
+> non-`struct{}` sentinel guard.
+
 - [ ] **Step 1: Syntax Spec**
   Add the syntax definition to `STRUCT_TAGS.md` and `STRUCT_TAGS_ja.md`. Update Section 1 of this document (`SPECIFICATION.md`).
 

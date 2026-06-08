@@ -49,7 +49,7 @@ var (
 	outputFile   = flag.String("output", "", "output file name; default <first_type>_binary.go (or <first_type>.json if -json is set)")
 	includeTests = flag.Bool("tests", false, "include test files (*_test.go) when parsing the package")
 	jsonOutput   = flag.Bool("json", false, "generate JSON representation of the struct layout instead of Go source code")
-	endian       = flag.String("endian", "", "fallback byte order (\"big\" or \"little\") baked into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods; optional when the struct declares its own order via a blank `_ struct{}` endian= field")
+	endian       = flag.String("endian", "", "fallback byte order `big|little` baked into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods; optional when the struct declares its own order via a blank _ struct{} endian= field")
 )
 
 // orderLiteral maps the -endian flag to the binarystruct byte-order expression

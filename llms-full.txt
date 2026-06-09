@@ -69,11 +69,16 @@ When unmarshalling into an interface field, you must choose one of two patterns:
    }
    ```
 
-### C. Build Tags for Restricted Environments
-* **Rule**: If the code is compiled for platforms that restrict Go's `unsafe` package (e.g., Google App Engine), compile and test with the `safe_binarystruct` build tag:
+### C. Build Tags
+* **`safe_binarystruct` (portability)**: If the code is compiled for platforms that restrict Go's `unsafe` package (e.g., Google App Engine), compile and test with the `safe_binarystruct` build tag — it swaps the unsafe pointer interpreter for the reflection-only path (byte-identical, slower):
   ```bash
   go test -tags safe_binarystruct ./...
   ```
+* **`experiment_simd` (performance, opt-in)**: On amd64 with Go 1.26+, building with `-tags experiment_simd` **and** `GOEXPERIMENT=simd` vectorizes endian byte-swaps (AVX2) in the unsafe runtime path and in codegen generated with `-unsafe-bulk`. It is purely a speed knob — output bytes are identical, and any other platform/build silently uses the scalar fallback:
+  ```bash
+  GOEXPERIMENT=simd go build -tags experiment_simd ./...
+  ```
+  Mutually exclusive in effect with `safe_binarystruct` (the safe path has no SIMD). Leave it off unless you are byte-swap bound on amd64; it depends on an experimental Go package (`simd/archsimd`) with no compatibility promise.
 
 ### D. Expressions (sizes and computed values)
 Wherever a tag takes a size or computed value — `[len]`, `(buf_len)`, `omittable=`, and `valueof=` — it accepts an expression, not just a literal:

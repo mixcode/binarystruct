@@ -263,9 +263,74 @@ func TestScalarArg(t *testing.T) {
 	genCustomValueofCase(t, src, "Frame", testSrc, false)
 }
 
-// TestCodegen_CustomValueof_NonByteRegion_Errors: a custom evaluator over a
-// text-encoded (non-byte-region) field fails generation with a clear message.
-func TestCodegen_CustomValueof_NonByteRegion_Errors(t *testing.T) {
+// TestCodegen_CustomValueof_TextEncodedArg: a custom evaluator over a hard arg (a
+// text-encoded wstring) is now supported via ms.MarshalAs. The generated output
+// must be byte-identical to the runtime interpreter (three-path parity) and the
+// CRC must cover the full wstring encoding (big-endian length prefix + sjis bytes).
+func TestCodegen_CustomValueof_TextEncodedArg(t *testing.T) {
+	src := "type Rec struct {\n" +
+		"\t_    struct{} `binary:\"endian=big\"`\n" +
+		"\tName string   `binary:\"wstring,encoding=sjis\"`\n" +
+		"\tCRC  uint32   `binary:\"uint32,valueof=CRC32(Name)\"`\n}\n"
+	testSrc := `
+import (
+	"bytes"
+	"hash/crc32"
+	"testing"
+
+	"github.com/mixcode/binarystruct"
+	"golang.org/x/text/encoding/japanese"
+)
+
+func mkMarshaler() *binarystruct.Marshaler {
+	ms := binarystruct.NewMarshaler()
+	ms.AddTextEncoding("sjis", japanese.ShiftJIS)
+	ms.AddValueOf("CRC32", func(c binarystruct.ValueOfContext) (uint64, error) {
+		h := crc32.NewIEEE()
+		for _, a := range c.Args {
+			h.Write(a.Bytes)
+		}
+		return uint64(h.Sum32()), nil
+	})
+	return ms
+}
+
+func TestTextArg(t *testing.T) {
+	ms := mkMarshaler()
+	in := Rec{Name: "あ"} // sjis 82 a0; wstring → 00 02 82 a0 (big-endian prefix)
+	var b bytes.Buffer
+	if _, err := in.WriteBinaryWithMarshaler(ms, &b, binarystruct.BigEndian); err != nil {
+		t.Fatalf("codegen encode: %v", err)
+	}
+	gen := b.Bytes()
+	rt, err := ms.Marshal(&in) // runtime interpreter, same struct + evaluator
+	if err != nil {
+		t.Fatalf("runtime encode: %v", err)
+	}
+	if !bytes.Equal(gen, rt) {
+		t.Fatalf("codegen vs runtime differ:\n codegen=% x\n runtime=% x", gen, rt)
+	}
+	want := crc32.ChecksumIEEE([]byte{0x00, 0x02, 0x82, 0xa0})
+	got := uint32(gen[len(gen)-4])<<24 | uint32(gen[len(gen)-3])<<16 | uint32(gen[len(gen)-2])<<8 | uint32(gen[len(gen)-1])
+	if got != want {
+		t.Fatalf("CRC = %#08x, want %#08x", got, want)
+	}
+	var out Rec
+	if _, err := out.ReadBinaryWithMarshaler(ms, bytes.NewReader(gen), binarystruct.BigEndian); err != nil {
+		t.Fatalf("decode (default validates the CRC): %v", err)
+	}
+	if out.Name != "あ" {
+		t.Fatalf("round-trip Name = %q, want あ", out.Name)
+	}
+}
+`
+	genCustomValueofCase(t, src, "Rec", testSrc, false)
+}
+
+// TestCodegen_CustomValueof_NestedStructArg_Errors: a custom evaluator over a
+// nested-struct arg is the one shape MarshalAs cannot reproduce standalone, so it
+// still fails generation with a clear message (use the runtime interpreter).
+func TestCodegen_CustomValueof_NestedStructArg_Errors(t *testing.T) {
 	t.Parallel()
 	tmpDir, err := os.MkdirTemp(".", "tmp-bs-cverr-")
 	if err != nil {
@@ -273,19 +338,21 @@ func TestCodegen_CustomValueof_NonByteRegion_Errors(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	src := "package p\n\ntype Bad struct {\n" +
-		"\t_    struct{} `binary:\"endian=big\"`\n" +
-		"\tName string   `binary:\"wstring,encoding=sjis\"`\n" +
-		"\tCRC  uint32   `binary:\"uint32,valueof=CRC32(Name)\"`\n}\n"
+	src := "package p\n\ntype Inner struct {\n" +
+		"\tA uint16 `binary:\"uint16\"`\n}\n\n" +
+		"type Bad struct {\n" +
+		"\t_   struct{} `binary:\"endian=big\"`\n" +
+		"\tHdr Inner    `binary:\"any\"`\n" +
+		"\tCRC uint32   `binary:\"uint32,valueof=CRC32(Hdr)\"`\n}\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, "t.go"), []byte(src), 0o644); err != nil {
 		t.Fatalf("write t.go: %v", err)
 	}
 
-	out, err := exec.Command(sharedCodegenBin, "-type", "Bad", tmpDir).CombinedOutput()
+	out, err := exec.Command(sharedCodegenBin, "-type", "Bad,Inner", tmpDir).CombinedOutput()
 	if err == nil {
-		t.Fatalf("expected a generation error for a non-byte-region arg; output:\n%s", out)
+		t.Fatalf("expected a generation error for a nested-struct arg; output:\n%s", out)
 	}
-	if !strings.Contains(string(out), "byte-region") {
-		t.Errorf("error should explain the byte-region limit; got:\n%s", out)
+	if !strings.Contains(string(out), "nested-struct") {
+		t.Errorf("error should explain the nested-struct limit; got:\n%s", out)
 	}
 }

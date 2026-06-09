@@ -108,3 +108,35 @@ func TestCustomValueof_UnregisteredEvaluatorErrors(t *testing.T) {
 		t.Errorf("error %q should name the missing evaluator CRC32", err)
 	}
 }
+
+// padArgChunk's Data is a CONSTANT fixed-length byte slice, so a shorter value is
+// zero-padded to 8 bytes on encode. A custom valueof over it must see those 8
+// encoded bytes.
+type padArgChunk struct {
+	_    struct{} `binary:"endian=big"`
+	Data []byte   `binary:"[8]byte"`
+	Sum  uint32   `binary:"uint32,valueof=CRC32(Data)"`
+}
+
+// TestCustomValueof_FastPathParity_PaddedSlice guards the fieldEncodedBytes raw-
+// byte fast path: for a constant fixed-length byte slice the encoded form pads, so
+// the fast path must DEFER to the re-encode and the evaluator must hash the padded
+// bytes — not the shorter live slice it would get from a naive zero-copy return.
+func TestCustomValueof_FastPathParity_PaddedSlice(t *testing.T) {
+	ms := newCRCMarshaler()
+	in := padArgChunk{Data: []byte{1, 2, 3}} // len 3, encoded as 8 (5 zero pad)
+
+	blob, err := ms.Marshal(&in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// layout: [8]Data [4]Sum = 12 bytes.
+	if len(blob) != 8+4 {
+		t.Fatalf("encoded length = %d, want 12; blob=% x", len(blob), blob)
+	}
+	want := crc32.ChecksumIEEE([]byte{1, 2, 3, 0, 0, 0, 0, 0})
+	got := uint32(blob[8])<<24 | uint32(blob[9])<<16 | uint32(blob[10])<<8 | uint32(blob[11])
+	if got != want {
+		t.Errorf("CRC over padded Data = %#08x, want %#08x (fast path must defer for constant-length slices)", got, want)
+	}
+}

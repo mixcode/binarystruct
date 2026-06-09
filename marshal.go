@@ -681,11 +681,12 @@ func (ms *Marshaler) fieldEncodedSize(order ByteOrder, strc, fieldVal reflect.Va
 }
 
 // fieldEncodedBytes returns the exact bytes the field would occupy when encoded.
-// It measures by encoding into a scratch buffer using the same logic as the real
-// write, so it is exact for text-encoded strings and nested structs (the bytes a
-// checksum must operate on). A fast path for fixed-width / raw-byte fields is a
-// possible future optimization; correctness is preferred here over avoiding the
-// second encode.
+// For a raw byte region (byte slice/array or an unencoded string at its natural
+// length) it returns the field's own bytes directly — those encode unchanged, so a
+// second pass would be pure overhead. Every other shape is measured by encoding
+// into a scratch buffer with the same logic as the real write, so it stays exact
+// for text-encoded strings, length-prefixed strings, and nested structs (the bytes
+// a checksum must operate on).
 func (ms *Marshaler) fieldEncodedBytes(order ByteOrder, strc, fieldVal reflect.Value, fMeta structFieldMetadata) ([]byte, error) {
 	// Measurement strategy: honor constant sizes (e.g. string(16), [4]byte) but
 	// use the value's own length for field-referencing expressions. This makes
@@ -718,11 +719,72 @@ func (ms *Marshaler) fieldEncodedBytes(order ByteOrder, strc, fieldVal reflect.V
 	if err != nil {
 		return nil, err
 	}
+	// Fast path: a raw byte region encodes to exactly its in-memory bytes, so hand
+	// them back instead of a second per-element reflective encode (the hot path for
+	// checksums and bytelen() over []byte). resolveFieldEncoding ran first, so the
+	// [NameLen]byte / valueof=bytelen(Name) recursion guard in naturalEval still
+	// applies. See TODO "Runtime custom-evaluator perf".
+	if b, ok := rawByteRegionBytes(fieldVal, naturalType, option); ok {
+		return b, nil
+	}
 	var buf bytes.Buffer
 	if _, err := ms.writeMain(&buf, order, fieldVal, naturalType, option, strc, fMeta.index); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// rawByteRegionBytes returns a field's encoded bytes directly when its encoded
+// form is byte-identical to its in-memory bytes: a byte slice or [N]byte array
+// written at its natural length, or an unencoded raw string. Such fields carry no
+// byte-order, padding, text-encoding, or codec transform, so the scratch-buffer
+// re-encode in fieldEncodedBytes is pure overhead. ok is false when the slow path
+// must run — a constant fixed length that pads/truncates, a text encoding, a
+// codec, a length-prefixed/terminated string, or a non-uint8 element type.
+//
+// For a byte slice the returned slice aliases the field's backing array (the
+// zero-copy intent); evaluators read it (e.g. to hash), they must not mutate it.
+func rawByteRegionBytes(fieldVal reflect.Value, naturalType eType, option typeOption) ([]byte, bool) {
+	if option.encoding != "" || option.codec != "" {
+		return nil, false
+	}
+	v := derefValue(fieldVal)
+	switch v.Kind() {
+	case reflect.Slice:
+		if naturalType != Byte && naturalType != Uint8 && naturalType != Int8 {
+			return nil, false
+		}
+		if v.Type().Elem().Kind() != reflect.Uint8 {
+			return nil, false // e.g. []int8: reflect.Value.Bytes would panic
+		}
+		// Only when the write emits the slice as-is; a constant fixed length that
+		// differs from the value pads/truncates, so defer to the slow path.
+		if option.arrayLen != 0 && option.arrayLen != v.Len() {
+			return nil, false
+		}
+		return v.Bytes(), true
+	case reflect.Array:
+		if v.Type().Elem().Kind() != reflect.Uint8 {
+			return nil, false
+		}
+		if option.arrayLen != 0 && option.arrayLen != v.Len() {
+			return nil, false
+		}
+		if v.CanAddr() {
+			return v.Slice(0, v.Len()).Bytes(), true
+		}
+		out := make([]byte, v.Len())
+		for i := range out {
+			out[i] = byte(v.Index(i).Uint())
+		}
+		return out, true
+	case reflect.String:
+		if naturalType != String || option.bufLen != 0 {
+			return nil, false
+		}
+		return []byte(v.String()), true
+	}
+	return nil, false
 }
 
 // evalCustomValueof computes a custom valueof field's value: it materializes the

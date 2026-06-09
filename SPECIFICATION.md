@@ -129,22 +129,26 @@ type Chunk struct {
 - **Grammar.** A custom evaluator must be the *entire* `valueof` expression —
   `valueof=CRC32(Type, Data)` — and cannot be combined with arithmetic or other
   functions in this version (e.g. `CRC32(Data)+1` is rejected at metadata time).
-- **Memory/CPU.** Each referenced field's bytes are materialized on demand with
-  the same scratch-encode `bytelen` uses, so peak memory is bounded by the
-  largest referenced field, not the struct or stream; the streaming `Write` path
-  stays streaming. The cost is a possible re-encode of covered fields (CPU, not
-  RAM); a raw-bytes fast path and a capturing writer are possible future
-  optimizations.
-- **Codegen support (byte regions + fixed-width scalars).** The static generator
-  supports a custom evaluator when **every referenced field is** either a
-  *byte-region* field — a `[]byte`/`[N]byte`, a raw `string`, or a fixed
-  `string(N)` with a constant size and no text encoding — **or a fixed-width
-  integer scalar** (`int8`…`int64`, `uint8`…`uint64`, `byte`/`word`/`dword`/`qword`),
-  which the generator encodes with `order.PutUintN`. For these the generated
-  `Args[].Bytes` match the runtime's `fieldEncodedBytes` exactly. A shape the
-  generator can't encode standalone (text-encoded string, length-prefixed/terminated
-  string, nested struct, floating-point field, array of multibyte scalars)
-  **fails generation** with a clear message → use the runtime interpreter.
+- **Memory/CPU.** Each referenced field's bytes are materialized on demand, so
+  peak memory is bounded by the largest referenced field, not the struct or
+  stream; the streaming `Write` path stays streaming. A **raw byte region** (byte
+  slice/array at natural length, or an unencoded raw string) is handed back
+  directly by `fieldEncodedBytes` (`rawByteRegionBytes`) — no re-encode — so a
+  checksum/`bytelen` over `[]byte` allocates a constant amount regardless of
+  payload size. Other shapes are measured with the same scratch-encode `bytelen`
+  uses.
+- **Codegen support.** The static generator emits a custom evaluator's argument
+  bytes inline for **byte-region** fields (`[]byte`/`[N]byte` at natural length, a
+  raw `string`, or a constant-size `string(N)` without text encoding) and
+  **fixed-width integer scalars** (`int8`…`int64`, `uint8`…`uint64`,
+  `byte`/`word`/`dword`/`qword`, via `order.PutUintN`) — no Marshaler call,
+  honoring the runtime `order`. **Every other shape** (text-encoded or
+  length-prefixed/terminated strings, floats, multibyte-scalar arrays, padded byte
+  slices, variable string buffers) is re-encoded with its own tag via
+  `ms.MarshalAs` — the runtime encoder, so the bytes match `fieldEncodedBytes`
+  exactly. The **one** unsupported shape is a **nested-struct argument** (its byte
+  order can't be expressed in a standalone tag): generation fails with a clear
+  message → use the runtime interpreter for that struct.
   Generated encode requires a non-nil Marshaler (like `codec=`; the no-arg
   `MarshalBinary` passes `nil` and errors at run time — call
   `WriteBinaryWithMarshaler` with a Marshaler that has the evaluator registered).

@@ -98,22 +98,24 @@ The binarystruct-codegen tool supports the full `binary:"..."` tag syntax includ
 - Nested structs
 
 **Custom `valueof` evaluators** (e.g. `valueof=CRC32(Type, Data)`, registered on a
-Marshaler with `AddValueOf`) are supported when **every referenced field is** a
-*byte-region* field (`[]byte`/`[N]byte`, raw `string`, or constant-size `string(N)`
-without text encoding) **or a fixed-width integer scalar** (`uint8`…`uint64`,
-signed, and `byte`/`word`/`dword`/`qword`); a shape the generator can't encode
-standalone (text-encoded string, prefixed/terminated string, nested struct,
-floating-point or array scalar) fails generation. Like `codec=`, they need a
-non-nil Marshaler, so use `WriteBinaryWithMarshaler` (the no-arg `MarshalBinary`
-errors). Decode-time validation is **on by default** (generated decode recomputes
-and verifies the value, matching the runtime interpreter); see `-no-validate` below.
+Marshaler with `AddValueOf`) are supported for **any argument shape except a
+nested struct**. Byte-region args (`[]byte`/`[N]byte`, raw `string`, constant-size
+`string(N)` without text encoding) and fixed-width integer scalars
+(`uint8`…`uint64`, signed, `byte`/`word`/`dword`/`qword`) are emitted inline; every
+other shape (text-encoded or prefixed/terminated strings, floats, multibyte-scalar
+arrays, padded byte slices, variable string buffers) is re-encoded with its own tag
+via `ms.MarshalAs`, so the bytes match the runtime exactly. Like `codec=`, they
+need a non-nil Marshaler, so use `WriteBinaryWithMarshaler` (the no-arg
+`MarshalBinary` errors). Decode-time validation is **on by default** (generated
+decode recomputes and verifies the value, matching the runtime interpreter); see
+`-no-validate` below.
 
 **Not supported by codegen** (generation errors with a clear message — use the
 runtime interpreter): struct-level `endian=inverse`, byte-order/encoding
 inheritance via embedding, a self-referential `valueof=bytelen(F)` where `F`
-is `string(thatVeryField)`, and a custom `valueof` evaluator referencing a field
-that is neither a byte region nor a fixed-width integer scalar. Per-field
-`endian=inverse` and per-field `encoding=` are supported.
+is `string(thatVeryField)`, and a custom `valueof` evaluator referencing a
+**nested-struct** field. Per-field `endian=inverse` and per-field `encoding=` are
+supported.
 
 For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the parent project.
 

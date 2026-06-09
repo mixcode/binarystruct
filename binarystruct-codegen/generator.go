@@ -279,27 +279,25 @@ func parseCustomValueofCall(expr string) (name string, args []string, ok bool) {
 }
 
 // cgValueofArgBytesExpr returns a Go expression yielding the encoded []byte of a
-// custom-valueof argument field, plus any hoisted pre-statements. It supports
-// fields whose encoded bytes the generator can reproduce exactly to match the
-// runtime's fieldEncodedBytes: byte regions ([]byte/[N]byte, raw string, fixed
-// constant-size string(N)) and fixed-width integer scalars (written via
-// order.PutUintN). Shapes the generator cannot encode standalone (text-encoded
-// strings, length-prefixed/terminated strings, nested structs, floating-point or
-// array scalars) return a generation error (use the runtime interpreter).
-func cgValueofArgBytesExpr(name string, fi cgFieldInfo) (expr, pre string, err error) {
-	fail := func(reason string) (string, string, error) {
-		return "", "", fmt.Errorf("codegen supports custom valueof only over byte-region fields ([]byte/[N]byte, raw string, constant-size string(N) without text encoding) and fixed-width integer scalars; referenced field %q is %s — use the runtime interpreter for this struct", name, reason)
-	}
+// custom-valueof argument field, plus any hoisted pre-statements. Byte regions
+// ([]byte/[N]byte at natural length, raw string, constant-size string(N)) and
+// fixed-width integer scalars are emitted inline (no Marshaler, honoring the
+// runtime `order`). Every other shape — text-encoded/prefixed strings, floats,
+// multibyte-scalar arrays, padded byte slices, variable string buffers — is
+// re-encoded with its own tag via ms.MarshalAs (the runtime encoder, so the bytes
+// match fieldEncodedBytes exactly). A nested struct stays unsupported (its byte
+// order can't be expressed in a standalone tag) and fails generation. endianStr
+// ("big"/"little") is the struct's resolved order, baked into the MarshalAs tag.
+func cgValueofArgBytesExpr(name string, fi cgFieldInfo, endianStr string) (expr, pre string, err error) {
 	gt := fi.goType
+	// Static fast paths: shapes whose encoded bytes the generator reproduces inline.
 	switch {
 	case strings.HasPrefix(gt, "[]") && isByteSequence(gt):
-		// A byte slice's encoded form equals its bytes only when the tag length is
-		// implicit or a field reference (writes the actual length); a constant
-		// fixed length pads/truncates, which we do not reproduce here.
-		if fi.arrayLenExpr != "" && cgConstIntRe.MatchString(fi.arrayLenExpr) {
-			return fail("a fixed-length byte slice (pads/truncates on encode)")
+		// A byte slice encodes to its own bytes only at its natural length; a
+		// constant fixed length pads/truncates — handled by the MarshalAs path below.
+		if !(fi.arrayLenExpr != "" && cgConstIntRe.MatchString(fi.arrayLenExpr)) {
+			return "s." + name, "", nil
 		}
-		return "s." + name, "", nil
 	case strings.HasPrefix(gt, "[") && isByteSequence(gt):
 		// Go fixed array [N]byte: always exactly N bytes.
 		return "s." + name + "[:]", "", nil
@@ -311,10 +309,9 @@ func cgValueofArgBytesExpr(name string, fi cgFieldInfo) (expr, pre string, err e
 			bufVar := "vo" + name
 			return bufVar, fmt.Sprintf("\t%s := make([]byte, %s)\n\tcopy(%s, []byte(s.%s))\n", bufVar, strings.TrimSpace(fi.bufLenExpr), bufVar, name), nil
 		}
-		return fail("a variable-size string buffer")
+		// variable-size string buffer → MarshalAs path below.
 	}
-	// Fixed-width integer scalars: the generator can produce the exact wire bytes
-	// with order.PutUintN, matching the field's binType width and the struct order.
+	// Fixed-width integer scalars: exact wire bytes via order.PutUintN.
 	if !fi.isArray {
 		v := "vo" + name
 		switch fi.binType {
@@ -328,19 +325,49 @@ func cgValueofArgBytesExpr(name string, fi cgFieldInfo) (expr, pre string, err e
 			return v, fmt.Sprintf("\t%s := make([]byte, 8)\n\torder.PutUint64(%s, uint64(s.%s))\n", v, v, name), nil
 		}
 	}
-	switch {
-	case fi.encoding != "":
-		return fail("text-encoded")
-	case fi.binType == "bstring" || fi.binType == "wstring" || fi.binType == "dwstring" || fi.binType == "zstring" || fi.binType == "z16string":
-		return fail("a length-prefixed or null-terminated string")
-	case fi.isStruct:
-		return fail("a nested struct")
-	case fi.binType == "float32" || fi.binType == "float64":
-		return fail("a floating-point field")
-	case fi.isArray:
-		return fail("an array of multibyte scalars")
+	// Hard shapes: re-encode the single arg via the runtime encoder.
+	if fi.isStruct {
+		return "", "", fmt.Errorf("codegen custom valueof cannot encode nested-struct argument %q standalone; use the runtime interpreter for this struct", name)
 	}
-	return fail("not a fixed-width byte or integer field")
+	tag := cgMarshalAsTag(fi, endianStr)
+	v := "vo" + name
+	pre = fmt.Sprintf("\t%s, errVo := ms.MarshalAs(s.%s, %s)\n\tif errVo != nil {\n\t\treturn n, errVo\n\t}\n", v, name, strconv.Quote(tag))
+	return v, pre, nil
+}
+
+// cgMarshalAsTag reconstructs the binary tag for a custom-valueof argument field
+// so ms.MarshalAs re-encodes it byte-identically to the runtime's fieldEncodedBytes.
+// Field-referenced lengths are dropped (MarshalAs gets only the standalone value,
+// and the runtime measures such fields at their natural length anyway); constant
+// lengths are kept (they pad/truncate). The struct's resolved byte order is baked
+// in so multibyte content (length prefixes, floats, multibyte scalars) matches.
+func cgMarshalAsTag(fi cgFieldInfo, endianStr string) string {
+	var b strings.Builder
+	switch {
+	case fi.isArray:
+		b.WriteString("[")
+		if al := strings.TrimSpace(fi.arrayLenExpr); cgConstIntRe.MatchString(al) {
+			b.WriteString(al)
+		}
+		b.WriteString("]")
+		b.WriteString(fi.binType)
+	case fi.bufLenExpr != "" && cgConstIntRe.MatchString(strings.TrimSpace(fi.bufLenExpr)):
+		b.WriteString(fi.binType)
+		b.WriteString("(")
+		b.WriteString(strings.TrimSpace(fi.bufLenExpr))
+		b.WriteString(")")
+	default:
+		b.WriteString(fi.binType)
+	}
+	if fi.encoding != "" {
+		b.WriteString(",encoding=")
+		b.WriteString(fi.encoding)
+	}
+	if endianStr != "" {
+		b.WriteString(",endian=")
+		b.WriteString(endianStr)
+	}
+	return b.String()
 }
 
 // splitTagOptions splits a binary-tag option list on commas, ignoring commas
@@ -856,6 +883,15 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	if bakedLit == "" {
 		return fmt.Errorf("type %s: no byte order — declare it on the struct (a blank `_ struct{}` field tagged `binary:\"endian=big|little\"`) or pass -endian", typeName)
 	}
+	// The struct's resolved order as a tag word ("big"/"little"), baked into the
+	// ms.MarshalAs tag for any hard custom-valueof argument (see cgMarshalAsTag).
+	endianStr := ""
+	switch bakedLit {
+	case "binarystruct.BigEndian":
+		endianStr = "big"
+	case "binarystruct.LittleEndian":
+		endianStr = "little"
+	}
 
 	// Struct-level default text encoding (the `_` sentinel's encoding=): a string
 	// field that declares no encoding= of its own inherits it. Baked into each
@@ -951,7 +987,7 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 				// A custom evaluator (a single NAME(...) call whose NAME is not a
 				// built-in) is resolved on the Marshaler at run time, like a codec.
 				if evname, cargs, isCall := parseCustomValueofCall(vexpr); isCall && evname != "bytelen" && evname != "count" {
-					if err := g.generateCustomValueofWrite(buf, fieldName, evname, cargs, goType, binType, parsedTag, fieldInfo); err != nil {
+					if err := g.generateCustomValueofWrite(buf, fieldName, evname, cargs, goType, binType, parsedTag, fieldInfo, endianStr); err != nil {
 						return fmt.Errorf("field %s: %w", fieldName, err)
 					}
 					continue
@@ -1095,7 +1131,7 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 				if !isCall || evname == "bytelen" || evname == "count" {
 					continue
 				}
-				if err := g.generateCustomValueofValidate(buf, fieldName, evname, cargs, goType, fieldInfo); err != nil {
+				if err := g.generateCustomValueofValidate(buf, fieldName, evname, cargs, goType, fieldInfo, endianStr); err != nil {
 					return fmt.Errorf("field %s: %w", fieldName, err)
 				}
 			}
@@ -1209,11 +1245,11 @@ func (g *Generator) generateConstValidate(buf *bytes.Buffer, fieldName, goType, 
 // encoded bytes, calls the evaluator looked up on the Marshaler by name, and
 // writes the returned value through the normal scalar path. Like custom codecs,
 // it requires a non-nil Marshaler (the no-arg MarshalBinary passes nil).
-func (g *Generator) generateCustomValueofWrite(buf *bytes.Buffer, fieldName, evname string, args []string, goType, binType string, parsedTag parsedFieldTag, fields map[string]cgFieldInfo) error {
+func (g *Generator) generateCustomValueofWrite(buf *bytes.Buffer, fieldName, evname string, args []string, goType, binType string, parsedTag parsedFieldTag, fields map[string]cgFieldInfo, endianStr string) error {
 	fmt.Fprintf(buf, "\tif ms == nil {\n\t\treturn n, errors.New(\"marshaler required for valueof %s\")\n\t}\n", evname)
 	buf.WriteString("\t{\n")
 	g.emitValueofLookup(buf, evname)
-	argExprs, err := g.customValueofArgs(buf, evname, args, fields)
+	argExprs, err := g.customValueofArgs(buf, evname, args, fields, endianStr)
 	if err != nil {
 		return err
 	}
@@ -1232,11 +1268,11 @@ func (g *Generator) generateCustomValueofWrite(buf *bytes.Buffer, fieldName, evn
 // from the stream, erroring (wrapping ErrValidationError) on mismatch. Emitted
 // by default (parity with the runtime); -no-validate strips it, in which case the
 // field is read as a plain scalar with no verification.
-func (g *Generator) generateCustomValueofValidate(buf *bytes.Buffer, fieldName, evname string, args []string, goType string, fields map[string]cgFieldInfo) error {
+func (g *Generator) generateCustomValueofValidate(buf *bytes.Buffer, fieldName, evname string, args []string, goType string, fields map[string]cgFieldInfo, endianStr string) error {
 	fmt.Fprintf(buf, "\tif ms == nil {\n\t\treturn n, errors.New(\"marshaler required for valueof %s\")\n\t}\n", evname)
 	buf.WriteString("\t{\n")
 	g.emitValueofLookup(buf, evname)
-	argExprs, err := g.customValueofArgs(buf, evname, args, fields)
+	argExprs, err := g.customValueofArgs(buf, evname, args, fields, endianStr)
 	if err != nil {
 		return err
 	}
@@ -1264,7 +1300,7 @@ func (g *Generator) emitValueofLookup(buf *bytes.Buffer, evname string) {
 // customValueofArgs emits hoisted pre-statements (deduped per referenced field)
 // for the byte-region arguments and returns the []binarystruct.ValueOfArg literal
 // elements (one per arg, in order).
-func (g *Generator) customValueofArgs(buf *bytes.Buffer, evname string, args []string, fields map[string]cgFieldInfo) ([]string, error) {
+func (g *Generator) customValueofArgs(buf *bytes.Buffer, evname string, args []string, fields map[string]cgFieldInfo, endianStr string) ([]string, error) {
 	var argExprs []string
 	seen := make(map[string]bool)
 	for _, a := range args {
@@ -1272,7 +1308,7 @@ func (g *Generator) customValueofArgs(buf *bytes.Buffer, evname string, args []s
 		if !ok {
 			return nil, fmt.Errorf("valueof %s() references unknown field %q", evname, a)
 		}
-		expr, pre, err := cgValueofArgBytesExpr(a, fi)
+		expr, pre, err := cgValueofArgBytesExpr(a, fi, endianStr)
 		if err != nil {
 			return nil, err
 		}

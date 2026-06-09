@@ -96,21 +96,7 @@ go test -tags safe_binarystruct ./...
 
 ## 計算フィールド値（`valueof`）
 
-長さや要素数のフィールドは、通常は別のフィールドに手作業で合わせ続ける必要があります（例: 常に `len(Name)` と等しくなければならないファイル名長フィールド）。`valueof` オプションは、こうしたフィールドのシリアライズ値を**エンコード時に**計算するため、データ側のフィールドだけを管理すれば済みます。
-
-```go
-type Record struct {
-	NameLen uint16 `binary:"uint16,valueof=bytelen(Name)"` // エンコード: Name のバイト長が書き込まれる
-	Name    []byte `binary:"[NameLen]byte"`                 // デコード: NameLen からサイズが決まる
-}
-```
-
-`valueof` の値は完全な[計算式](STRUCT_TAGS_ja.md#5-計算式)（四則演算・定数・フィールド参照）であり、さらに 2 つの関数が使えます。
-
-* **`bytelen(F)`** — 任意のフィールド `F` のエンコード後の総バイト長（単なる `len()` ではなく、テキストエンコーディング・長さプレフィックス・配列・ネスト構造体を考慮）。
-* **`count(F)`** — 配列またはスライスフィールド `F` の要素数（文字列には使用不可。文字列のバイト長には `bytelen` を使用）。
-
-組み込みの `bytelen`/`count` を使う `valueof` は**エンコード専用かつ emit-only** です。計算値はストリームに書き込まれますが、Go の構造体フィールドは一切変更されません。計算値を Go 側に取り込むには `Marshal`/`Unmarshal` のラウンドトリップを行ってください。CRC チェックサム・圧縮後サイズ・オフセットなどの派生値には、`Marshaler.AddValueOf` で**カスタム評価関数**を登録し、`valueof=CRC32(Type, Data)` のように参照します。これはエンコード時に値を計算し、**デコード時に検証**します。詳細は[構造体タグリファレンス](STRUCT_TAGS_ja.md#8-計算フィールド値valueof)を参照してください。
+長さや要素数のフィールドは、通常は別のフィールドに手作業で合わせ続ける必要があります。`valueof` オプションはこうしたフィールドのシリアライズ値を**エンコード時に**計算するため、データ側のフィールドだけを管理すれば済みます。組み込みは `bytelen(F)`（任意フィールドのエンコード後バイト長）と `count(F)`（配列・スライスの要素数）。CRC などの派生値には `Marshaler.AddValueOf` で**カスタム評価関数**（例: `valueof=CRC32(Type, Data)`）を登録でき、デコード時に検証も行われます。`valueof` は **emit-only** で、ストリームには書き込みますが Go のフィールドは変更しません（値を取り込むには `Unmarshal` でラウンドトリップ）。詳細は[構造体タグリファレンス](STRUCT_TAGS_ja.md#8-計算フィールド値valueof)を参照してください。
 
 ### レシピ: 可変長レコード
 
@@ -139,23 +125,15 @@ blob, _ := binarystruct.NewMarshalerOrder(binarystruct.LittleEndian).Marshal(&re
 
 ## 固定値・マジックナンバー（`const`）
 
-`const` オプションはフィールドを固定値に固定します。**エンコード時に書き込み**（Go のフィールド値は無視）、**デコード時に検証**します（不一致なら `ErrValidationError`）。フォーマットのシグネチャ、バージョンマーカー、予約フィールドを表現する自然な方法です。
+`const` オプションはフィールドを固定値に固定します。**エンコード時に書き込み**（Go のフィールド値は無視）、**デコード時に検証**します（不一致なら `ErrValidationError`）。フォーマットのシグネチャやバージョンマーカーに最適です。
 
 ```go
-type ZIPLocalHeader struct {
-	Signature uint32  `binary:"uint32,const=0x04034b50,endian=little"` // 'PK\x03\x04'
-	Version   uint16  `binary:"uint16,const=20,endian=little"`
-}
-
 type PNGHeader struct {
 	Magic [8]byte `binary:"[8]byte,const=0x89504e470d0a1a0a"` // \x89PNG\r\n\x1a\n
 }
 ```
 
-対象は 2 つの形があります。
-
-* **整数・ビットマップ**（`const=0x04034b50`）: 定数の整数式。バイト順に従って書き込まれるためバイト列はエンディアンに依存します。シグネチャを決定的にするには**明示的に `endian=little|big`** を付けてください。2⁶³ 未満の値に限ります。より大きい値や複数バイトのマジックにはバイト列形式を使ってください。
-* **バイト列** `[N]byte` / `string(N)`（`const=0x89504e470d0a1a0a`）: 自然なバイト順で書き込まれる 16 進ブロブで、**エンディアンに依存しません**。`PK\x03\x04` は単に `const=0x504b0304` です。フィールドの固定サイズは定数の長さと一致する必要があります。
+整数マジック（`const=0x04034b50`）はエンディアン依存なので、決定的にするには `endian=` を付けます。`[N]byte`/`string(N)` のバイト列マジックは自然なバイト順で書き込まれ、エンディアンに依存しません。どちらもコード生成に対応しています。詳細は[構造体タグリファレンス](STRUCT_TAGS_ja.md#9-固定値マジックナンバーconst)を参照してください。
 
 `const` は `valueof` と併用できず、バイト列形式は `encoding=` と併用できません。両方の形式とも静的コードジェネレータでサポートされます。詳細は[構造体タグリファレンス](STRUCT_TAGS_ja.md#9-固定値マジックナンバーconst)を参照してください。
 
@@ -192,51 +170,13 @@ fmt.Println(layout.Format(format))
 +0x07(0x02) [2]byte Data = [170 187]
 ```
 
-> **注意**: 構造体にカスタムコーデックやエンコーディングを使用している場合は、パッケージレベルの `binarystruct.Inspect(&pkt)` ではなく、マーシャルに使用したものと同じ設定済みの `Marshaler` インスタンスで `ms.Inspect(&pkt)` を呼び出してください。これにより、検証時にカスタム設定が正しく認識されます。
-
-### レイアウトのJSON出力
-
-解析されたレイアウトのメタデータをJSONスキーマとして出力することができます。これは、外部システムとの統合や他言語でのスキーマ構造の自動生成に便利です：
-
-```go
-js, _ := layout.ToJSON()
-fmt.Println(string(js))
-```
+（カスタムコーデックやエンコーディングを使う構造体では、マーシャルに使うのと同じ設定済み `Marshaler` で `Inspect` を呼んでください。）レイアウトは `layout.ToJSON()` で JSON スキーマにも出力でき、ツール連携や他言語での型生成に便利です。
 
 ---
 
 ## プロダクション向けの静的コード生成（Codegen）
 
-`binarystruct` は、構造体のレイアウト定義から静的なGoメソッドを自動生成するスタンドアロンのコードジェネレータツールを提供しています。プロダクション環境で使用することで、実行時のレイアウト解析やリフレクションのオーバーヘッドを完全に排除し、最大のパフォーマンスを得ることができます。
-
-### インストール
-コードジェネレータのCLIツールをインストールします：
-```bash
-go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
-```
-
-### 使用方法
-対象となる構造体の静的な `MarshalBinary` および `UnmarshalBinary` メソッドを生成します：
-```bash
-binarystruct-codegen -type MyStruct,MyNestedStruct [対象のパッケージディレクトリ]
-```
-デフォルトでは、指定した最初の型名を元にした `<型名>_binary.go` が同ディレクトリに出力されます。
-
-### go generate との連携
-通常、Goソースファイル内に `go generate` コメントを追加して連携することをお勧めします：
-```go
-//go:generate binarystruct-codegen -type Packet,Header
-type Packet struct {
-	Magic uint32 `binary:"uint32"`
-	Data  []byte `binary:"[10]byte"`
-}
-```
-`go generate ./...` を実行することで、シリアライズメソッドが自動生成・コンパイルされます。
-
-### 仕組みと特徴
-* 生成されたコードは、Go標準の `encoding.BinaryMarshaler` および `encoding.BinaryUnmarshaler` インタフェースの他、高パフォーマンスなストリーミングインタフェース（`BinaryReader` / `BinaryWriter`）を実装します。
-* カスタムコーデックやテキストエンコーディングが指定されている場合、コンテキスト対応インタフェース（`MarshalerContextReader` / `MarshalerContextWriter`）が生成され、実行時に自動的に [Marshaler] コンテキストから適切なハンドラを取得します。
-* パッケージレベルの `binarystruct.Marshal` / `binarystruct.Unmarshal` を使用している場合でも、対象オブジェクトが生成されたメソッドを実装している場合は、自動的にリフレクションをバイパスして生成されたメソッドを高速実行（ファストパス）します。
+最大のパフォーマンスを得るには、スタンドアロンの **[`binarystruct-codegen`](binarystruct-codegen/README.md)** ツールが構造体タグから静的な `MarshalBinary`/`UnmarshalBinary` メソッドを生成し、実行時のリフレクションとレイアウト解析を排除します。ツールをインストールし `//go:generate` ディレクティブを追加すれば、`binarystruct.Marshal`/`Unmarshal` は自動的に生成コードへファストパスします。インストール・フラグ・対応機能・`go:generate` の使い方は **[コードジェネレータガイド](binarystruct-codegen/README.md)** を参照してください。
 
 ### 性能比較
 

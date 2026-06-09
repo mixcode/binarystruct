@@ -95,25 +95,11 @@ go test -tags safe_binarystruct ./...
 
 ## Computed Field Values (`valueof`)
 
-Length and count fields usually have to mirror another field by hand — a filename-length field that must always equal `len(Name)`, for example. The `valueof` option computes such a field's serialized value at **encode time**, so you only maintain the data field:
-
-```go
-type Record struct {
-	NameLen uint16 `binary:"uint16,valueof=bytelen(Name)"` // encode: written as the byte length of Name
-	Name    []byte `binary:"[NameLen]byte"`                 // decode: sized from NameLen
-}
-```
-
-A `valueof` value is a full [expression](STRUCT_TAGS.md#5-expressions) (arithmetic, constants, field references) extended with two functions:
-
-* **`bytelen(F)`** — total encoded byte length of any field `F` (honors text encodings, length prefixes, arrays, and nested structs, not just `len()`).
-* **`count(F)`** — element count of an array or slice field `F` (not valid for strings; use `bytelen` for a string's byte length).
-
-`valueof` with the built-in `bytelen`/`count` is **encode-only and emit-only**: the computed value is written to the stream, but your Go struct field is never modified. To read the computed values back into Go, do a `Marshal`/`Unmarshal` round trip. For other derived values — CRC checksums, compressed sizes, offsets — register a **custom evaluator** with `Marshaler.AddValueOf` and reference it as `valueof=CRC32(Type, Data)`; it computes the value on encode and **validates it on decode**. See the [Struct Tag Reference](STRUCT_TAGS.md#8-computed-field-values-valueof) for full details.
+Length and count fields usually have to mirror another field by hand. The `valueof` option computes such a field's serialized value at **encode time**, so you maintain only the data field. The built-ins are `bytelen(F)` (the encoded byte length of any field) and `count(F)` (an array/slice's element count); for derived values like checksums you can register a **custom evaluator** (`Marshaler.AddValueOf`, e.g. `valueof=CRC32(Type, Data)`) that also validates on decode. `valueof` is **emit-only** — it writes the stream but leaves your Go field unchanged (round-trip through `Unmarshal` to read it back). Full details in the [Struct Tag Reference](STRUCT_TAGS.md#8-computed-field-values-valueof).
 
 ### Recipe: variable-length records
 
-The most common real-world layout — a header carrying the byte-lengths (or element counts) of the variable data that follows — is a length field with `valueof=` paired with a `[len]` size expression on its target. Each pair stays in sync automatically: `valueof` fills the length on encode, the size expression consumes it on decode.
+The most common real-world layout — a header carrying the byte-lengths (or element counts) of the variable data that follows — pairs a `valueof=` length field with a `[len]` size expression on its target. Each pair stays in sync automatically: `valueof` fills the length on encode, the size expression consumes it on decode.
 
 ```go
 type Record struct {
@@ -138,25 +124,15 @@ On encode you populate only `Name`, `Payload`, and `Items`; `NameLen`/`PayloadLe
 
 ## Fixed / Magic Values (`const`)
 
-The `const` option pins a field to a fixed value — **emitted on encode** (your Go field is ignored) and **validated on decode** (a mismatch returns an `ErrValidationError`). It is the natural way to express format signatures, version markers, and reserved fields:
+The `const` option pins a field to a fixed value — **emitted on encode** (your Go field is ignored) and **validated on decode** (mismatch → `ErrValidationError`) — ideal for format signatures and version markers:
 
 ```go
-type ZIPLocalHeader struct {
-	Signature uint32  `binary:"uint32,const=0x04034b50,endian=little"` // 'PK\x03\x04'
-	Version   uint16  `binary:"uint16,const=20,endian=little"`
-}
-
 type PNGHeader struct {
 	Magic [8]byte `binary:"[8]byte,const=0x89504e470d0a1a0a"` // \x89PNG\r\n\x1a\n
 }
 ```
 
-There are two target shapes:
-
-* **Integer / bitmap** (`const=0x04034b50`): a constant integer expression. It is written through the byte order, so its bytes depend on endianness — **add an explicit `endian=little|big`** to make a signature deterministic. Limited to values below 2⁶³; use the byte-sequence form for larger or multi-byte magics.
-* **Byte sequence** `[N]byte` / `string(N)` (`const=0x89504e470d0a1a0a`): a hex blob written in natural byte order, so it is **endianness-independent** — `PK\x03\x04` is simply `const=0x504b0304`. The field's fixed size must match the constant's length.
-
-`const` cannot be combined with `valueof`, the byte form cannot use `encoding=`, and both shapes are supported by the static code generator. See the [Struct Tag Reference](STRUCT_TAGS.md#9-fixed--magic-values-const) for details.
+Integer magics (`const=0x04034b50`) are endian-sensitive — add `endian=` for a deterministic signature; byte-sequence magics on `[N]byte`/`string(N)` are written in natural order (endian-independent). Both are codegen-supported. See the [Struct Tag Reference](STRUCT_TAGS.md#9-fixed--magic-values-const).
 
 ---
 
@@ -191,51 +167,13 @@ Output:
 +0x07(0x02) [2]byte Data = [170 187]
 ```
 
-> **Note**: If your structure contains custom codecs or encodings, call `ms.Inspect(&pkt)` on the same custom-configured `Marshaler` instance you marshal with, instead of the package-level `binarystruct.Inspect(&pkt)`, so those custom options are recognized during inspection.
-
-### Exporting Layout to JSON
-
-You can export the analyzed layout metadata as a JSON schema. This is useful for integrating with external systems or generating schema structures in other languages:
-
-```go
-js, _ := layout.ToJSON()
-fmt.Println(string(js))
-```
+(If the struct uses custom codecs/encodings, call `Inspect` on the same configured `Marshaler` you marshal with.) The layout also exports to a JSON schema via `layout.ToJSON()` — useful for tooling or generating types in other languages.
 
 ---
 
 ## Static Code Generation for Production
 
-`binarystruct` includes a standalone code generation tool that compiles struct layouts into static Go methods. In production, this completely eliminates runtime layout interpretation and reflection overhead, yielding maximum performance.
-
-### Installation
-Install the code generator CLI:
-```bash
-go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
-```
-
-### Usage
-Generate static `MarshalBinary` and `UnmarshalBinary` methods for your structs:
-```bash
-binarystruct-codegen -type MyStruct,MyNestedStruct [path/to/package/directory]
-```
-By default, it writes the generated code to `<first_type>_binary.go` in the same directory.
-
-### Go Generate Integration
-We recommend integrating it into your Go source files using `go generate`:
-```go
-//go:generate binarystruct-codegen -type Packet,Header
-type Packet struct {
-	Magic uint32 `binary:"uint32"`
-	Data  []byte `binary:"[10]byte"`
-}
-```
-Run `go generate ./...` to compile your serialization methods.
-
-### How It Works
-* The generated code implements standard Go `encoding.BinaryMarshaler` and `encoding.BinaryUnmarshaler` interfaces, and high-performance streaming interfaces (`BinaryReader` / `BinaryWriter`).
-* If custom codecs or text encodings are present, context-aware interfaces (`MarshalerContextReader` / `MarshalerContextWriter`) are generated to automatically retrieve custom handlers from the `Marshaler` context at runtime.
-* The main `binarystruct.Marshal` and `binarystruct.Unmarshal` library calls automatically detect these generated methods and fast-path to executing them directly.
+For maximum performance, the standalone **[`binarystruct-codegen`](binarystruct-codegen/README.md)** tool compiles your struct tags into static `MarshalBinary`/`UnmarshalBinary` methods, eliminating runtime reflection and layout interpretation. Install it, add a `//go:generate` directive, and `binarystruct.Marshal`/`Unmarshal` automatically fast-path to the generated code. See the **[code generator guide](binarystruct-codegen/README.md)** for installation, flags, supported features, and `go:generate` usage.
 
 ### Performance Comparison
 

@@ -45,13 +45,14 @@ type Generator struct {
 }
 
 type parsedFieldTag struct {
-	hasTag       bool
-	binaryType   string
-	isArray      bool
-	arrayLenExpr string
-	bufLenExpr   string
-	options      map[string]string
-	numDims      int // number of array dimensions; >1 means a multidimensional tag (codegen-unsupported)
+	hasTag        bool
+	binaryType    string
+	isArray       bool
+	arrayLenExpr  string
+	bufLenExpr    string
+	options       map[string]string
+	numDims       int      // number of array dimensions; >1 is a multidimensional tag
+	arrayDimExprs []string // per-dimension length expressions for a multidimensional tag
 }
 
 // Group 1 is the (possibly multi-dimensional) array bracket run "[4][2]"; group 2
@@ -90,7 +91,11 @@ func parseFieldTag(tag *ast.BasicLit) parsedFieldTag {
 		res.isArray = len(dims) > 0
 		res.numDims = len(dims)
 		if res.isArray {
-			res.arrayLenExpr = strings.TrimSpace(dims[0][1]) // outermost dimension
+			res.arrayDimExprs = make([]string, len(dims))
+			for i, d := range dims {
+				res.arrayDimExprs[i] = strings.TrimSpace(d[1])
+			}
+			res.arrayLenExpr = res.arrayDimExprs[0] // outermost dimension
 		}
 		res.binaryType = match[2]
 		res.bufLenExpr = match[4]
@@ -906,14 +911,20 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	// field's parsed tag below (applyStructEncoding), mirroring the runtime.
 	structEnc := structSentinelEncoding(st)
 
-	// Codegen does not support multidimensional array tags ([4][2]int8); fail loud
-	// so the struct falls back to the runtime interpreter, which does support them.
+	// Multidimensional array tags ([4][2]int8) are supported for scalar leaves with
+	// all-fixed or all-slice nesting; other shapes fail loud so the struct falls
+	// back to the runtime interpreter (which supports every shape).
 	for _, field := range st.Fields.List {
 		if len(field.Names) == 0 || field.Names[0].Name == "_" {
 			continue
 		}
-		if parseFieldTag(field.Tag).numDims > 1 {
-			return fmt.Errorf("type %s: field %s uses a multidimensional array tag, which codegen does not support; use the runtime interpreter for this struct", typeName, field.Names[0].Name)
+		pt := parseFieldTag(field.Tag)
+		if pt.numDims > 1 {
+			goType := getGoTypeName(field.Type)
+			binType := getEffectiveBinaryType(pt.binaryType, goType)
+			if reason := cgMultidimUnsupported(goType, binType, pt); reason != "" {
+				return fmt.Errorf("type %s: field %s: %s; use the runtime interpreter for this struct", typeName, field.Names[0].Name, reason)
+			}
 		}
 	}
 
@@ -1191,6 +1202,84 @@ func parseCgConstBytes(s string) ([]byte, error) {
 // than a slice ([]T).
 func isFixedArrayType(goType string) bool {
 	return len(goType) > 1 && goType[0] == '[' && goType[1] != ']'
+}
+
+// isCgScalarBinType reports whether binType is a fixed-width scalar that
+// generateFieldWrite/Read can emit as a multidimensional-array leaf.
+func isCgScalarBinType(binType string) bool {
+	switch binType {
+	case "int8", "uint8", "byte", "int16", "uint16", "word",
+		"int32", "uint32", "dword", "int64", "uint64", "qword",
+		"float32", "float64":
+		return true
+	}
+	return false
+}
+
+// cgArrayLevels peels numDims array levels off goType, reporting whether each
+// level is a slice ([]) or a fixed array ([N]), plus the remaining leaf type. ok
+// is false if goType has fewer array levels than the tag declares.
+func cgArrayLevels(goType string, numDims int) (isSlice []bool, leaf string, ok bool) {
+	s := goType
+	for k := 0; k < numDims; k++ {
+		switch {
+		case strings.HasPrefix(s, "[]"):
+			isSlice = append(isSlice, true)
+			s = s[2:]
+		case len(s) > 1 && s[0] == '[':
+			idx := strings.IndexByte(s, ']')
+			if idx < 0 {
+				return nil, "", false
+			}
+			isSlice = append(isSlice, false)
+			s = s[idx+1:]
+		default:
+			return nil, "", false
+		}
+	}
+	return isSlice, s, true
+}
+
+// cgPeelArrayLevels returns the Go type of an element after k index operations
+// (e.g. cgPeelArrayLevels("[][]int16", 1) == "[]int16"), used to size slice
+// levels with make() on decode.
+func cgPeelArrayLevels(goType string, k int) string {
+	s := goType
+	for ; k > 0; k-- {
+		switch {
+		case strings.HasPrefix(s, "[]"):
+			s = s[2:]
+		case len(s) > 0 && s[0] == '[':
+			idx := strings.IndexByte(s, ']')
+			if idx < 0 {
+				return s
+			}
+			s = s[idx+1:]
+		default:
+			return s
+		}
+	}
+	return s
+}
+
+// cgMultidimUnsupported returns a non-empty reason when codegen cannot emit a
+// multidimensional array field, so generateMethods can fail loud (runtime
+// fallback). Supported: a scalar leaf with all-fixed or all-slice nesting (slice
+// levels need an explicit dimension for decode allocation).
+func cgMultidimUnsupported(goType, binType string, pt parsedFieldTag) string {
+	if !isCgScalarBinType(binType) {
+		return fmt.Sprintf("codegen supports multidimensional arrays only over scalar leaf types, not %q", binType)
+	}
+	isSlice, leaf, ok := cgArrayLevels(goType, pt.numDims)
+	if !ok || isFixedArrayType(leaf) || strings.HasPrefix(leaf, "[]") {
+		return fmt.Sprintf("codegen could not match %d array dimensions to Go type %q", pt.numDims, goType)
+	}
+	for k, sl := range isSlice {
+		if sl && (k >= len(pt.arrayDimExprs) || pt.arrayDimExprs[k] == "") {
+			return fmt.Sprintf("a multidimensional slice needs an explicit length for dimension %d (for decode allocation)", k+1)
+		}
+	}
+	return ""
 }
 
 // goByteSliceLiteral formats bytes as a Go []byte{...} literal.
@@ -1561,7 +1650,77 @@ func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType
 	}
 }
 
+// multidimLeafTag derives the per-element tag for a multidimensional array leaf:
+// the array dimensions are stripped, and per-element validation (const/range/
+// match) is dropped (the runtime validates the field as a whole, not per element).
+func multidimLeafTag(parsedTag parsedFieldTag) parsedFieldTag {
+	leafTag := parsedTag
+	leafTag.isArray = false
+	leafTag.numDims = 0
+	leafTag.arrayLenExpr = ""
+	leafTag.arrayDimExprs = nil
+	leafTag.options = map[string]string{}
+	for k, v := range parsedTag.options {
+		switch k {
+		case "const", "range", "match":
+			// per-element validation of a multidimensional leaf is out of scope
+		default:
+			leafTag.options[k] = v
+		}
+	}
+	return leafTag
+}
+
+// generateMultidimWrite emits nested loops (one per dimension) that write each
+// scalar leaf in row-major order. Each level is bounded by len() so the same code
+// serves fixed arrays and slices. Supportability is checked in generateMethods.
+func (g *Generator) generateMultidimWrite(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag, fields map[string]cgFieldInfo) error {
+	_, leaf, _ := cgArrayLevels(goType, parsedTag.numDims)
+	leafTag := multidimLeafTag(parsedTag)
+	buf.WriteString("\t{\n")
+	accessor := "s." + fieldName
+	for k := 0; k < parsedTag.numDims; k++ {
+		idx := fmt.Sprintf("i%d", k)
+		fmt.Fprintf(buf, "\tfor %s := 0; %s < len(%s); %s++ {\n", idx, idx, accessor, idx)
+		accessor += "[" + idx + "]"
+	}
+	if err := g.generateFieldWrite(buf, accessor, leaf, binType, leafTag, fields); err != nil {
+		return err
+	}
+	for k := 0; k < parsedTag.numDims; k++ {
+		buf.WriteString("\t}\n")
+	}
+	buf.WriteString("\t}\n")
+	return nil
+}
+
+// generateMultidimRead emits nested loops that read each scalar leaf in row-major
+// order. Slice levels are allocated with make() to their declared dimension;
+// fixed-array levels are iterated by len(). Supportability is checked upstream.
+func (g *Generator) generateMultidimRead(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag, typeName, offExpr string) {
+	isSlice, leaf, _ := cgArrayLevels(goType, parsedTag.numDims)
+	leafTag := multidimLeafTag(parsedTag)
+	buf.WriteString("\t{\n")
+	accessor := "s." + fieldName
+	for k := 0; k < parsedTag.numDims; k++ {
+		idx := fmt.Sprintf("i%d", k)
+		if isSlice[k] {
+			fmt.Fprintf(buf, "\t%s = make(%s, int(%s))\n", accessor, cgPeelArrayLevels(goType, k), translateExpression(parsedTag.arrayDimExprs[k]))
+		}
+		fmt.Fprintf(buf, "\tfor %s := 0; %s < len(%s); %s++ {\n", idx, idx, accessor, idx)
+		accessor += "[" + idx + "]"
+	}
+	g.generateFieldRead(buf, accessor, leaf, binType, leafTag, typeName, fieldName, offExpr)
+	for k := 0; k < parsedTag.numDims; k++ {
+		buf.WriteString("\t}\n")
+	}
+	buf.WriteString("\t}\n")
+}
+
 func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag, fields map[string]cgFieldInfo) error {
+	if parsedTag.numDims > 1 {
+		return g.generateMultidimWrite(buf, fieldName, goType, binType, parsedTag, fields)
+	}
 	// Encode path: resolve valueof-referenced length fields to their computed
 	// values so e.g. [NameLen]byte writes len(s.Name) bytes, not stale s.NameLen.
 	sizeExpr, err := g.translateEncodeExpr(parsedTag.arrayLenExpr, fields, map[string]bool{})
@@ -1601,6 +1760,10 @@ func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, bin
 }
 
 func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag, typeName, offExpr string) {
+	if parsedTag.numDims > 1 {
+		g.generateMultidimRead(buf, fieldName, goType, binType, parsedTag, typeName, offExpr)
+		return
+	}
 	sizeExpr := translateExpression(parsedTag.arrayLenExpr)
 	if sizeExpr == "" {
 		buf.WriteString("\treturn n, errors.New(\"unknown array size expression\")\n")

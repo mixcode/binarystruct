@@ -145,8 +145,53 @@ func TestCodegen_NoValidate_StripsBuiltins(t *testing.T) {
 	}
 }
 
-// TestCodegen_Multidim_Errors verifies codegen fails loud on a multidimensional
-// array tag (a deliberate exclusion — the runtime interpreter handles it).
+// TestCodegen_Multidim_FixedArray: codegen of a fixed multidimensional array
+// ([2][3]int16) round-trips and is byte-identical to the runtime interpreter.
+func TestCodegen_Multidim_FixedArray(t *testing.T) {
+	typesSrc := "type Grid struct {\n" +
+		"\t_ struct{}    `binary:\"endian=big\"`\n" +
+		"\tM [2][3]int16 `binary:\"[2][3]int16\"`\n}\n"
+	testSrc := "import (\n\t\"bytes\"\n\t\"testing\"\n\n\t\"github.com/mixcode/binarystruct\"\n)\n\n" +
+		"func TestMD(t *testing.T) {\n" +
+		"\tin := Grid{M: [2][3]int16{{1, 2, 3}, {4, 5, 6}}}\n" +
+		"\tb, err := in.MarshalBinary()\n" +
+		"\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+		"\tif want := []byte{0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6}; !bytes.Equal(b, want) {\n\t\tt.Fatalf(\"encode = %x, want %x\", b, want)\n\t}\n" +
+		"\trt, err := binarystruct.Marshal(&in)\n" +
+		"\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+		"\tif !bytes.Equal(b, rt) {\n\t\tt.Fatalf(\"codegen %x vs runtime %x\", b, rt)\n\t}\n" +
+		"\tvar out Grid\n" +
+		"\tif err := out.UnmarshalBinary(b); err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+		"\tif out.M != in.M {\n\t\tt.Fatalf(\"round trip: %v\", out.M)\n\t}\n}\n"
+	genBytelenCase(t, "p", typesSrc, "Grid", testSrc)
+}
+
+// TestCodegen_Multidim_Slice: codegen of a multidimensional slice with
+// field-referenced dimensions ([R][C]uint8) allocates both levels on decode and
+// round-trips.
+func TestCodegen_Multidim_Slice(t *testing.T) {
+	typesSrc := "type S struct {\n" +
+		"\t_ struct{}  `binary:\"endian=big\"`\n" +
+		"\tR uint8     `binary:\"uint8\"`\n" +
+		"\tC uint8     `binary:\"uint8\"`\n" +
+		"\tM [][]uint8 `binary:\"[R][C]uint8\"`\n}\n"
+	testSrc := "import (\n\t\"bytes\"\n\t\"testing\"\n\n\t\"github.com/mixcode/binarystruct\"\n)\n\n" +
+		"func TestMDSlice(t *testing.T) {\n" +
+		"\tin := S{R: 2, C: 3, M: [][]uint8{{10, 11, 12}, {20, 21, 22}}}\n" +
+		"\tb, err := in.MarshalBinary()\n" +
+		"\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+		"\tif want := []byte{2, 3, 10, 11, 12, 20, 21, 22}; !bytes.Equal(b, want) {\n\t\tt.Fatalf(\"encode = %x, want %x\", b, want)\n\t}\n" +
+		"\trt, err := binarystruct.Marshal(&in)\n" +
+		"\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+		"\tif !bytes.Equal(b, rt) {\n\t\tt.Fatalf(\"codegen %x vs runtime %x\", b, rt)\n\t}\n" +
+		"\tvar out S\n" +
+		"\tif err := out.UnmarshalBinary(b); err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+		"\tif len(out.M) != 2 || len(out.M[1]) != 3 || out.M[1][2] != 22 {\n\t\tt.Fatalf(\"round trip: %+v\", out)\n\t}\n}\n"
+	genBytelenCase(t, "p", typesSrc, "S", testSrc)
+}
+
+// TestCodegen_Multidim_Errors verifies codegen still fails loud on an UNSUPPORTED
+// multidimensional shape (a non-scalar leaf) — the runtime interpreter handles it.
 func TestCodegen_Multidim_Errors(t *testing.T) {
 	t.Parallel()
 	tmpDir, err := os.MkdirTemp(".", "tmp-bs-md-")
@@ -156,15 +201,15 @@ func TestCodegen_Multidim_Errors(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	src := "package p\n\ntype Rec struct {\n" +
-		"\t_ struct{}    `binary:\"endian=big\"`\n" +
-		"\tM [2][3]int16 `binary:\"[2][3]int16\"`\n}\n"
+		"\t_ struct{}      `binary:\"endian=big\"`\n" +
+		"\tM [2][3]string `binary:\"[2][3]string\"`\n}\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, "t.go"), []byte(src), 0o644); err != nil {
 		t.Fatalf("write t.go: %v", err)
 	}
 
 	out, err := exec.Command(sharedCodegenBin, "-type", "Rec", tmpDir).CombinedOutput()
 	if err == nil {
-		t.Fatalf("expected a generation error for a multidimensional tag; output:\n%s", out)
+		t.Fatalf("expected a generation error for a non-scalar multidimensional leaf; output:\n%s", out)
 	}
 	if !strings.Contains(string(out), "multidimensional") {
 		t.Errorf("error should explain the multidimensional limit; got:\n%s", out)

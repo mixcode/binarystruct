@@ -110,12 +110,18 @@ need a non-nil Marshaler, so use `WriteBinaryWithMarshaler` (the no-arg
 decode recomputes and verifies the value, matching the runtime interpreter); see
 `-no-validate` below.
 
+**Multidimensional arrays** (`[2][3]int16`, `[2][2][2]int8`) are supported for a
+**scalar leaf type** — fixed Go arrays, and slices whose dimensions are all
+specified (each slice level is allocated with `make` on decode). A non-scalar leaf
+(string, nested struct, pointer) or mixed fixed-array/slice nesting falls back to
+the runtime.
+
 **Not supported by codegen** (generation errors with a clear message — use the
-runtime interpreter): **multidimensional array tags** (`[2][3]int16`), struct-level
-`endian=inverse`, byte-order/encoding inheritance via embedding, a self-referential
-`valueof=bytelen(F)` where `F` is `string(thatVeryField)`, and a custom `valueof`
-evaluator referencing a **nested-struct** field. Per-field `endian=inverse` and
-per-field `encoding=` are supported.
+runtime interpreter): multidimensional arrays over a non-scalar leaf (per above),
+struct-level `endian=inverse`, byte-order/encoding inheritance via embedding, a
+self-referential `valueof=bytelen(F)` where `F` is `string(thatVeryField)`, and a
+custom `valueof` evaluator referencing a **nested-struct** field. Per-field
+`endian=inverse` and per-field `encoding=` are supported.
 
 For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the parent project.
 

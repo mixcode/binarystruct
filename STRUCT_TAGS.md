@@ -148,7 +148,7 @@ Stack multiple length prefixes to encode nested Go arrays/slices in row-major or
 * **Usage**: `M [2][3]int16 `binary:"[2][3]int16"`` writes the 6 elements as 12 bytes (`M[0][0], M[0][1], … M[1][2]`).
 * Each dimension is an independent [expression](#5-expressions), so dimensions may reference other fields: `M [][]uint8 `binary:"[Rows][Cols]uint8"``.
 * Works with Go fixed arrays, slices, and any leaf type (scalars, strings, nested structs); on decode, slice levels are allocated to the declared lengths. An untagged nested Go array (e.g. `[2][3]int16` with no tag) is encoded by natural inference.
-* **Codegen**: multidimensional tags are **not** supported by `binarystruct-codegen` (it fails loud) — use the runtime interpreter for those structs.
+* **Codegen**: `binarystruct-codegen` supports multidimensional arrays with a **scalar leaf type** (fixed arrays, and slices whose dimensions are all specified). Other leaf types (strings, nested structs, pointers) or mixed fixed-array/slice nesting fail generation — use the runtime interpreter for those.
 
 ### String Buffer Size Postfix: `TYPE(buf_len)`
 Limits or pads the string buffer to exactly `buf_len` bytes, where `buf_len` is an expression.

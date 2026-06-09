@@ -70,7 +70,8 @@ Example:
   - [len]TYPE: Specifies an array whose length is the expression len.
   - [d1][d2]...TYPE: Multidimensional arrays — stacked length prefixes encode
     nested Go arrays/slices in row-major order (e.g. [2][3]int16). Each dimension
-    is its own expression. Runtime only; binarystruct-codegen does not support them.
+    is its own expression. binarystruct-codegen supports scalar-leaf multidimensional
+    arrays; non-scalar leaves fall back to the runtime interpreter.
   - TYPE(buf_len): Limits/pads a string or padding buffer to the expression buf_len.
 
 Wherever a tag takes a size or computed value — [len], (buf_len), omittable=Expr, and valueof=Expr — it accepts an expression, not just a literal. Operands are integer literals (decimal, hex 0x1F, octal 0o17, binary 0b1010, with optional _ digit separators) and references to other struct fields; operators are +, -, *, /, and parentheses. Decode-side expressions ([len], (buf_len), omittable) may reference only fields defined before the target; valueof may reference any field. The bytelen()/count() functions are available only inside valueof (see "Computed Field Values").

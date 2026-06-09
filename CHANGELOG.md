@@ -45,9 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[2][2][2]int8`) to encode/decode nested Go arrays and slices in row-major order.
   Each dimension is an independent expression, so dimensions may reference other
   fields (`[Rows][Cols]uint8`); slice levels are allocated to the declared lengths
-  on decode, and any leaf type works (scalars, strings, nested structs). Supported
-  by the runtime (safe + unsafe); **`binarystruct-codegen` fails loud** on a
-  multidimensional tag (use the runtime interpreter for those structs).
+  on decode, and any leaf type works (scalars, strings, nested structs).
+  `binarystruct-codegen` generates multidimensional arrays with a **scalar leaf
+  type** (fixed arrays, and slices with all dimensions specified, byte-identical to
+  the runtime); non-scalar leaves (strings, nested structs, pointers) or mixed
+  fixed-array/slice nesting fail generation (use the runtime interpreter).
 
 ### Performance
 - **Raw-byte fast path in the runtime `valueof`/`bytelen` measurement.**

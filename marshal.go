@@ -385,6 +385,16 @@ func (ms *Marshaler) writeArray(w io.Writer, order ByteOrder, array reflect.Valu
 		// arrayLen = desiredLen
 	}
 
+	// Bulk fast path for fixed-width scalar elements: encode every element into
+	// one contiguous buffer and issue a single Write, rather than a per-element
+	// writeMain + w.Write. Mirrors the unsafe engine's bulk copy (the safe path
+	// still reads each element via reflection, but avoids N interface Writes).
+	if (arrayKind == reflect.Array || arrayKind == reflect.Slice) && elementType != Any {
+		if m, ok, e := ms.writeScalarSliceBulk(w, order, array, arrayLen, desiredLen, elementType); ok {
+			return m, e
+		}
+	}
+
 	wErr := func(i int, e error) error {
 		return fmt.Errorf("array index [%d]: %w", i, e)
 	}
@@ -442,6 +452,49 @@ func (ms *Marshaler) writeArray(w io.Writer, order ByteOrder, array reflect.Valu
 		}
 	}
 	return
+}
+
+// writeScalarSliceBulk encodes a fixed-width scalar array/slice into a single
+// buffer and writes it in one call. ok is false when the element isn't a
+// fixed-width scalar (caller falls back to the per-element path). Elements
+// [arrayLen, desiredLen) are left zero (padding to a constant declared length).
+func (ms *Marshaler) writeScalarSliceBulk(w io.Writer, order ByteOrder, array reflect.Value, arrayLen, desiredLen int, elementType eType) (n int, ok bool, err error) {
+	switch elementType.iKind() {
+	case intKind, uintKind, bitmapKind, floatKind:
+	default:
+		return 0, false, nil
+	}
+	p, found := properties[elementType]
+	if !found || p.bytesize == 0 {
+		return 0, false, nil
+	}
+	sz := p.bytesize
+	if sz > 1 && order == nil {
+		return 0, false, nil // let the per-element path report errNoByteOrder
+	}
+	enc := encodeFunc(array.Type().Elem(), elementType)
+	if enc == nil {
+		return 0, false, nil
+	}
+	buf := make([]byte, desiredLen*sz)
+	for i := 0; i < arrayLen; i++ {
+		u64, _, e := enc(array.Index(i))
+		if e != nil {
+			return 0, true, fmt.Errorf("array index [%d]: %w", i, e)
+		}
+		switch sz {
+		case 1:
+			buf[i] = byte(u64)
+		case 2:
+			order.PutUint16(buf[i*2:], uint16(u64))
+		case 4:
+			order.PutUint32(buf[i*4:], uint32(u64))
+		case 8:
+			order.PutUint64(buf[i*8:], u64)
+		}
+	}
+	n, err = w.Write(buf)
+	return n, true, err
 }
 
 // write a struct

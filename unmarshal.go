@@ -213,6 +213,26 @@ func (ms *Marshaler) readMain(r io.Reader, order ByteOrder, v reflect.Value, enc
 	return
 }
 
+// scalarBulkDecodeInfo reports whether elementType is a fixed-width scalar that
+// can be decoded in bulk (one ReadFull + per-element parse), returning its byte
+// width and the cached decoder. ok is false for non-scalar elements or when a
+// multibyte width has no byte order.
+func scalarBulkDecodeInfo(elemGoType reflect.Type, elementType eType, order ByteOrder) (sz int, dec func(reflect.Value, uint64) error, ok bool) {
+	switch elementType.iKind() {
+	case intKind, uintKind, bitmapKind, floatKind:
+	default:
+		return 0, nil, false
+	}
+	sz, dec = decodeFunc(elementType, elemGoType)
+	if dec == nil || sz == 0 {
+		return 0, nil, false
+	}
+	if sz > 1 && order == nil {
+		return 0, nil, false
+	}
+	return sz, dec, true
+}
+
 func (ms *Marshaler) readSlice(r io.Reader, order ByteOrder, slice reflect.Value, elementType eType, option typeOption) (n int, err error) {
 
 	if slice.Kind() != reflect.Slice {
@@ -261,6 +281,35 @@ func (ms *Marshaler) readSlice(r io.Reader, order ByteOrder, slice reflect.Value
 				return
 			}
 			n += m
+
+		} else if sz, dec, okBulk := scalarBulkDecodeInfo(uslice.Type().Elem(), elementType, order); okBulk && l > 0 {
+			// Bulk fast path for fixed-width scalar elements: one ReadFull into a
+			// contiguous buffer, then decode each element from it — instead of a
+			// per-element readMain + io.ReadFull.
+			buf := make([]byte, l*sz)
+			m, err = io.ReadFull(r, buf)
+			n += m
+			if err != nil {
+				err = wErr(0, err)
+				return
+			}
+			for i := 0; i < l; i++ {
+				var u64 uint64
+				switch sz {
+				case 1:
+					u64 = uint64(buf[i])
+				case 2:
+					u64 = uint64(order.Uint16(buf[i*2:]))
+				case 4:
+					u64 = uint64(order.Uint32(buf[i*4:]))
+				case 8:
+					u64 = order.Uint64(buf[i*8:])
+				}
+				if e := dec(uslice.Index(i), u64); e != nil {
+					err = wErr(i, e)
+					return
+				}
+			}
 
 		} else {
 

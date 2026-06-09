@@ -574,7 +574,10 @@ func (ms *Marshaler) readStruct(r io.Reader, order ByteOrder, strc reflect.Value
 			}
 			if fMeta.isArray {
 				option.isArray = true
-				if fMeta.arrayLenExpr != "" {
+				if fMeta.arrayLenConst {
+					// Pre-resolved constant length; skip re-evaluating the expression.
+					option.arrayLen = fMeta.option.arrayLen
+				} else if fMeta.arrayLenExpr != "" {
 					option.arrayLen, err = evaluateTagValue(strc, fMeta.arrayLenExpr)
 					if err != nil {
 						err = wErr(fMeta.index, err)
@@ -607,7 +610,9 @@ func (ms *Marshaler) readStruct(r io.Reader, order ByteOrder, strc reflect.Value
 					option.arrayLen = option.dims[0]
 				}
 			}
-			if fMeta.bufLenExpr != "" {
+			if fMeta.bufLenConst {
+				option.bufLen = fMeta.option.bufLen
+			} else if fMeta.bufLenExpr != "" {
 				option.bufLen, err = evaluateTagValue(strc, fMeta.bufLenExpr)
 				if err != nil {
 					err = wErr(fMeta.index, err)
@@ -805,7 +810,7 @@ func (ms *Marshaler) readString(r io.Reader, order ByteOrder, v reflect.Value, e
 	strlen := 0
 	if headersz > 0 {
 		var u64 uint64
-		u64, n, err = readU64(r, order, headersz)
+		u64, n, err = ms.readU64(r, order, headersz)
 		if err != nil {
 			return
 		}
@@ -849,13 +854,15 @@ func (ms *Marshaler) readString(r io.Reader, order ByteOrder, v reflect.Value, e
 }
 
 // read bytes according to the byte order
-func readU64(r io.Reader, order ByteOrder, bytesize int) (u64 uint64, n int, err error) {
+// readU64 reads bytesize bytes into the Marshaler's reusable scratch buffer (not a
+// fresh per-call array), so b does not escape to a new allocation through
+// io.ReadFull — the single biggest per-scalar alloc otherwise.
+func (ms *Marshaler) readU64(r io.Reader, order ByteOrder, bytesize int) (u64 uint64, n int, err error) {
 	if bytesize > 1 && order == nil {
 		err = errNoByteOrder
 		return
 	}
-	var buf [8]byte
-	b := buf[:bytesize]
+	b := ms.scratch[:bytesize]
 	n, err = io.ReadFull(r, b)
 	if err != nil {
 		return
@@ -882,7 +889,7 @@ func (ms *Marshaler) readScalar(r io.Reader, order ByteOrder, v reflect.Value, k
 		return
 	}
 	sz, dec := decodeFunc(k, v.Type())
-	u64, n, err := readU64(r, order, sz)
+	u64, n, err := ms.readU64(r, order, sz)
 	if err != nil {
 		return
 	}

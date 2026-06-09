@@ -264,15 +264,19 @@ func (ms *Marshaler) unsafeWriteStruct(w io.Writer, order ByteOrder, strc reflec
 			naturalType := fMeta.naturalType
 			option := fMeta.option
 			if fMeta.arrayLenExpr != "" {
-				option.arrayLen, err = writeEval(fMeta.arrayLenExpr)
-				if err != nil {
-					return n, wErr(fMeta.index, err)
+				// A constant length is pre-resolved in option (from fMeta.option);
+				// only re-evaluate when the expression references other fields.
+				if !fMeta.arrayLenConst {
+					option.arrayLen, err = writeEval(fMeta.arrayLenExpr)
+					if err != nil {
+						return n, wErr(fMeta.index, err)
+					}
 				}
 			} else if fieldValType.Kind() == reflect.Slice {
 				sh := (*sliceHeader)(currPtr)
 				option.arrayLen = sh.Len
 			}
-			if fMeta.bufLenExpr != "" {
+			if fMeta.bufLenExpr != "" && !fMeta.bufLenConst {
 				option.bufLen, err = writeEval(fMeta.bufLenExpr)
 				if err != nil {
 					return n, wErr(fMeta.index, err)
@@ -328,7 +332,7 @@ func (ms *Marshaler) unsafeWriteStruct(w io.Writer, order ByteOrder, strc reflec
 			fieldVal := strc.Field(fMeta.index)
 			naturalType := fMeta.naturalType
 			option := fMeta.option
-			if fMeta.bufLenExpr != "" {
+			if fMeta.bufLenExpr != "" && !fMeta.bufLenConst {
 				option.bufLen, err = writeEval(fMeta.bufLenExpr)
 				if err != nil {
 					return n, wErr(fMeta.index, err)
@@ -408,7 +412,7 @@ func (ms *Marshaler) unsafeWriteScalar(w io.Writer, order ByteOrder, ptr unsafe.
 		return 0, fmt.Errorf("unsupported scalar type: %s", k)
 	}
 
-	return writeU64(w, order, u64, sz)
+	return ms.writeU64(w, order, u64, sz)
 }
 
 func (ms *Marshaler) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflect.Value) (n int, err error) {
@@ -573,15 +577,19 @@ func (ms *Marshaler) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflect
 			naturalType := fMeta.naturalType
 			option := fMeta.option
 			if fMeta.arrayLenExpr != "" {
-				option.arrayLen, err = evaluateTagValue(strc, fMeta.arrayLenExpr)
-				if err != nil {
-					return n, wErr(fMeta.index, err)
+				// A constant length is pre-resolved in option; only re-evaluate when
+				// the expression references other fields.
+				if !fMeta.arrayLenConst {
+					option.arrayLen, err = evaluateTagValue(strc, fMeta.arrayLenExpr)
+					if err != nil {
+						return n, wErr(fMeta.index, err)
+					}
 				}
 			} else if fieldValType.Kind() == reflect.Slice {
 				sh := (*sliceHeader)(currPtr)
 				option.arrayLen = sh.Len
 			}
-			if fMeta.bufLenExpr != "" {
+			if fMeta.bufLenExpr != "" && !fMeta.bufLenConst {
 				option.bufLen, err = evaluateTagValue(strc, fMeta.bufLenExpr)
 				if err != nil {
 					return n, wErr(fMeta.index, err)
@@ -663,7 +671,7 @@ func (ms *Marshaler) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflect
 			fieldVal := strc.Field(fMeta.index)
 			naturalType := fMeta.naturalType
 			option := fMeta.option
-			if fMeta.bufLenExpr != "" {
+			if fMeta.bufLenExpr != "" && !fMeta.bufLenConst {
 				option.bufLen, err = evaluateTagValue(strc, fMeta.bufLenExpr)
 				if err != nil {
 					return n, wErr(fMeta.index, err)
@@ -748,7 +756,7 @@ func (ms *Marshaler) unsafeReadScalar(r io.Reader, order ByteOrder, ptr unsafe.P
 	}
 
 	var u64 uint64
-	u64, n, err = readU64(r, order, sz)
+	u64, n, err = ms.readU64(r, order, sz)
 	if err != nil {
 		return
 	}

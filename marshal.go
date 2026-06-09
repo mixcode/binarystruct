@@ -58,6 +58,15 @@ type Marshaler struct {
 
 	encoderCache map[string]*encoding.Encoder // cache of encoding.NewEncoder()
 	decoderCache map[string]*encoding.Decoder // cache of encoding.NewDecoder()
+
+	// scratch is a reusable 8-byte staging buffer for scalar reads/writes
+	// (readU64/writeU64). Because it lives on the heap-allocated Marshaler, the
+	// slice handed to io.Writer.Write / io.ReadFull no longer escapes to a fresh
+	// per-call allocation. It is reused within a single (sequential) operation;
+	// this is why a *Marshaler must not be shared across goroutines (see the
+	// concurrency note on the package functions — the same rule already applies to
+	// the lazily-populated encoder cache).
+	scratch [8]byte
 }
 
 // NewMarshaler returns a Marshaler with no fallback byte order: values must
@@ -589,10 +598,15 @@ func (ms *Marshaler) resolveFieldEncoding(fieldVal reflect.Value, fMeta structFi
 	}
 	if fMeta.isArray {
 		option.isArray = true
-		// Resolve every dimension of a (possibly multidimensional) array tag. An
-		// empty dimension expression keeps the length seeded from the value itself
-		// (getNaturalType above), e.g. `[]byte` or an implicit outer `[][3]int8`.
-		if len(fMeta.arrayDimExprs) > 0 {
+		switch {
+		case fMeta.arrayLenConst && len(fMeta.arrayDimExprs) <= 1:
+			// Common 1-D constant length: use the value pre-resolved at metadata
+			// time instead of re-evaluating the expression every operation.
+			option.arrayLen = fMeta.option.arrayLen
+		case len(fMeta.arrayDimExprs) > 0:
+			// Resolve every dimension of a (possibly multidimensional) array tag. An
+			// empty dimension expression keeps the length seeded from the value itself
+			// (getNaturalType above), e.g. `[]byte` or an implicit outer `[][3]int8`.
 			option.dims = make([]int, len(fMeta.arrayDimExprs))
 			for i, d := range fMeta.arrayDimExprs {
 				if d == "" {
@@ -613,7 +627,10 @@ func (ms *Marshaler) resolveFieldEncoding(fieldVal reflect.Value, fMeta structFi
 			option.arrayLen = option.dims[0]
 		}
 	}
-	if fMeta.bufLenExpr != "" {
+	if fMeta.bufLenConst {
+		// Pre-resolved constant buffer size (e.g. string(16)).
+		option.bufLen = fMeta.option.bufLen
+	} else if fMeta.bufLenExpr != "" {
 		option.bufLen, err = evalExpr(fMeta.bufLenExpr)
 		if err != nil {
 			return
@@ -1038,7 +1055,7 @@ func (ms *Marshaler) writeString(w io.Writer, order ByteOrder, v reflect.Value, 
 
 	if headersz > 0 {
 		// write string size header
-		m, err = writeU64(w, order, uint64(strlen), headersz)
+		m, err = ms.writeU64(w, order, uint64(strlen), headersz)
 		n += m
 		if err != nil {
 			return
@@ -1090,13 +1107,14 @@ func (ms *Marshaler) writeScalar(w io.Writer, order ByteOrder, v reflect.Value, 
 	if err != nil {
 		return
 	}
-	return writeU64(w, order, u64, sz)
+	return ms.writeU64(w, order, u64, sz)
 }
 
-// write bytes according to the byte order
-func writeU64(w io.Writer, order ByteOrder, u64 uint64, bytesize int) (n int, err error) {
-	var buf [8]byte
-	b := buf[:bytesize]
+// write bytes according to the byte order. The staging buffer is the Marshaler's
+// reusable scratch (not a fresh per-call array), so b does not escape to a new
+// allocation through w.Write — the single biggest per-scalar alloc otherwise.
+func (ms *Marshaler) writeU64(w io.Writer, order ByteOrder, u64 uint64, bytesize int) (n int, err error) {
+	b := ms.scratch[:bytesize]
 	if bytesize > 1 && order == nil {
 		return 0, errNoByteOrder
 	}

@@ -27,6 +27,12 @@ type structFieldMetadata struct {
 	arrayLenExpr  string   // outermost dimension expression (mirrors arrayDimExprs[0]), kept for back-compat
 	arrayDimExprs []string // all dimension expressions for a multidimensional tag (`[4][N]int8` → ["4","N"])
 	bufLenExpr    string
+	// arrayLenConst/bufLenConst are true when the expression is a compile-time
+	// constant (no field references) and was pre-resolved into option.arrayLen /
+	// option.bufLen at metadata time. The encode/decode paths then skip
+	// re-tokenizing and re-evaluating it per operation.
+	arrayLenConst bool
+	bufLenConst   bool
 	valueofExpr   string
 	// valueofCustom* hold a custom valueof evaluator parsed from a
 	// `valueof=NAME(field, ...)` tag whose NAME is not a built-in (bytelen,
@@ -1046,6 +1052,7 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 				if meta.arrayLenExpr != "" {
 					if val, err := evaluateTagValue(reflect.Value{}, meta.arrayLenExpr); err == nil {
 						meta.option.arrayLen = val
+						meta.arrayLenConst = true
 					}
 				}
 				// Pre-resolve constant array dimensions (field-referenced dims stay
@@ -1066,6 +1073,7 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 			if meta.bufLenExpr != "" {
 				if val, err := evaluateTagValue(reflect.Value{}, meta.bufLenExpr); err == nil {
 					meta.option.bufLen = val
+					meta.bufLenConst = true
 				}
 			}
 			if meta.encoding != "" {

@@ -1717,6 +1717,92 @@ func (g *Generator) generateMultidimRead(buf *bytes.Buffer, fieldName, goType, b
 	buf.WriteString("\t}\n")
 }
 
+// cgArrayCanBulk reports whether an array/slice field's elements can use the bulk
+// scalar-buffer path: a fixed-width scalar element (byte/uint8 excluded — they have
+// their own direct path), with no per-element validation/codec and a non-pointer
+// element type. It returns the element's wire width.
+func cgArrayCanBulk(goType, binType string, parsedTag parsedFieldTag) (width int, ok bool) {
+	switch binType {
+	case "int8":
+		width = 1
+	case "int16", "uint16", "word":
+		width = 2
+	case "int32", "uint32", "dword", "float32":
+		width = 4
+	case "int64", "uint64", "qword", "float64":
+		width = 8
+	default:
+		return 0, false
+	}
+	elem := goType[strings.IndexByte(goType, ']')+1:] // element type of [] or [N]
+	if strings.HasPrefix(elem, "*") {
+		return 0, false
+	}
+	for _, opt := range []string{"range", "match", "const", "codec"} {
+		if _, has := parsedTag.options[opt]; has {
+			return 0, false
+		}
+	}
+	return width, true
+}
+
+// generateScalarSliceBulkWrite emits a single buffer fill + one w.Write for a
+// fixed-width scalar array/slice, replacing N per-element order.PutUintN + w.Write.
+func (g *Generator) generateScalarSliceBulkWrite(buf *bytes.Buffer, fieldName, binType, sizeExpr string, width int) {
+	fmt.Fprintf(buf, "\t{\n\t\twriteLen := int(%s)\n", sizeExpr)
+	fmt.Fprintf(buf, "\t\tsbuf := make([]byte, writeLen*%d)\n", width)
+	buf.WriteString("\t\tfor i := 0; i < writeLen; i++ {\n")
+	switch {
+	case width == 1:
+		fmt.Fprintf(buf, "\t\t\tsbuf[i] = byte(s.%s[i])\n", fieldName)
+	case binType == "float32":
+		fmt.Fprintf(buf, "\t\t\torder.PutUint32(sbuf[i*4:], math.Float32bits(float32(s.%s[i])))\n", fieldName)
+	case binType == "float64":
+		fmt.Fprintf(buf, "\t\t\torder.PutUint64(sbuf[i*8:], math.Float64bits(float64(s.%s[i])))\n", fieldName)
+	case width == 2:
+		fmt.Fprintf(buf, "\t\t\torder.PutUint16(sbuf[i*2:], uint16(s.%s[i]))\n", fieldName)
+	case width == 4:
+		fmt.Fprintf(buf, "\t\t\torder.PutUint32(sbuf[i*4:], uint32(s.%s[i]))\n", fieldName)
+	case width == 8:
+		fmt.Fprintf(buf, "\t\t\torder.PutUint64(sbuf[i*8:], uint64(s.%s[i]))\n", fieldName)
+	}
+	buf.WriteString("\t\t}\n")
+	buf.WriteString("\t\tm, err = w.Write(sbuf)\n\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
+}
+
+// generateScalarSliceBulkRead emits a single io.ReadFull + buffer decode for a
+// fixed-width scalar array/slice, replacing N per-element io.ReadFull.
+func (g *Generator) generateScalarSliceBulkRead(buf *bytes.Buffer, fieldName, goType, binType string, width int, isFixed bool, sizeExpr string) {
+	elem := goType[strings.IndexByte(goType, ']')+1:]
+	buf.WriteString("\t{\n")
+	lenExpr := fmt.Sprintf("len(s.%s)", fieldName)
+	if !isFixed {
+		fmt.Fprintf(buf, "\t\treadLen := int(%s)\n", sizeExpr)
+		fmt.Fprintf(buf, "\t\ts.%s = make(%s, readLen)\n", fieldName, goType)
+		lenExpr = "readLen"
+	}
+	fmt.Fprintf(buf, "\t\tsbuf := make([]byte, %s*%d)\n", lenExpr, width)
+	buf.WriteString("\t\tm, err = io.ReadFull(r, sbuf)\n\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n")
+	var get string
+	switch {
+	case width == 1:
+		get = "sbuf[i]"
+	case binType == "float32":
+		get = "math.Float32frombits(order.Uint32(sbuf[i*4:]))"
+	case binType == "float64":
+		get = "math.Float64frombits(order.Uint64(sbuf[i*8:]))"
+	case width == 2:
+		get = "order.Uint16(sbuf[i*2:])"
+	case width == 4:
+		get = "order.Uint32(sbuf[i*4:])"
+	case width == 8:
+		get = "order.Uint64(sbuf[i*8:])"
+	}
+	fmt.Fprintf(buf, "\t\tfor i := 0; i < %s; i++ {\n", lenExpr)
+	fmt.Fprintf(buf, "\t\t\ts.%s[i] = %s(%s)\n", fieldName, elem, get)
+	buf.WriteString("\t\t}\n\t}\n")
+}
+
 func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag, fields map[string]cgFieldInfo) error {
 	if parsedTag.numDims > 1 {
 		return g.generateMultidimWrite(buf, fieldName, goType, binType, parsedTag, fields)
@@ -1747,6 +1833,13 @@ func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, bin
 		fmt.Fprintf(buf, "\t{\n\t\twriteLen := int(%s)\n", sizeExpr)
 		fmt.Fprintf(buf, "\t\tm, err = w.Write(s.%s[:writeLen])\n", fieldName)
 		buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
+		return nil
+	}
+
+	// Bulk write for fixed-width multibyte scalar slices: one buffer + one Write
+	// instead of a per-element order.PutUintN + w.Write.
+	if width, ok := cgArrayCanBulk(goType, binType, parsedTag); ok {
+		g.generateScalarSliceBulkWrite(buf, fieldName, binType, sizeExpr, width)
 		return nil
 	}
 
@@ -1791,10 +1884,21 @@ func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binT
 			buf.WriteString("\tn += m\n\tif err != nil {\n\t\treturn n, err\n\t}\n")
 			return
 		}
+		if width, ok := cgArrayCanBulk(goType, binType, parsedTag); ok {
+			g.generateScalarSliceBulkRead(buf, fieldName, goType, binType, width, true, sizeExpr)
+			return
+		}
 		elemType := goType[strings.IndexByte(goType, ']')+1:]
 		fmt.Fprintf(buf, "\tfor i := 0; i < len(s.%s); i++ {\n", fieldName)
 		g.generateFieldRead(buf, fmt.Sprintf("s.%s[i]", fieldName), elemType, binType, parsedTag, typeName, fmt.Sprintf("%s[i]", fieldName), offExpr)
 		buf.WriteString("\t}\n")
+		return
+	}
+
+	// Bulk read for fixed-width multibyte scalar slices: one io.ReadFull + buffer
+	// decode instead of a per-element io.ReadFull.
+	if width, ok := cgArrayCanBulk(goType, binType, parsedTag); ok {
+		g.generateScalarSliceBulkRead(buf, fieldName, goType, binType, width, false, sizeExpr)
 		return
 	}
 

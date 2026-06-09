@@ -322,10 +322,43 @@ blob, _ := ms.Marshal(&Chunk{Type: "IHDR", Data: payload})
 * **Validated on decode** (unlike encode-only `bytelen`): the same evaluator re-runs over the decoded fields and the result is compared to the value read; a mismatch is a `DecodeError` wrapping `ErrValidationError`. It's a post-decode pass, so a checksum may reference fields declared after it.
 * **Must be the whole expression** — `valueof=CRC32(Type, Data)`; cannot be mixed with arithmetic in this version. An unregistered name fails loud.
 
+### Recipe: a full chunked container (header + count-prefixed records + per-record CRC)
+The library's sweet spot (PNG/TLV/packet-log shapes) combines four features in one type — struct-declared order (Rule E), a `const` magic (Section 8), `valueof` count/length, and a custom CRC. Set **only** the real data fields; every magic / count / length / CRC is written or validated for you:
+
+```go
+type Record struct {
+	NameLen uint8  `binary:"uint8,valueof=bytelen(Name)"`
+	Name    []byte `binary:"[NameLen]byte"`
+	DataLen uint32 `binary:"uint32,valueof=bytelen(Payload)"`
+	Payload []byte `binary:"[DataLen]byte"`
+	CRC     uint32 `binary:"uint32,valueof=CRC32(Name, Payload)"` // per-record; validated on decode
+}
+type Container struct {
+	_       struct{}  `binary:"endian=big"`              // order declared once; propagates into Record
+	Magic   uint32    `binary:"uint32,const=0x504B544C"` // "PKTL": written on encode, checked on decode
+	Version uint16    `binary:"uint16"`                  // a real field — you set this
+	Count   uint16    `binary:"uint16,valueof=count(Records)"`
+	Records []*Record `binary:"[Count]"`                 // slice-of-struct: BARE [Count], no element type
+}
+
+ms := binarystruct.NewMarshaler()                        // custom CRC ⇒ a configured Marshaler, not pkg funcs
+ms.AddValueOf("CRC32", func(c binarystruct.ValueOfContext) (uint64, error) {
+	h := crc32.NewIEEE()
+	for _, a := range c.Args { h.Write(a.Bytes) }
+	return uint64(h.Sum32()), nil
+})
+blob, _ := ms.Marshal(&Container{Version: 1, Records: recs}) // set only Version + Records (+ each Name/Payload)
+var out Container
+_, _ = ms.Unmarshal(blob, &out)                              // Magic + every CRC validated; lengths/Count consumed
+```
+* A **slice of structs** whose element count is a field uses the **bare `[Count]`** tag (no element type) — `[]*Record \`binary:"[Count]"\``.
+* Because the custom CRC needs the registered evaluator, drive **both** directions through the same `ms` (the no-arg `binarystruct.Marshal`/the generated `MarshalBinary` would fail loud on the unknown name).
+
 ### Rules
 * **Encode-only (built-ins).** On decode the field is read normally; size the target with a decode-side `[len]` expression. (Custom evaluators additionally validate on decode — above.)
 * **Emit-only (no write-back), by design.** The computed value is written to the stream but your Go struct field is left unchanged — this keeps encoding a pure, side-effect-free read (safe for concurrent marshalling). **To obtain the computed values in Go, do a `Marshal`/`Unmarshal` (or `Write`/`Read`) round trip.** A write-back mode will not be added.
 * **Integer/bitmap fields only**; other field types are a compile-time error. `bytelen`/`count` are valid only inside `valueof`.
+* **Round-trip test gotcha (Go nil-vs-empty):** a zero-length `[]byte{}` (or `[]T{}`) decodes back as `nil`, so `reflect.DeepEqual(in, out)` can fail on otherwise-correct data — the *bytes* round-trip fine. Compare byte fields with `bytes.Equal` (treats nil and empty as equal), or normalize before `DeepEqual`. This is standard Go behavior, not a binarystruct quirk.
 * **Codegen support**: the static code generator resolves `count(F)` and `bytelen(F)` for nearly every field shape — fixed-width scalars and scalar arrays, byte slices/arrays, fixed `string(N)` and all length-prefixed/null-terminated string variants (including text-encoded, via an `ms`-guarded `EncodeText` measurement), nested structs, tag-counted arrays of structs, and pointer-to-struct. It also supports **custom valueof evaluators**: byte-region args (`[]byte`/`[N]byte`, raw `string`, constant-size `string(N)` without text encoding) and fixed-width integer scalars (`order.PutUintN`) are emitted inline; every other arg shape (text-encoded/prefixed strings, floats, multibyte-scalar arrays, padded byte slices, variable string buffers) is re-encoded with its own tag via `ms.MarshalAs`, byte-matching the runtime. Only a **nested-struct arg** is unsupported (fails generation → use the runtime). Generated code needs a non-nil Marshaler (call `WriteBinaryWithMarshaler`, not the no-arg `MarshalBinary`); decode-time validation is **on by default** (generated decode recomputes and verifies the value, matching the runtime interpreter), and the `-no-validate` flag strips all decode validation — this custom check plus the built-in `const`/`range`/`match` checks. It rejects (generation-time error → use the runtime interpreter for that struct) `bytelen` of a **pointer-element struct array** or a **pointer scalar field**.
 
 ---

@@ -1,5 +1,10 @@
 # Developer Agent Guide (AGENTS.txt)
 
+> **Audience: contributors.** This document is for agents **modifying** the
+> `binarystruct` repository itself. If you are **using** the library in your own
+> code, read **[llms-full.txt](llms-full.txt)** instead (indexed by `llms.txt`) —
+> it has the API cheat sheet, recipes, and traps.
+
 This document provides instructions for AI developer agents modifying, extending, or maintaining the `binarystruct` repository.
 
 ## 1. Ground Truth Specification

@@ -8,6 +8,17 @@ Static code generator for [binarystruct](https://github.com/mixcode/binarystruct
 go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
 ```
 
+To pin a **specific release**, the version suffix is the **path-prefixed nested-module
+tag**, not a bare `vX.Y.Z` (a common stumbling block — the parent module's `v0.3.3`
+tag does not select this tool):
+
+```bash
+go install github.com/mixcode/binarystruct/binarystruct-codegen@binarystruct-codegen/v0.3.3
+```
+
+The installed binary lands in `$GOBIN` (or `$(go env GOPATH)/bin` if `GOBIN` is unset);
+ensure that directory is on your `PATH`.
+
 This is a **separate nested module** (its own `go.mod`), so it is not reachable by
 import path from a consumer module and is **not** covered by a `replace` directive
 on the parent `binarystruct` module. To run an **unreleased / local checkout** (e.g.

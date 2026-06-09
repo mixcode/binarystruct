@@ -67,9 +67,9 @@ binarystruct-codegen -type Packet -json -output layout.json
 
 For each specified type, the tool generates (the no-arg methods bake the `-endian` order):
 
-- `MarshalBinary() ([]byte, error)` — implements `encoding.BinaryMarshaler`
+- `MarshalBinary() ([]byte, error)` — implements `encoding.BinaryMarshaler` ⚠️ **errors for a struct that uses `encoding=`/`codec=`/custom `valueof` — those need a Marshaler; use `WriteBinaryWithMarshaler` instead (see below).**
 - `AppendBinary(b []byte) ([]byte, error)` — implements `encoding.BinaryAppender` (Go 1.24)
-- `UnmarshalBinary(data []byte) error` — implements `encoding.BinaryUnmarshaler`
+- `UnmarshalBinary(data []byte) error` — implements `encoding.BinaryUnmarshaler` (same caveat as `MarshalBinary`)
 - `WriteBinary(w io.Writer, order ByteOrder) (int, error)` / `ReadBinary(r io.Reader, order ByteOrder) (int, error)` — order-taking forms binarystruct dispatches to
 
 Context-aware variants are **always** generated too (the no-arg forms above simply call them with a `nil` Marshaler):

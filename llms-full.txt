@@ -114,7 +114,7 @@ type PNG struct {
 ```
 
 ### F. Concurrency
-The package-level `Marshal`/`Unmarshal`/`Write`/`Read` are safe for concurrent use (each call allocates its own `Marshaler`), and independent `Marshaler` instances may run concurrently (the only shared global is a `sync.Map` metadata cache). Do **not** share a single `*Marshaler` across goroutines: it lazily populates an internal encoder cache (and `AddTextEncoding` mutates it) without locking — use one instance per goroutine, or the package-level functions.
+The package-level `Marshal`/`Unmarshal`/`Write`/`Read` are safe for concurrent use (each call allocates its own `Marshaler`), and independent `Marshaler` instances may run concurrently (the only shared global is a `sync.Map` metadata cache). Do **not** share a single `*Marshaler` across goroutines: it lazily populates an internal encoder cache (and `AddTextEncoding` mutates it), and it reuses an internal scalar scratch buffer during encode/decode — neither is locked, so a shared instance races even when no text encoding is registered. Use one instance per goroutine, or the package-level functions.
 
 ### G. The struct order propagates; per-field `endian=` is only an override (common trap)
 The struct's declared order (the `_` sentinel, Rule E) applies to the **entire** value and **propagates automatically into every field and nested struct**. The per-field `endian=big|little|inverse` tag is purely an **override** for the rare field that differs (a mixed-endian format); `inverse` flips relative to the inherited order.
@@ -237,6 +237,12 @@ To achieve peak performance in production, compile struct layouts into static Go
 * **Byte order / `-endian` flag**: a struct's own `_` sentinel declaration supplies (and overrides) the order baked into the generated no-arg `MarshalBinary()`/`UnmarshalBinary()`/`AppendBinary()`. `-endian big|little` is only the **fallback** for a struct that declares none. Generation **errors** if neither the struct nor the flag gives an order (the stdlib `encoding` interfaces carry none, so there is no default). Codegen does **not** support struct-level `endian=inverse` or order-via-embedding — use the runtime interpreter for those.
 * **Generated methods**: for each type, `MarshalBinary`/`UnmarshalBinary` (stdlib `encoding.BinaryMarshaler`/`Unmarshaler`), `AppendBinary` (stdlib `encoding.BinaryAppender`, Go 1.24), and `WriteBinary`/`ReadBinary` (+ `…WithMarshaler` when the struct uses encodings/codecs).
 * **Runtime Fast-Paths**: The main library automatically detects generated static methods via type assertion (interfaces `BinaryReader`, `BinaryWriter`, `MarshalerContextReader`, `MarshalerContextWriter`) and fast-paths directly to them during `Marshal` / `Unmarshal` calls.
+* **Codegen limitations — design your struct to stay inside these** (each fails generation with a clear message; the **runtime interpreter handles them all**, so fall back to it for that struct):
+  - a custom `valueof` evaluator whose argument is a **nested struct** (other arg shapes are fine — see §7);
+  - a **multidimensional array with a non-scalar leaf** (string/nested-struct/pointer), or mixed fixed-array/slice nesting (scalar-leaf multidim like `[2][3]int16` / `[Rows][Cols]uint16` **is** supported);
+  - `bytelen()` of a **pointer-element struct array** or a **pointer scalar field**;
+  - struct-level **`endian=inverse`** or byte-order/encoding **inheritance via embedding**.
+  Also: a struct that uses `encoding=`/`codec=`/custom `valueof` **must** be driven via `WriteBinaryWithMarshaler`/`ReadBinaryWithMarshaler` (a registered Marshaler) — the no-arg `MarshalBinary`/`UnmarshalBinary` pass a nil Marshaler and error for those fields.
 
 ### Example:
 ```go

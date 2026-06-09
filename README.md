@@ -65,7 +65,7 @@ output, err := binarystruct.Marshal(&strc)
 * **Fixed / Magic Values**: Pin signatures and version fields with `const=` — emitted on encode and validated on decode (integer magics like `const=0x04034b50` or byte-sequence magics like `const=0x89504e470d0a1a0a`). See [Fixed / Magic Values](#fixed--magic-values-const).
 * **Interface & Polymorphic Handling**: Automatically deserializes into pre-assigned interface fields, or uses custom codecs to dynamically allocate types based on previously decoded header values.
 * **High-Performance Runtime Interpreter**: Uses dynamic layout compilation and a cached metadata interpreter. Unsafe Mode (default) bypasses reflection using `unsafe.Pointer` and zero-allocation slice streaming, yielding giant performance gain compared with safe mode using Go reflection.
-* **Static Code Generation**: Includes a `binarystruct-codegen` tool that generates optimized, reflection-free `MarshalBinary` / `UnmarshalBinary` methods from struct tags. Achieves up to **6.7x speedup** over safe-mode reflection with near-zero allocations. Supports `go:generate` integration. See [`binarystruct-codegen/README.md`](binarystruct-codegen/README.md).
+* **Static Code Generation**: Includes a `binarystruct-codegen` tool that generates optimized, reflection-free `MarshalBinary` / `UnmarshalBinary` methods from struct tags. Achieves **several-fold speedups** over the reflection interpreter with the fewest allocations of any mode. Supports `go:generate` integration. See [`binarystruct-codegen/README.md`](binarystruct-codegen/README.md).
 * **Multi-Language String Encoding**: Supports converting custom character encodings (e.g., `Shift-JIS`, `UTF-16`) on string fields by registering encodings via `AddTextEncoding` with customizable default fallback encodings.
 * **Single-Value Marshalling**: Encode/deserialize standalone non-struct variables directly using `MarshalAs` / `UnmarshalAs` with custom tags.
 * **Custom Codecs**: Register custom encoders/decoders via the `Codec` interface to handle complex validation or dynamic type mappings.
@@ -246,6 +246,8 @@ A deserialization benchmark decoding a realistic 280-byte packet containing rang
 | **Safe Mode** (`-tags safe_binarystruct`) | `4,260 ns/op` | `47 allocs/op` | Baseline |
 | **Unsafe Mode** (Default Interpreter) | `3,670 ns/op` | `22 allocs/op` | +16% Speed, -53% Allocations |
 | **Static Codegen** (Compiled) | `634 ns/op` | `8 allocs/op` | **+570% Speed (6.7x faster)**, **-83% Allocations** |
+
+> ⚠️ **These figures predate the 0.3.2 performance release**, which substantially cut allocations across all three modes (e.g. safe-mode scalar slices went from ~2–3 allocs/element to O(1)) and narrowed the safe-vs-unsafe gap for small structs — the unsafe interpreter's edge is now largest on big scalar arrays/slices. The relative ordering above is no longer representative; **run `go test -bench=. -benchmem ./...` (and again with `-tags safe_binarystruct`) for current numbers on your workload.** Static codegen remains the fastest path with the fewest allocations.
 
 ---
 

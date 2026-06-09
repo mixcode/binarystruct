@@ -57,7 +57,7 @@ output, err := binarystruct.Marshal(&strc)
 ## 主な機能
 
 * **自動的かつ安全な型変換**: パックされたバイナリレイアウトをGoの自然な型（例: `uint16` や `int8` ストリームから直接Goの `int` フィールド）へ、安全な値の範囲チェック付きで自動変換します。
-* **静的コード生成**: `binarystruct-codegen` ツールにより、構造体タグからリフレクション不要で最適化された `MarshalBinary` / `UnmarshalBinary` メソッドを生成します。Safeモードのリフレクションに対して最大**6.7倍の高速化**をほぼゼロアロケーションで実現し、`go:generate` との統合をサポートします。詳細は [`binarystruct-codegen/README.md`](binarystruct-codegen/README.md) を参照してください。
+* **静的コード生成**: `binarystruct-codegen` ツールにより、構造体タグからリフレクション不要で最適化された `MarshalBinary` / `UnmarshalBinary` メソッドを生成します。リフレクションインタプリタに対して**数倍の高速化**を全モード中最小のアロケーションで実現し、`go:generate` との統合をサポートします。詳細は [`binarystruct-codegen/README.md`](binarystruct-codegen/README.md) を参照してください。
 * **超高速ランタイムインタプリタ**: タグ解析結果を初回ロード時にキャッシュし、Unsafeモード（デフォルト）では `unsafe.Pointer` とアロケーションフリーのスライス転送技術を用いることで、Safeモード（リフレクション）と比較して高速化とメモリ割り当て削減を実現します（具体的な数値は[性能比較](#性能比較)を参照）。
 * **宣言的バリデーション**: `range=min..max` による数値範囲チェックや `match=pattern` による正規表現文字列バリデーションにより、デシリアライズ時にインラインで検証を行い、違反時にはエラーを返します。
 * **きめ細かなレイアウト制御**: `byte`, `word`, `dword`, `qword` などの明示的なデータ型や、`pad(size)` によるゼロ埋めパディングを柔軟に設定できます。
@@ -247,6 +247,8 @@ type Packet struct {
 | **Safe Mode** (`-tags safe_binarystruct`) | `4,260 ns/op` | `47 allocs/op` | 基準値（Baseline） |
 | **Unsafe Mode** (デフォルト・インタプリタ) | `3,670 ns/op` | `22 allocs/op` | 速度+16%、メモリ割当-53% |
 | **静的コード生成** (Codegen適用・コンパイル済) | `634 ns/op` | `8 allocs/op` | **速度+570%（約6.7倍高速）**、**メモリ割当-83%** |
+
+> ⚠️ **これらの数値は 0.3.2 パフォーマンスリリース以前のものです**。0.3.2 では全3モードでアロケーションが大幅に削減され（例: Safeモードのスカラースライスは要素あたり約2〜3回から O(1) へ）、小さな構造体での Safe/Unsafe 間の差も縮まりました（Unsafe インタプリタの優位性は、大きなスカラー配列・スライスで最も大きくなります）。上記の相対的な順位はもはや代表的ではありません。**現在の数値はワークロードに対して `go test -bench=. -benchmem ./...`（および `-tags safe_binarystruct` での再実行）で測定してください。** 静的コード生成は依然として最速かつ最小アロケーションの経路です。
 
 ---
 

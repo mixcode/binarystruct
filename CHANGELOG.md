@@ -5,6 +5,14 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+- **`binarystruct-codegen/README.md`**: the install section now uses `@latest` as
+  the only concrete command and documents the path-prefixed nested-module pin
+  syntax generically (`@binarystruct-codegen/vX.Y.Z`) instead of a concrete version,
+  so the example no longer needs a per-release bump.
+
 ## [0.3.4] - 2026-06-09
 
 Documentation only — **no code or wire-format changes**. Agent-readiness polish

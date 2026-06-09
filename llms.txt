@@ -8,7 +8,7 @@ An automatic type-converting binary data marshaller/unmarshaller for Go structs 
 - [Inspect](struct.go) — Inspects structural byte offsets, sizes, and formats.
 
 ## Documentation Index
-- [Full LLM Integration Guide](llms-full.txt) — Comprehensive coding rules, dynamic sizing, computed/derived fields (lengths, counts, and custom checksums/CRCs via `valueof`), custom codecs, text encodings, and validation instructions.
+- [Full LLM Integration Guide](llms-full.txt) — Comprehensive coding rules, dynamic sizing, multidimensional arrays, computed/derived fields (lengths, counts, and custom checksums/CRCs via `valueof`), custom codecs, text encodings, and validation instructions.
 - [Struct Tag Reference](STRUCT_TAGS.md) — Detailed guide on binary struct tag syntax, options, and endianness overrides.
 - [Technical Specification](SPECIFICATION.md) — Ground-truth specification for runtime interpreter mechanics and compiler behavior.
 - [Static Code Generator (binarystruct-codegen)](binarystruct-codegen/README.md) — Standalone CLI tool details to compile tags into static, zero-allocation Go methods.

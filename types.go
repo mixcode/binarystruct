@@ -10,6 +10,7 @@ import (
 	"math"
 	"reflect"
 	"strings"
+	"sync"
 )
 
 // Codec is a user-defined binary encoder/decoder interface.
@@ -335,7 +336,51 @@ func getStaticTypeInfo(typ reflect.Type) (t eType, option typeOption) {
 }
 
 // decodeFunc() generates a binary-type to go-type conversion function
+// scalarFuncKey identifies a (Go type, binary type) pair for caching the encode/
+// decode closures. reflect.Type is canonical and comparable, so it is a valid map
+// key.
+type scalarFuncKey struct {
+	rt reflect.Type
+	et eType
+}
+
+type decodeFuncEntry struct {
+	bytesz  int
+	decoder func(reflect.Value, uint64) error
+}
+
+// encodeFunc/decodeFunc closures depend only on the (type, binary-type) pair, so
+// they are built once per pair and cached process-wide. This removes a closure
+// allocation on every scalar element — the dominant remaining cost when encoding/
+// decoding large scalar slices in safe mode. The caches are read-mostly; sync.Map
+// fits and stays safe for concurrent Marshalers (unlike the per-Marshaler scratch).
+var (
+	encodeFuncCache sync.Map // scalarFuncKey -> func(reflect.Value) (uint64, int, error)
+	decodeFuncCache sync.Map // scalarFuncKey -> decodeFuncEntry
+)
+
+func encodeFunc(srcRType reflect.Type, destType eType) func(reflect.Value) (uint64, int, error) {
+	key := scalarFuncKey{srcRType, destType}
+	if f, ok := encodeFuncCache.Load(key); ok {
+		return f.(func(reflect.Value) (uint64, int, error))
+	}
+	f := buildEncodeFunc(srcRType, destType)
+	encodeFuncCache.Store(key, f)
+	return f
+}
+
 func decodeFunc(srcType eType, destRType reflect.Type) (bytesz int, decoder func(reflect.Value, uint64) error) {
+	key := scalarFuncKey{destRType, srcType}
+	if e, ok := decodeFuncCache.Load(key); ok {
+		ent := e.(decodeFuncEntry)
+		return ent.bytesz, ent.decoder
+	}
+	bytesz, decoder = buildDecodeFunc(srcType, destRType)
+	decodeFuncCache.Store(key, decodeFuncEntry{bytesz, decoder})
+	return bytesz, decoder
+}
+
+func buildDecodeFunc(srcType eType, destRType reflect.Type) (bytesz int, decoder func(reflect.Value, uint64) error) {
 
 	printerr := func(v interface{}, t reflect.Value) error {
 		return fmt.Errorf("value %v not fit in type %v", v, t.Type())
@@ -522,7 +567,7 @@ func decodeFunc(srcType eType, destRType reflect.Type) (bytesz int, decoder func
 }
 
 // encodeFunc() generates a go-type to binary-type conversion function
-func encodeFunc(srcRType reflect.Type, destType eType) func(reflect.Value) (uint64, int, error) {
+func buildEncodeFunc(srcRType reflect.Type, destType eType) func(reflect.Value) (uint64, int, error) {
 
 	printErrNotFit := func(v interface{}, t eType) error {
 		return fmt.Errorf("value %v not fit in %s", v, t)

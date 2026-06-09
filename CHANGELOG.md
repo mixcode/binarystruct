@@ -5,6 +5,42 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-06-09
+
+A performance release — **no API changes**.
+
+### Performance
+- **Runtime: no per-scalar heap allocation.** `read`/`writeU64` stage through a
+  reusable Marshaler-owned scratch buffer instead of a fresh per-call array, so the
+  staging slice no longer escapes to the heap via `io.Writer.Write` / `io.ReadFull`.
+- **Runtime: constant tag expressions resolved once.** Constant array/buffer
+  lengths (`string(10)`, `[1000]uint32`) are pre-resolved at metadata time instead
+  of being re-tokenized on every operation.
+- **Runtime: encode/decode scalar closures cached** by (Go type, binary type) pair,
+  removing a per-element closure allocation.
+- **Runtime: bulk-buffer scalar slices (safe mode).** A fixed-width scalar
+  array/slice encodes/decodes through one contiguous buffer + a single
+  `Write`/`ReadFull` instead of N per-element calls. Combined effect: safe-mode
+  slice allocations go from ~2–3 per element to O(1) (e.g. unmarshalling a
+  1000-element slice: ~3005 allocs → ~4, ~8× faster); unsafe small-struct marshal
+  19 → 6 allocs.
+- **Codegen: bulk-buffer scalar slices.** Generated code for a multibyte
+  fixed-width scalar array/slice now fills one buffer + single `Write` (decode: one
+  `ReadFull` + parse) instead of a per-element loop (~2.6–2.9× faster).
+- **Codegen: nested generated types are called directly.** A nested struct (or
+  struct-slice element) whose type is itself generated is encoded/decoded with a
+  direct `WriteBinaryWithMarshaler`/`ReadBinaryWithMarshaler` call instead of the
+  reflection runtime with a per-element `Marshaler` allocation (~4.4× faster). This
+  also passes the `Marshaler` through, so a **nested `codec=`/`encoding=`/custom
+  `valueof` now receives its registered context** (previously silently dropped).
+
+### Note
+- A `*Marshaler` must not be shared across goroutines — it now also carries a
+  reusable scalar scratch buffer. Use one instance per goroutine, or the
+  package-level functions. (This matches the pre-existing rule for its
+  lazily-populated encoder cache; independent Marshalers remain safe to run
+  concurrently.)
+
 ## [0.3.1] - 2026-06-09
 
 ### Added
@@ -201,6 +237,7 @@ predate this changelog):
 ### Changed
 - Renamed the build tag `safe` → `safe_binarystruct` to avoid collisions.
 
+[0.3.2]: https://github.com/mixcode/binarystruct/releases/tag/v0.3.2
 [0.3.1]: https://github.com/mixcode/binarystruct/releases/tag/v0.3.1
 [0.3.0]: https://github.com/mixcode/binarystruct/releases/tag/v0.3.0
 [0.2.6]: https://github.com/mixcode/binarystruct/releases/tag/v0.2.6

@@ -18,15 +18,16 @@ const (
 )
 
 type structFieldMetadata struct {
-	index        int
-	name         string
-	offset       uintptr
-	hasTag       bool
-	encodeType   eType
-	isArray      bool
-	arrayLenExpr string
-	bufLenExpr   string
-	valueofExpr  string
+	index         int
+	name          string
+	offset        uintptr
+	hasTag        bool
+	encodeType    eType
+	isArray       bool
+	arrayLenExpr  string   // outermost dimension expression (mirrors arrayDimExprs[0]), kept for back-compat
+	arrayDimExprs []string // all dimension expressions for a multidimensional tag (`[4][N]int8` → ["4","N"])
+	bufLenExpr    string
+	valueofExpr   string
 	// valueofCustom* hold a custom valueof evaluator parsed from a
 	// `valueof=NAME(field, ...)` tag whose NAME is not a built-in (bytelen,
 	// count). Empty name means the valueof (if any) is a built-in/arithmetic
@@ -86,8 +87,12 @@ func (m *structMetadata) fieldByName(name string) (structFieldMetadata, bool) {
 var (
 	errNegativeSize = errors.New("the size must not be negative")
 
-	// regexp to match a tag
-	mTag = regexp.MustCompile(`^\s*(\[([^\]]*)\])?([^\s\(\)]*)(\(([^\)]+)\))?`)
+	// regexp to match a tag. Group 1 is the (possibly multi-dimensional) array
+	// bracket run "[4][2]"; group 2 is the binary type; group 4 is the (buflen).
+	mTag = regexp.MustCompile(`^\s*((?:\[[^\]]*\])*)([^\s\(\)\[\]]*)(\(([^\)]+)\))?`)
+
+	// splits an array bracket run "[4][2]" into its per-dimension expressions.
+	mTagDim = regexp.MustCompile(`\[([^\]]*)\]`)
 
 	// single entry of tag-value evaluation
 	mExpression = regexp.MustCompile(`\s*([\+\-])?\s*([^\s\+\-]+)`)
@@ -624,6 +629,21 @@ func splitTagOptions(s string) []string {
 	return append(out, s[start:])
 }
 
+// parseArrayDims splits an array bracket run such as "[4][2]" into its
+// per-dimension expression strings (["4","2"]); "[]" yields one empty entry, and
+// an empty run yields nil (not an array).
+func parseArrayDims(bracketRun string) []string {
+	if bracketRun == "" {
+		return nil
+	}
+	ms := mTagDim.FindAllStringSubmatch(bracketRun, -1)
+	dims := make([]string, 0, len(ms))
+	for _, m := range ms {
+		dims = append(dims, strings.TrimSpace(m[1]))
+	}
+	return dims
+}
+
 // parse tag string directly
 func parseTagString(tagStr string, strc reflect.Value, naturalType eType, naturalOption typeOption, fieldErr error) (encodeType eType, option typeOption, err error) {
 	encodeType = naturalType
@@ -640,7 +660,7 @@ func parseTagString(tagStr string, strc reflect.Value, naturalType eType, natura
 	}
 
 	m := mTag.FindStringSubmatch(tags[0])
-	typeTag := m[3]
+	typeTag := m[2]
 	parsedType := Any
 	if typeTag != "" {
 		parsedType = typeByName(typeTag)
@@ -657,21 +677,31 @@ func parseTagString(tagStr string, strc reflect.Value, naturalType eType, natura
 	}
 	encodeType = parsedType
 
-	// check for array type and its size
-	option.isArray = m[1] != ""
-	if option.isArray && m[2] != "" {
-		option.arrayLen, err = evaluateTagValue(strc, m[2])
-		if err != nil {
-			return
+	// check for array type and its size(s); a run like [4][2] is multidimensional.
+	dims := parseArrayDims(m[1])
+	option.isArray = len(dims) > 0
+	if option.isArray {
+		option.dims = make([]int, len(dims))
+		for i, d := range dims {
+			if d == "" {
+				continue // length comes from the value's own length (e.g. []byte)
+			}
+			var dv int
+			dv, err = evaluateTagValue(strc, d)
+			if err != nil {
+				return
+			}
+			if dv < 0 {
+				err = errNegativeSize
+				return
+			}
+			option.dims[i] = dv
 		}
-		if option.arrayLen < 0 {
-			err = errNegativeSize
-			return
-		}
+		option.arrayLen = option.dims[0]
 	}
 
-	if m[5] != "" {
-		option.bufLen, err = evaluateTagValue(strc, m[5])
+	if m[4] != "" {
+		option.bufLen, err = evaluateTagValue(strc, m[4])
 		if option.bufLen < 0 {
 			err = errNegativeSize
 			return
@@ -886,7 +916,7 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 
 		meta.hasTag = true
 		m := mTag.FindStringSubmatch(tags[0])
-		typeTag := m[3]
+		typeTag := m[2]
 		parsedType := Any
 		if typeTag != "" {
 			parsedType = typeByName(typeTag)
@@ -899,13 +929,15 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 			continue
 		}
 
-		meta.isArray = m[1] != ""
-		if meta.isArray && m[2] != "" {
-			meta.arrayLenExpr = m[2]
+		dims := parseArrayDims(m[1])
+		meta.isArray = len(dims) > 0
+		if meta.isArray {
+			meta.arrayDimExprs = dims
+			meta.arrayLenExpr = dims[0] // outermost, for back-compat
 		}
 
-		if m[5] != "" {
-			meta.bufLenExpr = m[5]
+		if m[4] != "" {
+			meta.bufLenExpr = m[4]
 		}
 
 		// parse options
@@ -1014,6 +1046,20 @@ func getStructMetadata(structType reflect.Type) (*structMetadata, error) {
 				if meta.arrayLenExpr != "" {
 					if val, err := evaluateTagValue(reflect.Value{}, meta.arrayLenExpr); err == nil {
 						meta.option.arrayLen = val
+					}
+				}
+				// Pre-resolve constant array dimensions (field-referenced dims stay
+				// 0 here and are resolved at encode/decode time). Multidimensional
+				// only; 1-D keeps using arrayLen.
+				if len(meta.arrayDimExprs) > 1 {
+					meta.option.dims = make([]int, len(meta.arrayDimExprs))
+					for i, d := range meta.arrayDimExprs {
+						if d == "" {
+							continue
+						}
+						if val, err := evaluateTagValue(reflect.Value{}, d); err == nil {
+							meta.option.dims[i] = val
+						}
 					}
 				}
 			}

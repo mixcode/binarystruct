@@ -278,6 +278,31 @@ func (ms *Marshaler) unsafeWriteStruct(w io.Writer, order ByteOrder, strc reflec
 					return n, wErr(fMeta.index, err)
 				}
 			}
+			// Multidimensional arrays recurse per dimension; route them straight to
+			// the reflection writer (no unsafe fast path), resolving field-referenced
+			// dimensions first.
+			if len(fMeta.arrayDimExprs) > 1 {
+				option.dims = make([]int, len(fMeta.arrayDimExprs))
+				for i, d := range fMeta.arrayDimExprs {
+					if d == "" {
+						if i == 0 {
+							option.dims[i] = option.arrayLen
+						}
+						continue
+					}
+					option.dims[i], err = writeEval(d)
+					if err != nil {
+						return n, wErr(fMeta.index, err)
+					}
+				}
+				option.arrayLen = option.dims[0]
+				m, err = ms.writeMain(w, order, fieldVal, naturalType, option, strc, fMeta.index)
+				if err != nil {
+					return n, wErr(fMeta.index, err)
+				}
+				n += m
+				continue
+			}
 			var ok bool
 			if fieldValType.Kind() == reflect.Slice || fieldValType.Kind() == reflect.Array {
 				m, ok, err = ms.unsafeWriteSlice(w, fieldOrder, currPtr, fieldValType.Kind() == reflect.Slice, option.arrayLen, fMeta.naturalType, fieldValType.Elem())
@@ -561,6 +586,34 @@ func (ms *Marshaler) unsafeReadStruct(r io.Reader, order ByteOrder, strc reflect
 				if err != nil {
 					return n, wErr(fMeta.index, err)
 				}
+			}
+			// Multidimensional arrays recurse per dimension; route them straight to
+			// the reflection reader, resolving field-referenced dimensions first.
+			if len(fMeta.arrayDimExprs) > 1 {
+				option.dims = make([]int, len(fMeta.arrayDimExprs))
+				for i, d := range fMeta.arrayDimExprs {
+					if d == "" {
+						if i == 0 {
+							option.dims[i] = option.arrayLen
+						}
+						continue
+					}
+					option.dims[i], err = evaluateTagValue(strc, d)
+					if err != nil {
+						return n, wErr(fMeta.index, err)
+					}
+				}
+				option.arrayLen = option.dims[0]
+				m, err = ms.readMain(r, order, fieldVal, naturalType, option, strc, fMeta.index)
+				if err != nil {
+					return n, wErr(fMeta.index, err)
+				}
+				if err = validateField(fieldVal, &fMeta); err != nil {
+					return n, wErr(fMeta.index, err)
+				}
+				n += m
+				firstElem = false
+				continue
 			}
 			var ok bool
 			if fieldValType.Kind() == reflect.Slice || fieldValType.Kind() == reflect.Array {

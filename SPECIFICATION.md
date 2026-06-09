@@ -41,6 +41,10 @@ Tag options modify the behavior of binary types. They are appended after the typ
 | **`valueof`** | `valueof=Expr` | Integer/bitmap types | **Encode-only.** Computes the field's serialized value from an expression (may use `bytelen()`/`count()`). Emit-only: the Go field is not modified. See [Computed Field Assignment](#computed-field-assignment-valueof-bytelen-count). |
 | **`const`** | `const=Value` | Integer/bitmap or raw byte sequence | **Encode + decode.** Emits a fixed value (emit-only; field ignored) and validates it on decode (`ErrValidationError` on mismatch). Integer = constant int expression (endian-sensitive); byte sequence = natural-order hex blob. See [Fixed / Magic Values](#fixed--magic-values-const). |
 
+### Array Notation: `[len]TYPE` and multidimensional `[d1][d2]…TYPE`
+
+A `[len]` prefix marks a field as an array/slice of `len` elements (an expression; see the reference-scope rule below). **Multiple stacked prefixes** declare a multidimensional array — `M [2][3]int16 \`binary:"[2][3]int16"\`` writes the 6 elements as 12 bytes in **row-major** order. Each dimension is an independent expression and may reference other fields (`[Rows][Cols]uint8`); on decode, slice levels are allocated to the declared lengths (fixed Go arrays need no allocation), and any leaf type is allowed (scalars, strings, nested structs). An *untagged* nested Go array is encoded by natural inference. **Runtime engines only:** `binarystruct-codegen` emits a clear generation error for a multidimensional tag (a deliberate exclusion — see §1's codegen exclusions; use the runtime interpreter).
+
 ### Computed Field Assignment: `valueof`, `bytelen()`, `count()`
 
 The `valueof` option auto-computes an integer field's **serialized** value from other fields during encoding, removing manual length/count bookkeeping (e.g. a filename-length field that must equal `len(Name)`).

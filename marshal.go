@@ -244,6 +244,13 @@ func (ms *Marshaler) writeMain(w io.Writer, order ByteOrder, v reflect.Value, en
 		var naturalOption typeOption
 		encodeType, naturalOption = getNaturalType(v)
 		option.indirectCount += naturalOption.indirectCount
+		// Adopt the natural array length when the tag left it unknown (e.g. an
+		// untagged nested Go array): without this the element would be silently
+		// skipped (arrayLen 0). 1-D fields already carry their length here.
+		if naturalOption.isArray && option.arrayLen == 0 && len(option.dims) == 0 {
+			option.isArray = true
+			option.arrayLen = naturalOption.arrayLen
+		}
 	}
 
 	// type was a pointer or an interface
@@ -254,8 +261,10 @@ func (ms *Marshaler) writeMain(w io.Writer, order ByteOrder, v reflect.Value, en
 	}
 
 	if option.isArray {
-		// write the array
-		if option.arrayLen == 0 {
+		// write the array. arrayLen==0 means an empty 1-D array (write nothing);
+		// a multidimensional tag still recurses (its outer length comes from the
+		// value when the outer dimension is implicit).
+		if option.arrayLen == 0 && len(option.dims) <= 1 {
 			return
 		}
 		return ms.writeArray(w, order, v, encodeType, option)
@@ -301,6 +310,41 @@ func (ms *Marshaler) writeMain(w io.Writer, order ByteOrder, v reflect.Value, en
 
 // write an array
 func (ms *Marshaler) writeArray(w io.Writer, order ByteOrder, array reflect.Value, elementType eType, option typeOption) (n int, err error) {
+
+	// Multidimensional tag (e.g. [4][2]int8): each outer element is itself an
+	// array of the remaining dimensions. Recurse through writeMain so any leaf
+	// type works; the innermost dimension falls through to the 1-D path below.
+	if len(option.dims) > 1 {
+		if array.Kind() != reflect.Array && array.Kind() != reflect.Slice {
+			return 0, fmt.Errorf("multidimensional binary tag on non-array value of kind %s", array.Kind())
+		}
+		actualLen := array.Len()
+		desiredLen := option.dims[0]
+		if desiredLen <= 0 {
+			desiredLen = actualLen
+		}
+		if actualLen > desiredLen {
+			return 0, fmt.Errorf("array too large to fit: len %d, size %d", desiredLen, actualLen)
+		}
+		child := option
+		child.dims = option.dims[1:]
+		child.arrayLen = child.dims[0]
+		child.isArray = true
+		elemType := array.Type().Elem()
+		var m int
+		for i := 0; i < desiredLen; i++ {
+			e := reflect.Zero(elemType) // pad missing outer elements with zero sub-arrays
+			if i < actualLen {
+				e = array.Index(i)
+			}
+			m, err = ms.writeMain(w, order, e, elementType, child, reflect.Value{}, -1)
+			n += m
+			if err != nil {
+				return n, fmt.Errorf("array index [%d]: %w", i, err)
+			}
+		}
+		return n, nil
+	}
 
 	arrayKind := array.Kind()
 	//
@@ -545,14 +589,28 @@ func (ms *Marshaler) resolveFieldEncoding(fieldVal reflect.Value, fMeta structFi
 	}
 	if fMeta.isArray {
 		option.isArray = true
-		if fMeta.arrayLenExpr != "" {
-			option.arrayLen, err = evalExpr(fMeta.arrayLenExpr)
-			if err != nil {
-				return
+		// Resolve every dimension of a (possibly multidimensional) array tag. An
+		// empty dimension expression keeps the length seeded from the value itself
+		// (getNaturalType above), e.g. `[]byte` or an implicit outer `[][3]int8`.
+		if len(fMeta.arrayDimExprs) > 0 {
+			option.dims = make([]int, len(fMeta.arrayDimExprs))
+			for i, d := range fMeta.arrayDimExprs {
+				if d == "" {
+					if i == 0 {
+						option.dims[i] = option.arrayLen // natural outer length
+					}
+					continue
+				}
+				dv, e := evalExpr(d)
+				if e != nil {
+					return naturalType, option, e
+				}
+				if dv < 0 {
+					return naturalType, option, errNegativeSize
+				}
+				option.dims[i] = dv
 			}
-			if option.arrayLen < 0 {
-				return naturalType, option, errNegativeSize
-			}
+			option.arrayLen = option.dims[0]
 		}
 	}
 	if fMeta.bufLenExpr != "" {

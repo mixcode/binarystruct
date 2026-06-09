@@ -145,6 +145,32 @@ func TestCodegen_NoValidate_StripsBuiltins(t *testing.T) {
 	}
 }
 
+// TestCodegen_Multidim_Errors verifies codegen fails loud on a multidimensional
+// array tag (a deliberate exclusion — the runtime interpreter handles it).
+func TestCodegen_Multidim_Errors(t *testing.T) {
+	t.Parallel()
+	tmpDir, err := os.MkdirTemp(".", "tmp-bs-md-")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	src := "package p\n\ntype Rec struct {\n" +
+		"\t_ struct{}    `binary:\"endian=big\"`\n" +
+		"\tM [2][3]int16 `binary:\"[2][3]int16\"`\n}\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "t.go"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write t.go: %v", err)
+	}
+
+	out, err := exec.Command(sharedCodegenBin, "-type", "Rec", tmpDir).CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected a generation error for a multidimensional tag; output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "multidimensional") {
+		t.Errorf("error should explain the multidimensional limit; got:\n%s", out)
+	}
+}
+
 // TestCodegen_StructEndian_NoFlag generates code for a struct that declares its
 // byte order via the `_` sentinel WITHOUT passing -endian, and verifies the
 // generated methods bake that order — including that binarystruct.Marshal(v),

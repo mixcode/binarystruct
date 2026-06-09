@@ -111,11 +111,11 @@ decode recomputes and verifies the value, matching the runtime interpreter); see
 `-no-validate` below.
 
 **Not supported by codegen** (generation errors with a clear message — use the
-runtime interpreter): struct-level `endian=inverse`, byte-order/encoding
-inheritance via embedding, a self-referential `valueof=bytelen(F)` where `F`
-is `string(thatVeryField)`, and a custom `valueof` evaluator referencing a
-**nested-struct** field. Per-field `endian=inverse` and per-field `encoding=` are
-supported.
+runtime interpreter): **multidimensional array tags** (`[2][3]int16`), struct-level
+`endian=inverse`, byte-order/encoding inheritance via embedding, a self-referential
+`valueof=bytelen(F)` where `F` is `string(thatVeryField)`, and a custom `valueof`
+evaluator referencing a **nested-struct** field. Per-field `endian=inverse` and
+per-field `encoding=` are supported.
 
 For the complete tag reference, see [STRUCT_TAGS.md](../STRUCT_TAGS.md) in the parent project.
 

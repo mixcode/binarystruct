@@ -155,6 +155,12 @@ func (ms *Marshaler) readMain(r io.Reader, order ByteOrder, v reflect.Value, enc
 		var naturalOption typeOption
 		encodeType, naturalOption = getNaturalType(v)
 		option.indirectCount += naturalOption.indirectCount
+		// Adopt the natural array length when the tag left it unknown (e.g. an
+		// untagged nested Go array), mirroring writeMain.
+		if naturalOption.isArray && option.arrayLen == 0 && len(option.dims) == 0 {
+			option.isArray = true
+			option.arrayLen = naturalOption.arrayLen
+		}
 	}
 
 	// type was a pointer or an interface
@@ -301,6 +307,48 @@ func (ms *Marshaler) readArray(r io.Reader, order ByteOrder, array reflect.Value
 
 	// deference a pointer or an interface
 	array, _ = dereferencePointer(array)
+
+	// Multidimensional tag (e.g. [4][2]int8): read each outer element as a
+	// sub-array of the remaining dimensions. Recurse through readMain so the
+	// innermost dimension falls through to the normal slice/array path below.
+	if len(option.dims) > 1 {
+		child := option
+		child.dims = option.dims[1:]
+		child.arrayLen = child.dims[0]
+		child.isArray = true
+		outerLen := option.dims[0]
+		switch array.Kind() {
+		case reflect.Slice:
+			if outerLen <= 0 {
+				if array.IsNil() {
+					return 0, nil // implicit outer length with no destination: nothing to read
+				}
+				outerLen = array.Len()
+			}
+			if array.IsNil() || array.Len() < outerLen {
+				array.Set(reflect.MakeSlice(array.Type(), outerLen, outerLen))
+			}
+		case reflect.Array:
+			if outerLen <= 0 || outerLen > array.Len() {
+				outerLen = array.Len()
+			}
+		default:
+			return 0, fmt.Errorf("multidimensional binary tag on non-array value of kind %s", array.Kind())
+		}
+		var m int
+		for i := 0; i < outerLen; i++ {
+			m, err = ms.readMain(r, order, array.Index(i), elementType, child, reflect.Value{}, -1)
+			n += m
+			if err != nil {
+				if i == 0 && err == io.EOF {
+					return n, err
+				}
+				return n, fmt.Errorf("array index [%d]: %w", i, err)
+			}
+		}
+		return n, nil
+	}
+
 	eKind := array.Kind()
 
 	if eKind == reflect.Slice {
@@ -536,6 +584,27 @@ func (ms *Marshaler) readStruct(r io.Reader, order ByteOrder, strc reflect.Value
 						err = wErr(fMeta.index, errNegativeSize)
 						return
 					}
+				}
+				if len(fMeta.arrayDimExprs) > 1 {
+					option.dims = make([]int, len(fMeta.arrayDimExprs))
+					for i, d := range fMeta.arrayDimExprs {
+						if d == "" {
+							if i == 0 {
+								option.dims[i] = option.arrayLen
+							}
+							continue
+						}
+						option.dims[i], err = evaluateTagValue(strc, d)
+						if err != nil {
+							err = wErr(fMeta.index, err)
+							return
+						}
+						if option.dims[i] < 0 {
+							err = wErr(fMeta.index, errNegativeSize)
+							return
+						}
+					}
+					option.arrayLen = option.dims[0]
 				}
 			}
 			if fMeta.bufLenExpr != "" {

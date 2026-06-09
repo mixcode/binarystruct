@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decode validation is now on by default and `-no-validate` is the single opt-out
   for all decode checks.)
 
+- **Multidimensional array tags** — stack length prefixes (`[2][3]int16`,
+  `[2][2][2]int8`) to encode/decode nested Go arrays and slices in row-major order.
+  Each dimension is an independent expression, so dimensions may reference other
+  fields (`[Rows][Cols]uint8`); slice levels are allocated to the declared lengths
+  on decode, and any leaf type works (scalars, strings, nested structs). Supported
+  by the runtime (safe + unsafe); **`binarystruct-codegen` fails loud** on a
+  multidimensional tag (use the runtime interpreter for those structs).
+
 ### Performance
 - **Raw-byte fast path in the runtime `valueof`/`bytelen` measurement.**
   `fieldEncodedBytes` now hands back a raw byte region (byte slice/array at natural
@@ -51,6 +59,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from ~397 ms to ~0.6 ms per encode in the benchmark. Other shapes are unchanged.
 
 ### Fixed
+- **Untagged nested Go arrays no longer encode to zero bytes.** A struct field of
+  a nested array/slice type (e.g. `[2][3]int16`) with no `binary` tag previously
+  encoded as nothing (an outer length of 0 was inferred and the field silently
+  skipped); it is now encoded by natural inference.
 - **Codegen validation errors now match the runtime's type.** Generated
   `const`/`range`/`match` and custom-`valueof` decode-validation failures return a
   `*DecodeError{Offset, Field}` wrapping `ErrValidationError` (previously a plain

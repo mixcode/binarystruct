@@ -81,6 +81,7 @@ Wherever a tag takes a size or computed value — `[len]`, `(buf_len)`, `omittab
 * **Operators**: `+`, `-`, `*`, `/`, and parentheses.
 * **Reference scope**: decode-side expressions (`[len]`, `(buf_len)`, `omittable`) may reference only fields defined **before** the target. The encode-only `valueof` (Section 7) may reference any field, because the whole Go value is available when encoding.
 * **Functions** `bytelen(F)` / `count(F)` are available **only** inside `valueof` (Section 7), never in decode-side expressions.
+* **Multidimensional arrays**: stack length prefixes — `[2][3]int16`, `[2][2][2]int8` — to encode/decode nested Go arrays/slices in row-major order; each dimension is its own expression (`[Rows][Cols]uint8`). Runtime only — `binarystruct-codegen` fails loud on a multidimensional tag (use the runtime interpreter).
 
 ### E. Byte order is declared on the struct; the API is order-free
 A struct states its byte order with a blank `_ struct{}` **sentinel** field, so the format's endianness lives with the type that describes it. The package functions and the `Marshaler` methods (`Marshal`, `Unmarshal`, `Write`, `Read`, `Append`, `Inspect`) take **no** `order` argument:

@@ -195,7 +195,8 @@ const (
 type typeOption struct {
 	indirectCount int            // if nonzero, original type is a pointer/interface and this value cotains the number of indirections to the actual value
 	isArray       bool           // if true, tagged field is an array: `binary:"[arrayLen]TYPE"`
-	arrayLen      int            // length of the tagged array
+	arrayLen      int            // length of the (outermost) tagged array dimension
+	dims          []int          // all array dimensions for multidimensional tags (`[4][2]int8` → [4 2]); len>1 means nested arrays. arrayLen mirrors dims[0]. nil/len<=1 = ordinary 1-D.
 	bufLen        int            // tagged field is a string or a padding of length bufLen: `binary:"STRINGTYPE(buflen)"`
 	encoding      string         // string encoding of the field: `binary:"string,encoding=ENC"`
 	endian        endianOverride // byte order override: `binary:"...,endian=big|little|inverse"`
@@ -283,12 +284,15 @@ func getNaturalType(v reflect.Value) (t eType, option typeOption) {
 		elementType := typ.Elem()
 		k := elementType.Kind()
 		option.isArray = true
-		if k == reflect.Array || k == reflect.Slice {
-			t = Any
-			return
-		}
 		if !isNil {
 			option.arrayLen = v.Len()
+		}
+		if k == reflect.Array || k == reflect.Slice {
+			// Nested array/slice element: the outer length is set above (so the
+			// element is no longer silently skipped), and the element itself is
+			// written/read through the Any recursion.
+			t = Any
+			return
 		}
 		t = getITypeFromRType(elementType)
 	}

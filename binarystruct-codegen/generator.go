@@ -51,9 +51,13 @@ type parsedFieldTag struct {
 	arrayLenExpr string
 	bufLenExpr   string
 	options      map[string]string
+	numDims      int // number of array dimensions; >1 means a multidimensional tag (codegen-unsupported)
 }
 
-var mTag = regexp.MustCompile(`^\s*(\[([^\]]*)\])?([^\s\(\)]*)(\(([^\)]+)\))?`)
+// Group 1 is the (possibly multi-dimensional) array bracket run "[4][2]"; group 2
+// is the binary type; group 4 is the (buflen). mTagDim splits the run per-dimension.
+var mTag = regexp.MustCompile(`^\s*((?:\[[^\]]*\])*)([^\s\(\)\[\]]*)(\(([^\)]+)\))?`)
+var mTagDim = regexp.MustCompile(`\[([^\]]*)\]`)
 
 func parseFieldTag(tag *ast.BasicLit) parsedFieldTag {
 	res := parsedFieldTag{options: make(map[string]string)}
@@ -81,11 +85,15 @@ func parseFieldTag(tag *ast.BasicLit) parsedFieldTag {
 	}
 
 	match := mTag.FindStringSubmatch(tags[0])
-	if len(match) >= 6 {
-		res.isArray = match[1] != ""
-		res.arrayLenExpr = match[2]
-		res.binaryType = match[3]
-		res.bufLenExpr = match[5]
+	if len(match) >= 5 {
+		dims := mTagDim.FindAllStringSubmatch(match[1], -1)
+		res.isArray = len(dims) > 0
+		res.numDims = len(dims)
+		if res.isArray {
+			res.arrayLenExpr = strings.TrimSpace(dims[0][1]) // outermost dimension
+		}
+		res.binaryType = match[2]
+		res.bufLenExpr = match[4]
 	}
 
 	for _, opt := range tags[1:] {
@@ -897,6 +905,17 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	// field that declares no encoding= of its own inherits it. Baked into each
 	// field's parsed tag below (applyStructEncoding), mirroring the runtime.
 	structEnc := structSentinelEncoding(st)
+
+	// Codegen does not support multidimensional array tags ([4][2]int8); fail loud
+	// so the struct falls back to the runtime interpreter, which does support them.
+	for _, field := range st.Fields.List {
+		if len(field.Names) == 0 || field.Names[0].Name == "_" {
+			continue
+		}
+		if parseFieldTag(field.Tag).numDims > 1 {
+			return fmt.Errorf("type %s: field %s uses a multidimensional array tag, which codegen does not support; use the runtime interpreter for this struct", typeName, field.Names[0].Name)
+		}
+	}
 
 	// Write standard helper functions. The no-arg stdlib encoding interfaces carry
 	// no byte order, so they bake bakedLit (the struct's declared order if any,

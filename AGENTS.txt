@@ -16,8 +16,11 @@ This document provides instructions for AI developer agents modifying, extending
 * **[struct.go](struct.go)**: Layout parser and AST-like metadata compiler (`getStructMetadata`).
 * **[marshal.go](marshal.go) / [unmarshal.go](unmarshal.go)**: Reflection-based safe-mode runtime interpreter.
 * **[unsafe_io.go](unsafe_io.go)**: Reflection-free, high-performance unsafe pointer interpreter.
+* **[simd_amd64.go](simd_amd64.go) / [simd_fallback.go](simd_fallback.go)**: Optional SIMD byte-swap kernels behind the `experiment_simd` build tag (`GOEXPERIMENT=simd -tags experiment_simd`). `unsafe_io.go`'s arch-neutral `swapBytes` dispatches to `simdSwap16/32/64`; the amd64 file implements them with an AVX2 `VPSHUFB` shuffle, the fallback with the scalar loop. `swap_test.go` validates the dispatcher against an independent reference and runs in **both** builds.
 * **[binarystruct-codegen/](binarystruct-codegen/)**: Separate compiler module generating static methods to bypass interpreters.
 * **[STRUCT_TAGS.md](STRUCT_TAGS.md)**: User-facing documentation for tag syntaxes.
+
+> **Upstream-tracking note (SIMD).** The vectorized kernel is **amd64-only by design** because Go 1.26's `simd/archsimd` exposes vector types/ops for amd64 *only* (every functional file in the package is `_amd64.go`; referencing a vector symbol under `GOARCH=arm64` fails to compile). All other architectures intentionally stay on the scalar `simd_fallback.go`. **If a future Go release adds another architecture to `simd/archsimd` (arm64 NEON is the likely first), update this code to match:** add a `simd_<arch>.go` implementing `simdSwap16/32/64` with that ISA's primitives (e.g. NEON `REV16/REV32/REV64`, which byte-reverse within elements directly — not a copy of the amd64 shuffle), and narrow `simd_fallback.go`'s build-tag negation to exclude the new arch. The dispatcher (`swapBytes`) and `swap_test.go` are already architecture-agnostic, so no other file needs to change. Until then, keep SIMD documented and scoped as amd64-only.
 
 ## 3. Development and Testing Rules
 * **Build, test, and verify** (a `go.work` two-module workspace — the root library and the nested `binarystruct-codegen` module). All of the following must pass before a change is complete:

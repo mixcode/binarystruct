@@ -15,7 +15,7 @@ import (
 // typesSrc, drops in the supplied test file, and runs `go test` over the temp
 // package. It asserts the whole pipeline succeeds; cases that codegen does not
 // yet support therefore fail here (red) until they are implemented.
-func genBytelenCase(t *testing.T, pkg, typesSrc, typeList, testSrc string) {
+func genBytelenCase(t *testing.T, pkg, typesSrc, typeList, testSrc string, extraGenFlags ...string) {
 	t.Helper()
 	t.Parallel()
 
@@ -31,7 +31,9 @@ func genBytelenCase(t *testing.T, pkg, typesSrc, typeList, testSrc string) {
 		t.Fatalf("failed to write types.go: %v", err)
 	}
 
-	genCmd := exec.Command(codegenBin, "-type", typeList, "-endian", "big", tmpDir)
+	genArgs := append([]string{"-type", typeList, "-endian", "big"}, extraGenFlags...)
+	genArgs = append(genArgs, tmpDir)
+	genCmd := exec.Command(codegenBin, genArgs...)
 	var genStderr bytes.Buffer
 	genCmd.Stderr = &genStderr
 	if err := genCmd.Run(); err != nil {

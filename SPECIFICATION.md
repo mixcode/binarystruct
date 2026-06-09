@@ -249,6 +249,28 @@ When a struct is passed to `Write`/`Read`, the runtime checks for these interfac
    * **Runtime**: `valueof` fields are resolved at encode time only, via a context-carrying evaluator able to compute `bytelen()`/`count()`; the result is written without mutating the struct (emit-only). `bytelen()` measures into a scratch buffer, so the output stream stays forward-only. Functions are `valueof`-only; decode expressions remain arithmetic-only and may reference preceding fields only.
    * **Codegen**: Emits the value computation inline before the field write — `len(s.F)` for `count`, and for `bytelen` resolves nearly every field shape (scalars and scalar arrays, byte slices/arrays, all string variants including text-encoded, nested structs, tag-counted arrays of structs, and pointer-to-struct; see §1's `valueof` codegen row for the exact mapping). It still rejects `bytelen` of a pointer-element struct array or a pointer scalar field at generation time (use the runtime interpreter). No write-back is generated.
 
+### Endian Byte-Swap & the Bulk Scalar-Slice Path (byte-identical, optional)
+
+A fixed-width multibyte scalar array/slice can be encoded two ways that produce
+**identical bytes**: a portable per-element `order.PutUintN`/`UintN` loop, or a
+raw-memory bulk path — one `Write`/`ReadFull` over the element backing store plus,
+when the requested order differs from the host, a single in-place byte-swap of the
+whole buffer. The byte-swap is the shared `swapBytes(buf, width)` dispatcher
+(`swap.go` → `simdSwap16/32/64`), which is **scalar by default and AVX2-vectorized**
+when built with `-tags experiment_simd` (`GOEXPERIMENT=simd`) on amd64 (`simd_amd64.go`
+vs `simd_fallback.go`).
+
+* **Runtime (unsafe path, `unsafe_io.go`)**: always uses the raw-memory bulk path
+  for layout-compatible scalar slices (`unsafeWriteSlice`/`unsafeReadSlice`),
+  gated by `fieldOrder == hostEndian`.
+* **Runtime (safe path)**: uses the portable per-element bulk buffer (no `unsafe`).
+* **Codegen**: per-element bulk buffer **by default**; the opt-in `-unsafe-bulk`
+  flag emits the raw-memory path instead — calling the exported `binarystruct.SwapBytes`
+  / `binarystruct.HostEndian`, and so inheriting the SIMD acceleration in consumers
+  built with `experiment_simd`. It applies only when the Go element width equals the
+  wire width (e.g. `[]int` tagged `int32` is excluded); the result is byte-identical
+  to the default path, so this is a performance knob, never a wire-format change.
+
 ---
 
 ## 3. Extension Protocol (Sync Checklist)

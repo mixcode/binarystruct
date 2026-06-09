@@ -51,6 +51,7 @@ var (
 	jsonOutput   = flag.Bool("json", false, "generate JSON representation of the struct layout instead of Go source code")
 	endian       = flag.String("endian", "", "fallback byte order `big|little` baked into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods; optional when the struct declares its own order via a blank _ struct{} endian= field")
 	noValidate   = flag.Bool("no-validate", false, "strip ALL decode-time validation from the generated read methods (const/range/match checks and custom valueof recompute-and-compare); default off (the generated decode validates everything, matching the runtime interpreter). Set for trusted-input / hot-path decoding")
+	unsafeBulk   = flag.Bool("unsafe-bulk", false, "emit a raw-memory bulk path (via unsafe) for fixed-width scalar arrays/slices whose Go element width matches the wire width: one Write/ReadFull over the backing store plus one in-place SwapBytes when the order differs from the host (SIMD-accelerated under -tags experiment_simd). Byte-identical to the default per-element path; trades portability (adds an unsafe import) for speed. Default off")
 )
 
 // orderLiteral maps the -endian flag to the binarystruct byte-order expression
@@ -140,6 +141,7 @@ func main() {
 		Types:        types,
 		IncludeTests: *includeTests,
 		NoValidate:   *noValidate,
+		UnsafeBulk:   *unsafeBulk,
 	}
 
 	if *jsonOutput {

@@ -142,6 +142,7 @@ Both the array length and the string/padding buffer size are **expressions** (se
 Specifies that a field is an array whose length is given by the expression `len`.
 * **Usage**: `Data []int `binary:"[10]int16"``
 * If a fixed-size Go array (e.g. `[4]string`) is used, the tag's array length can be omitted: `binary:"[]string(10)"`.
+* **Codegen** `-unsafe-bulk` (optional): for a fixed-width scalar array/slice whose Go element width matches the wire width, the generator can emit a raw-memory bulk path (one `Write`/`ReadFull` + one in-place byte-swap, SIMD-accelerated under `-tags experiment_simd` on amd64) instead of the default per-element loop. The bytes are identical; it only trades portability for speed. Off by default.
 
 ### Multidimensional Arrays: `[d1][d2]…TYPE`
 Stack multiple length prefixes to encode nested Go arrays/slices in row-major order.

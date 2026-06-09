@@ -37,6 +37,7 @@ binarystruct-codegen -type TypeName[,TypeName2,...] [flags] [directory]
 | `-json` | Export parsed struct layout metadata to JSON instead of generating Go code. |
 | `-tests` | Include test files (`*_test.go`) when parsing package files. |
 | `-no-validate` | Strip **all** decode-time validation from the generated read methods — the `const`/`range`/`match` checks and custom-`valueof` recompute-and-compare. Default off: the generated decode validates everything, matching the runtime interpreter. Set this for trusted-input / hot-path decoding. |
+| `-unsafe-bulk` | Emit a raw-memory bulk path (via `unsafe`) for fixed-width scalar arrays/slices whose Go element width matches the wire width: one `Write`/`ReadFull` over the element backing store plus one in-place `binarystruct.SwapBytes` when the requested order differs from the host — **SIMD-accelerated** when the consumer builds with `-tags experiment_simd` (`GOEXPERIMENT=simd`) on amd64. Byte-identical to the default per-element path; it only trades portability (the generated file gains an `unsafe` import) for speed. Default off. |
 
 ### Arguments
 
@@ -85,7 +86,7 @@ The binarystruct-codegen tool supports the full `binary:"..."` tag syntax includ
 
 - All primitive types (`int8`–`int64`, `uint8`–`uint64`, `float32`, `float64`, `byte`, `word`, `dword`, `qword`)
 - String types (`string(N)`, `bstring`, `wstring`, `dwstring`, `zstring`, `z16string`)
-- Arrays (`[N]type`, `[Expr]type`)
+- Arrays (`[N]type`, `[Expr]type`) — fixed-width scalar arrays/slices can opt into a raw-memory, optionally SIMD-accelerated bulk path with `-unsafe-bulk`
 - Padding (`pad(N)`)
 - Tag math expressions (e.g. `string(PayloadSize - 4)`)
 - Validation (`range=min..max`, `match=pattern`, and `const=Value` magic/fixed values) — checked on decode by default; see `-no-validate`

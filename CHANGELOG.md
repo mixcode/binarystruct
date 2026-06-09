@@ -5,6 +5,31 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Real SIMD byte-swap kernel.** Under `-tags experiment_simd` (`GOEXPERIMENT=simd`)
+  on amd64 (Go 1.26+), `swapBytes` now uses an AVX2 `VPSHUFB` shuffle instead of the
+  previous conceptual stub; non-amd64 / non-experiment builds keep the scalar
+  fallback. Measured on a swap-heavy big-endian workload: runtime unsafe Marshal
+  ~1.26×, Unmarshal ~1.84×. The kernel is amd64-only **by design** because Go's
+  `simd/archsimd` is amd64-only today — see the upstream-tracking note in `AGENTS.txt`.
+- **Exported `binarystruct.SwapBytes(buf, width)` and `binarystruct.HostEndian()`**,
+  so generated code can share the (SIMD-capable) byte-swap path.
+- **Codegen `-unsafe-bulk` flag (default off).** For fixed-width scalar
+  arrays/slices whose Go element width matches the wire width, the generator emits a
+  raw-memory bulk path (one `Write`/`ReadFull` over the element backing store via
+  `unsafe`, plus one in-place `SwapBytes` when the order differs from the host) that
+  inherits the SIMD acceleration under `experiment_simd`. **Byte-identical** to the
+  default per-element path — a portability-for-speed knob, not a wire-format change.
+  Generated output is unchanged unless the flag is set (no `unsafe` import by default).
+
+### Performance
+- With `-unsafe-bulk`, generated big-endian `[1000]uint32`: Unmarshal **4,848 → 1,334 ns**
+  (default build) and **→ 273 ns** under `experiment_simd`; allocations drop from
+  4,144 B/2 to 48 B/1. Little-endian (host-order) Unmarshal **→ 111 ns** via the
+  zero-copy read.
+
 ## [0.3.2] - 2026-06-09
 
 A performance release — **no API changes**.

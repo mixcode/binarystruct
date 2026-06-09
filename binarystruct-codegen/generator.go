@@ -38,6 +38,15 @@ type Generator struct {
 	// writes its magic, valueof still computes its value). Set from the -no-validate flag.
 	NoValidate bool
 
+	// UnsafeBulk, when true, emits a raw-memory bulk path for fixed-width scalar
+	// arrays/slices whose Go element width matches the wire width: a single
+	// Write/ReadFull over the element backing store via unsafe, plus one in-place
+	// binarystruct.SwapBytes when the order differs from the host (SIMD-accelerated
+	// under -tags experiment_simd on amd64). Default false = the portable
+	// per-element order.PutUintN/UintN bulk path (no unsafe import). The two paths
+	// are byte-identical; this only trades portability for speed. Set from -unsafe-bulk.
+	UnsafeBulk bool
+
 	// structs holds every struct type parsed from the target package, keyed by
 	// name. Populated by Generate; used to recognize nested-struct fields when
 	// translating bytelen() (case 5).
@@ -777,6 +786,7 @@ func (g *Generator) Generate(outPath string) error {
 	needRegexp := false
 	needErrors := false
 	needFmt := false
+	needUnsafe := false
 
 	for _, typeName := range g.Types {
 		st, ok := structs[typeName]
@@ -791,8 +801,14 @@ func (g *Generator) Generate(outPath string) error {
 			parsedTag := parseFieldTag(field.Tag)
 			binType := getEffectiveBinaryType(parsedTag.binaryType, goType)
 
+			// float fields need math for the bits<->float conversion, EXCEPT when a
+			// float slice takes the raw-memory bulk path (which copies bytes directly
+			// and never calls math.FloatNbits).
 			if binType == "float32" || binType == "float64" {
-				needMath = true
+				_, bulkUnsafe := g.cgArrayCanBulkUnsafe(goType, binType, parsedTag)
+				if !(parsedTag.isArray && parsedTag.numDims <= 1 && bulkUnsafe) {
+					needMath = true
+				}
 			}
 			// const/range/match decode validation is emitted unless -no-validate.
 			if _, ok := parsedTag.options["match"]; ok && !g.NoValidate {
@@ -820,6 +836,13 @@ func (g *Generator) Generate(outPath string) error {
 			if parsedTag.isArray && parsedTag.arrayLenExpr == "" {
 				needErrors = true
 			}
+			// A scalar array/slice whose Go element width matches the wire width
+			// uses the raw-memory bulk path, which references unsafe.
+			if parsedTag.isArray && parsedTag.numDims <= 1 {
+				if _, ok := g.cgArrayCanBulkUnsafe(goType, binType, parsedTag); ok {
+					needUnsafe = true
+				}
+			}
 		}
 	}
 
@@ -837,6 +860,9 @@ func (g *Generator) Generate(outPath string) error {
 	}
 	if needRegexp {
 		buf.WriteString("\t\"regexp\"\n")
+	}
+	if needUnsafe {
+		buf.WriteString("\t\"unsafe\"\n")
 	}
 	buf.WriteString("\t\"github.com/mixcode/binarystruct\"\n")
 	buf.WriteString(")\n\n")
@@ -1773,6 +1799,45 @@ func cgArrayCanBulk(goType, binType string, parsedTag parsedFieldTag) (width int
 	return width, true
 }
 
+// cgGoScalarWidth returns the in-memory size of a fixed-width Go scalar type
+// name. Platform-dependent types (int/uint/uintptr) return ok=false, so they
+// never qualify for the raw-memory bulk path.
+func cgGoScalarWidth(elem string) (int, bool) {
+	switch elem {
+	case "int8", "uint8", "byte":
+		return 1, true
+	case "int16", "uint16":
+		return 2, true
+	case "int32", "uint32", "float32":
+		return 4, true
+	case "int64", "uint64", "float64":
+		return 8, true
+	}
+	return 0, false
+}
+
+// cgArrayCanBulkUnsafe reports whether a scalar array/slice can use the unsafe
+// raw-memory bulk path: a single Write/ReadFull over the element backing store
+// plus one in-place binarystruct.SwapBytes when the order differs from the host.
+// It requires bulk eligibility AND that the Go element's in-memory width equals
+// the wire width (so the []byte view has the right stride) — e.g. []int tagged
+// int32 is excluded because int is 8 bytes on amd64. width==1 is excluded: it
+// has its own direct byte path and needs no swap.
+func (g *Generator) cgArrayCanBulkUnsafe(goType, binType string, parsedTag parsedFieldTag) (width int, ok bool) {
+	if !g.UnsafeBulk {
+		return 0, false
+	}
+	w, bulkOK := cgArrayCanBulk(goType, binType, parsedTag)
+	if !bulkOK || w == 1 {
+		return 0, false
+	}
+	elem := goType[strings.IndexByte(goType, ']')+1:]
+	if gw, known := cgGoScalarWidth(elem); !known || gw != w {
+		return 0, false
+	}
+	return w, true
+}
+
 // generateScalarSliceBulkWrite emits a single buffer fill + one w.Write for a
 // fixed-width scalar array/slice, replacing N per-element order.PutUintN + w.Write.
 func (g *Generator) generateScalarSliceBulkWrite(buf *bytes.Buffer, fieldName, binType, sizeExpr string, width int) {
@@ -1830,6 +1895,45 @@ func (g *Generator) generateScalarSliceBulkRead(buf *bytes.Buffer, fieldName, go
 	buf.WriteString("\t\t}\n\t}\n")
 }
 
+// generateScalarSliceBulkWriteUnsafe emits the raw-memory write: when order ==
+// host, write the element backing store directly (zero copy); otherwise copy it
+// and byte-swap once via binarystruct.SwapBytes (SIMD-accelerated under
+// experiment_simd). Replaces the per-element order.PutUintN loop. The caller
+// guarantees the Go element width equals `width` (cgArrayCanBulkUnsafe).
+func (g *Generator) generateScalarSliceBulkWriteUnsafe(buf *bytes.Buffer, fieldName, sizeExpr string, width int) {
+	fmt.Fprintf(buf, "\t{\n\t\twriteLen := int(%s)\n", sizeExpr)
+	buf.WriteString("\t\tif writeLen > 0 {\n")
+	fmt.Fprintf(buf, "\t\t\tsrc := unsafe.Slice((*byte)(unsafe.Pointer(&s.%s[0])), writeLen*%d)\n", fieldName, width)
+	buf.WriteString("\t\t\tif order == binarystruct.HostEndian() {\n")
+	buf.WriteString("\t\t\t\tm, err = w.Write(src)\n")
+	buf.WriteString("\t\t\t} else {\n")
+	fmt.Fprintf(buf, "\t\t\t\tsbuf := make([]byte, writeLen*%d)\n", width)
+	buf.WriteString("\t\t\t\tcopy(sbuf, src)\n")
+	fmt.Fprintf(buf, "\t\t\t\tbinarystruct.SwapBytes(sbuf, %d)\n", width)
+	buf.WriteString("\t\t\t\tm, err = w.Write(sbuf)\n")
+	buf.WriteString("\t\t\t}\n")
+	buf.WriteString("\t\t\tn += m\n\t\t\tif err != nil {\n\t\t\t\treturn n, err\n\t\t\t}\n")
+	buf.WriteString("\t\t}\n\t}\n")
+}
+
+// generateScalarSliceBulkReadUnsafe emits the raw-memory read: ReadFull straight
+// into the element backing store, then one in-place binarystruct.SwapBytes when
+// order != host. Replaces the io.ReadFull + per-element order.UintN decode loop.
+func (g *Generator) generateScalarSliceBulkReadUnsafe(buf *bytes.Buffer, fieldName, goType string, width int, isFixed bool, sizeExpr string) {
+	buf.WriteString("\t{\n")
+	lenExpr := fmt.Sprintf("len(s.%s)", fieldName)
+	if !isFixed {
+		fmt.Fprintf(buf, "\t\treadLen := int(%s)\n", sizeExpr)
+		fmt.Fprintf(buf, "\t\ts.%s = make(%s, readLen)\n", fieldName, goType)
+		lenExpr = "readLen"
+	}
+	fmt.Fprintf(buf, "\t\tif %s > 0 {\n", lenExpr)
+	fmt.Fprintf(buf, "\t\t\tdst := unsafe.Slice((*byte)(unsafe.Pointer(&s.%s[0])), %s*%d)\n", fieldName, lenExpr, width)
+	buf.WriteString("\t\t\tm, err = io.ReadFull(r, dst)\n\t\t\tn += m\n\t\t\tif err != nil {\n\t\t\t\treturn n, err\n\t\t\t}\n")
+	fmt.Fprintf(buf, "\t\t\tif order != binarystruct.HostEndian() {\n\t\t\t\tbinarystruct.SwapBytes(dst, %d)\n\t\t\t}\n", width)
+	buf.WriteString("\t\t}\n\t}\n")
+}
+
 func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, binType string, parsedTag parsedFieldTag, fields map[string]cgFieldInfo) error {
 	if parsedTag.numDims > 1 {
 		return g.generateMultidimWrite(buf, fieldName, goType, binType, parsedTag, fields)
@@ -1864,7 +1968,13 @@ func (g *Generator) generateArrayWrite(buf *bytes.Buffer, fieldName, goType, bin
 	}
 
 	// Bulk write for fixed-width multibyte scalar slices: one buffer + one Write
-	// instead of a per-element order.PutUintN + w.Write.
+	// instead of a per-element order.PutUintN + w.Write. When the Go element width
+	// matches the wire width, take the raw-memory path (one swap via SwapBytes,
+	// SIMD-accelerated under experiment_simd); otherwise the per-element buffer fill.
+	if width, ok := g.cgArrayCanBulkUnsafe(goType, binType, parsedTag); ok {
+		g.generateScalarSliceBulkWriteUnsafe(buf, fieldName, sizeExpr, width)
+		return nil
+	}
 	if width, ok := cgArrayCanBulk(goType, binType, parsedTag); ok {
 		g.generateScalarSliceBulkWrite(buf, fieldName, binType, sizeExpr, width)
 		return nil
@@ -1911,6 +2021,10 @@ func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binT
 			buf.WriteString("\tn += m\n\tif err != nil {\n\t\treturn n, err\n\t}\n")
 			return
 		}
+		if width, ok := g.cgArrayCanBulkUnsafe(goType, binType, parsedTag); ok {
+			g.generateScalarSliceBulkReadUnsafe(buf, fieldName, goType, width, true, sizeExpr)
+			return
+		}
 		if width, ok := cgArrayCanBulk(goType, binType, parsedTag); ok {
 			g.generateScalarSliceBulkRead(buf, fieldName, goType, binType, width, true, sizeExpr)
 			return
@@ -1923,7 +2037,12 @@ func (g *Generator) generateArrayRead(buf *bytes.Buffer, fieldName, goType, binT
 	}
 
 	// Bulk read for fixed-width multibyte scalar slices: one io.ReadFull + buffer
-	// decode instead of a per-element io.ReadFull.
+	// decode instead of a per-element io.ReadFull. Prefer the raw-memory path
+	// (ReadFull into the backing store + one SwapBytes) when widths match.
+	if width, ok := g.cgArrayCanBulkUnsafe(goType, binType, parsedTag); ok {
+		g.generateScalarSliceBulkReadUnsafe(buf, fieldName, goType, width, false, sizeExpr)
+		return
+	}
 	if width, ok := cgArrayCanBulk(goType, binType, parsedTag); ok {
 		g.generateScalarSliceBulkRead(buf, fieldName, goType, binType, width, false, sizeExpr)
 		return

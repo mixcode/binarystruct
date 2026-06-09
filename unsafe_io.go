@@ -5,7 +5,6 @@
 package binarystruct
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -13,18 +12,6 @@ import (
 	"reflect"
 	"unsafe"
 )
-
-var hostEndian binary.ByteOrder
-
-func init() {
-	buf := [2]byte{}
-	*(*uint16)(unsafe.Pointer(&buf[0])) = uint16(0xABCD)
-	if buf[0] == 0xAB {
-		hostEndian = binary.BigEndian
-	} else {
-		hostEndian = binary.LittleEndian
-	}
-}
 
 func getITypeFromRKind(k reflect.Kind) eType {
 	switch k {
@@ -793,16 +780,6 @@ type sliceHeader struct {
 	Data unsafe.Pointer
 	Len  int
 	Cap  int
-}
-
-func swapBytes(buf []byte, sz int) {
-	if sz == 2 {
-		simdSwap16(buf)
-	} else if sz == 4 {
-		simdSwap32(buf)
-	} else if sz == 8 {
-		simdSwap64(buf)
-	}
 }
 
 func (ms *Marshaler) unsafeWriteSlice(w io.Writer, fieldOrder ByteOrder, currPtr unsafe.Pointer, isSlice bool, arrayLen int, elType eType, goElType reflect.Type) (n int, ok bool, err error) {

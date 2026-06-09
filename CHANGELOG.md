@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-06-09
+
+Documentation only — **no code or wire-format changes**. Agent-readiness polish
+triaged from the v0.3.3 clean-agent evaluation (which scored 5/5 with a
+fully-working build).
+
+### Documentation
+- **`AGENTS.txt`**: added an "audience: contributors" header that points library
+  *users* to `llms-full.txt` (the consumer manual) — `AGENTS.txt` is the
+  contributor guide and was briefly opened by mistake during the eval.
+- **`llms-full.txt`**: added a combined end-to-end recipe — a chunked container
+  (struct-declared order + `const` magic + `valueof` count/length + a custom CRC +
+  a count-prefixed slice-of-struct via bare `[Count]`), since those pieces were
+  previously scattered across Rule E / §7 / §8. Also documented the Go
+  nil-vs-empty `[]byte` round-trip gotcha (compare with `bytes.Equal`, not
+  `reflect.DeepEqual`).
+- **`binarystruct-codegen/README.md`**: documented the path-prefixed nested-module
+  install tag (`@binarystruct-codegen/vX.Y.Z`) and the `$GOBIN` install location.
+
 ## [0.3.3] - 2026-06-09
 
 ### Added

@@ -150,6 +150,19 @@ Stack multiple length prefixes to encode nested Go arrays/slices in row-major or
 * Works with Go fixed arrays, slices, and any leaf type (scalars, strings, nested structs); on decode, slice levels are allocated to the declared lengths. An untagged nested Go array (e.g. `[2][3]int16` with no tag) is encoded by natural inference.
 * **Codegen**: `binarystruct-codegen` supports multidimensional arrays with a **scalar leaf type** (fixed arrays, and slices whose dimensions are all specified). Other leaf types (strings, nested structs, pointers) or mixed fixed-array/slice nesting fail generation — use the runtime interpreter for those.
 
+**Field-sized grid (dynamic dimensions).** Both dimensions can come from other fields, so a header can carry the grid's shape. The size fields must be declared **before** the array (the decode-side forward-reference rule), and each slice level is allocated to its dimension on decode:
+
+```go
+type Matrix struct {
+	_     struct{}  `binary:"endian=big"`
+	Rows  uint16    `binary:"uint16,valueof=count(Cells)"` // outer length: auto-filled on encode
+	Cols  uint16    `binary:"uint16"`                       // inner length: set it yourself
+	Cells [][]int32 `binary:"[Rows][Cols]int32"`            // sized from Rows/Cols on decode
+}
+```
+
+On encode you populate only `Cells` and `Cols`; `Rows` is computed by `count(Cells)`. Note there is **no built-in to auto-compute the *inner* dimension** — `count(F)` yields an array's outer length only — so set `Cols` explicitly (or use a constant dimension). Works in the runtime (safe + unsafe) and in codegen (`int32` is a scalar leaf).
+
 ### String Buffer Size Postfix: `TYPE(buf_len)`
 Limits or pads the string buffer to exactly `buf_len` bytes, where `buf_len` is an expression.
 * **Usage**: `Name string `binary:"string(16)"`` (if shorter than 16 bytes, it will be zero-padded; if longer, it will be truncated).

@@ -448,6 +448,21 @@ func (g *Generator) isStructType(goType string) bool {
 	return ok
 }
 
+// isGeneratedType reports whether goType (after stripping pointer/slice/array
+// prefixes) names a type this run is generating methods for — i.e. it will have
+// its own WriteBinaryWithMarshaler/ReadBinaryWithMarshaler. Nested fields of such
+// types are encoded by a direct generated-method call instead of the runtime
+// reflection interpreter.
+func (g *Generator) isGeneratedType(goType string) bool {
+	name := stripToElemType(goType)
+	for _, t := range g.Types {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
 // scalarWidth returns the fixed encoded byte width of a scalar binary type, and
 // whether binType is such a fixed-width scalar. Used to compute bytelen() of
 // scalar and scalar-array fields statically (case 2).
@@ -1518,8 +1533,15 @@ func (g *Generator) generateFieldWrite(buf *bytes.Buffer, target, goType, binTyp
 		}
 		buf.WriteString("\t}\n")
 	default:
-		// Nested struct or fallback
-		fmt.Fprintf(buf, "\t{\n\t\tm, err = binarystruct.NewMarshalerOrder(order).Write(w, &%s)\n", accessor)
+		// Nested struct. When the nested type is itself generated, call its method
+		// directly (passing ms through, so nested codecs/encodings/valueofs work) —
+		// avoiding a per-value Marshaler allocation and the reflection interpreter.
+		// Otherwise fall back to the runtime for that (foreign) type.
+		if g.isGeneratedType(goType) {
+			fmt.Fprintf(buf, "\t{\n\t\tm, err = (%s).WriteBinaryWithMarshaler(ms, w, order)\n", accessor)
+		} else {
+			fmt.Fprintf(buf, "\t{\n\t\tm, err = binarystruct.NewMarshalerOrder(order).Write(w, &%s)\n", accessor)
+		}
 		buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
 	}
 
@@ -1613,8 +1635,13 @@ func (g *Generator) generateFieldRead(buf *bytes.Buffer, target, goType, binType
 			fmt.Fprintf(buf, "\t\t%s = string(strBytes[:strlen])\n", accessor)
 			buf.WriteString("\t}\n")
 		default:
-			// Nested struct
-			fmt.Fprintf(buf, "\t{\n\t\tm, err = binarystruct.NewMarshalerOrder(order).Read(r, &%s)\n", accessor)
+			// Nested struct: direct generated-method call when the nested type is
+			// itself generated (ms passed through); runtime fallback otherwise.
+			if g.isGeneratedType(goType) {
+				fmt.Fprintf(buf, "\t{\n\t\tm, err = (%s).ReadBinaryWithMarshaler(ms, r, order)\n", accessor)
+			} else {
+				fmt.Fprintf(buf, "\t{\n\t\tm, err = binarystruct.NewMarshalerOrder(order).Read(r, &%s)\n", accessor)
+			}
 			buf.WriteString("\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
 		}
 	}

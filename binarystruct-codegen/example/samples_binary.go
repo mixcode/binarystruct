@@ -91,3 +91,158 @@ func (s *Samples) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reade
 	}
 	return n, nil
 }
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s *Rec) MarshalBinary() ([]byte, error) {
+	var b bytes.Buffer
+	_, err := s.WriteBinary(&b, binarystruct.LittleEndian)
+	return b.Bytes(), err
+}
+
+// AppendBinary implements encoding.BinaryAppender.
+func (s *Rec) AppendBinary(b []byte) ([]byte, error) {
+	buf := bytes.NewBuffer(b)
+	_, err := s.WriteBinary(buf, binarystruct.LittleEndian)
+	return buf.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *Rec) UnmarshalBinary(data []byte) error {
+	r := bytes.NewReader(data)
+	_, err := s.ReadBinary(r, binarystruct.LittleEndian)
+	return err
+}
+
+// WriteBinary implements binarystruct.BinaryWriter.
+func (s *Rec) WriteBinary(w io.Writer, order binarystruct.ByteOrder) (int, error) {
+	return s.WriteBinaryWithMarshaler(nil, w, order)
+}
+
+// WriteBinaryWithMarshaler implements binarystruct.MarshalerContextWriter.
+func (s *Rec) WriteBinaryWithMarshaler(ms *binarystruct.Marshaler, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {
+	order = binarystruct.LittleEndian
+	var tmp [8]byte
+	var m int
+	order.PutUint16(tmp[:2], uint16((len(s.Items))))
+	m, err = w.Write(tmp[:2])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	{
+		limit := int((len(s.Items)))
+		for i := 0; i < limit; i++ {
+			{
+				m, err = (s.Items[i]).WriteBinaryWithMarshaler(ms, w, order)
+				n += m
+				if err != nil {
+					return n, err
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// ReadBinary implements binarystruct.BinaryReader.
+func (s *Rec) ReadBinary(r io.Reader, order binarystruct.ByteOrder) (int, error) {
+	return s.ReadBinaryWithMarshaler(nil, r, order)
+}
+
+// ReadBinaryWithMarshaler implements binarystruct.MarshalerContextReader.
+func (s *Rec) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {
+	order = binarystruct.LittleEndian
+	var tmp [8]byte
+	var m int
+	m, err = io.ReadFull(r, tmp[:2])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	s.N = uint16(order.Uint16(tmp[:2]))
+	{
+		readLen := int(s.N)
+		s.Items = make([]Item, readLen)
+		for i := 0; i < readLen; i++ {
+			{
+				m, err = (s.Items[i]).ReadBinaryWithMarshaler(ms, r, order)
+				n += m
+				if err != nil {
+					return n, err
+				}
+			}
+		}
+	}
+	return n, nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (s *Item) MarshalBinary() ([]byte, error) {
+	var b bytes.Buffer
+	_, err := s.WriteBinary(&b, binarystruct.LittleEndian)
+	return b.Bytes(), err
+}
+
+// AppendBinary implements encoding.BinaryAppender.
+func (s *Item) AppendBinary(b []byte) ([]byte, error) {
+	buf := bytes.NewBuffer(b)
+	_, err := s.WriteBinary(buf, binarystruct.LittleEndian)
+	return buf.Bytes(), err
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (s *Item) UnmarshalBinary(data []byte) error {
+	r := bytes.NewReader(data)
+	_, err := s.ReadBinary(r, binarystruct.LittleEndian)
+	return err
+}
+
+// WriteBinary implements binarystruct.BinaryWriter.
+func (s *Item) WriteBinary(w io.Writer, order binarystruct.ByteOrder) (int, error) {
+	return s.WriteBinaryWithMarshaler(nil, w, order)
+}
+
+// WriteBinaryWithMarshaler implements binarystruct.MarshalerContextWriter.
+func (s *Item) WriteBinaryWithMarshaler(ms *binarystruct.Marshaler, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {
+	order = binarystruct.LittleEndian
+	var tmp [8]byte
+	var m int
+	order.PutUint32(tmp[:4], uint32(s.A))
+	m, err = w.Write(tmp[:4])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	order.PutUint16(tmp[:2], uint16(s.B))
+	m, err = w.Write(tmp[:2])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
+// ReadBinary implements binarystruct.BinaryReader.
+func (s *Item) ReadBinary(r io.Reader, order binarystruct.ByteOrder) (int, error) {
+	return s.ReadBinaryWithMarshaler(nil, r, order)
+}
+
+// ReadBinaryWithMarshaler implements binarystruct.MarshalerContextReader.
+func (s *Item) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {
+	order = binarystruct.LittleEndian
+	var tmp [8]byte
+	var m int
+	m, err = io.ReadFull(r, tmp[:4])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	s.A = uint32(order.Uint32(tmp[:4]))
+	m, err = io.ReadFull(r, tmp[:2])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	s.B = uint16(order.Uint16(tmp[:2]))
+	return n, nil
+}

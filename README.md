@@ -52,7 +52,9 @@ output, err := binarystruct.Marshal(&strc)
 
 ```
 
-> **Byte order.** Declare a struct's byte order once with a blank `_ struct{}` field tagged `binary:"endian=big|little"` (or embed a struct that declares one); then `Marshal`/`Unmarshal`/`Write`/`Read`/`Append`/`Inspect` take **no** order argument. A per-field `endian=` tag overrides it for that field. For a value that declares no order (a bare scalar, a third-party struct), supply a fallback with `binarystruct.NewMarshalerOrder(order)`.
+> **Tags.** The `binary:"…"` tag declares each field's wire format. Fixed-width scalars (`int8`–`int64`, `uint8`–`uint64`, `float32`/`float64`, and the `byte`/`word`/`dword`/`qword` aliases), arrays, and string variants (length-prefixed and zero-terminated) are all supported. See the [Struct Tag Reference](STRUCT_TAGS.md#2-binary-types).
+
+> **Byte order.** Declare a struct's byte order once with a blank `_ struct{}` field tagged `binary:"endian=big|little"` (or embed a struct that declares one); then `Marshal`/`Unmarshal`/`Write`/`Read`/`Append`/`Inspect` process the values following the endian. A per-field `endian=` tag overrides it for that field.
 
 ## Features
 

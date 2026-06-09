@@ -52,6 +52,8 @@ output, err := binarystruct.Marshal(&strc)
 
 ```
 
+> **タグ.** `binary:"…"` タグは各フィールドのバイナリ表現（ワイヤフォーマット）を宣言します。固定幅のスカラー（`int8`〜`int64`、`uint8`〜`uint64`、`float32`/`float64`、および `byte`/`word`/`dword`/`qword` のエイリアス）、配列、文字列バリアント（長さプレフィックス付き・ゼロ終端）がサポートされています。詳細は[構造体タグリファレンス](STRUCT_TAGS_ja.md#2-バイナリ型対応型一覧)を参照してください。
+
 > **バイトオーダー**: 構造体のバイトオーダーは、空フィールド `_ struct{}` に `binary:"endian=big|little"` タグを付けて一度だけ宣言します（またはそれを宣言した構造体を埋め込みます）。すると `Marshal`/`Unmarshal`/`Write`/`Read`/`Append`/`Inspect` はバイトオーダー引数を取りません。フィールド単位の `endian=` タグはそのフィールドのみを上書きします。バイトオーダーを宣言しない値（裸のスカラーや外部の構造体）には `binarystruct.NewMarshalerOrder(order)` でフォールバックを指定してください。
 
 ## 主な機能

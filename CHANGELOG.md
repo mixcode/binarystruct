@@ -8,10 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Documentation
+- **Fixed a stale godoc claim that codegen *requires* `-endian`.** The package doc
+  (`doc.go`) and the codegen command doc (`binarystruct-codegen` package comment)
+  said `-endian` was required when generating Go code; it has been the optional
+  *fallback* (a struct's own `endian=` declaration wins) since 0.3.0. Both now say
+  so, the codegen godoc flag list is completed (`-json`/`-tests`/`-no-validate`/`-unsafe-bulk`),
+  and a dead "missing required -endian" code branch was removed.
 - **`binarystruct-codegen/README.md`**: the install section now uses `@latest` as
   the only concrete command and documents the path-prefixed nested-module pin
   syntax generically (`@binarystruct-codegen/vX.Y.Z`) instead of a concrete version,
   so the example no longer needs a per-release bump.
+- **`TODO.md`** trimmed to a forward-looking list — completed entries dropped
+  (the CHANGELOG + git history are the record); the stale "up to 214x" optimizer
+  figure now points to the generated README benchmark table.
 
 ## [0.3.4] - 2026-06-09
 

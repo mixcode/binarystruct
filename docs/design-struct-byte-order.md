@@ -157,8 +157,8 @@ Per the `SPECIFICATION.md` §3 extension protocol:
 (e.g. a struct-level default text `encoding=`)? Not needed now, but the mechanism
 generalizes; deciding the scope now avoids re-litigating the carrier later.
 
-**❓ OPEN #3 — codegen `-endian` interaction.** Today `-endian` is *required* and
-bakes the order into the no-arg `MarshalBinary`/`AppendBinary`/`UnmarshalBinary`.
+**❓ OPEN #3 — codegen `-endian` interaction.** → **Resolved: D5** (option (a) shipped — `-endian` is now optional when the struct declares its order). *Below describes the pre-decision state.* `-endian` was *required* and
+baked the order into the no-arg `MarshalBinary`/`AppendBinary`/`UnmarshalBinary`.
 If a struct declares its own order, options:
   (a) the struct-level order wins and `-endian` becomes optional/ignored for
       declared types (consistent with §4.1 precedence); or

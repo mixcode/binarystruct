@@ -15,10 +15,25 @@
 //	-type string
 //	    Comma-separated list of struct type names to generate methods for (required).
 //	-endian string
-//	    Byte order baked into the no-arg MarshalBinary/UnmarshalBinary/AppendBinary
-//	    methods: "big" or "little" (required when generating Go code; not for -json).
+//	    Fallback byte order ("big" or "little") baked into the no-arg
+//	    MarshalBinary/UnmarshalBinary/AppendBinary methods. Optional when the struct
+//	    declares its own order (a blank "_ struct{}" field tagged endian=, which wins);
+//	    generation errors only if neither the struct nor this flag supplies an order.
+//	    Not needed with -json.
 //	-output string
-//	    Output file name (default: <first_type>_binary.go).
+//	    Output file name (default: <first_type>_binary.go, or <first_type>.json with -json).
+//	-json
+//	    Export parsed struct layout metadata to JSON instead of generating Go code.
+//	-tests
+//	    Include test files (*_test.go) when parsing the package.
+//	-no-validate
+//	    Strip all decode-time validation from the generated read methods (default off;
+//	    the generated decode otherwise validates const/range/match and custom valueof,
+//	    matching the runtime interpreter).
+//	-unsafe-bulk
+//	    Emit a raw-memory bulk path (via unsafe) for fixed-width scalar arrays/slices
+//	    whose Go element width matches the wire width (default off; byte-identical to
+//	    the default per-element path, SIMD-accelerated under -tags experiment_simd on amd64).
 //
 // The directory argument specifies the Go package directory containing the struct
 // definitions. If omitted, the current directory is used.
@@ -54,17 +69,16 @@ var (
 	unsafeBulk   = flag.Bool("unsafe-bulk", false, "emit a raw-memory bulk path (via unsafe) for fixed-width scalar arrays/slices whose Go element width matches the wire width: one Write/ReadFull over the backing store plus one in-place SwapBytes when the order differs from the host (SIMD-accelerated under -tags experiment_simd). Byte-identical to the default per-element path; trades portability (adds an unsafe import) for speed. Default off")
 )
 
-// orderLiteral maps the -endian flag to the binarystruct byte-order expression
-// the generated code uses. There is no default: the stdlib encoding.Binary*
-// interfaces carry no order, so the baked order must be chosen explicitly.
+// orderLiteral maps a given -endian flag value to the binarystruct byte-order
+// expression the generated code uses. Only called when -endian is non-empty (the
+// flag is optional — a struct may declare its own order); an empty value is the
+// invalid case here, since the caller has already decided a flag was supplied.
 func orderLiteral(endian string) (string, error) {
 	switch endian {
 	case "big":
 		return "binarystruct.BigEndian", nil
 	case "little":
 		return "binarystruct.LittleEndian", nil
-	case "":
-		return "", fmt.Errorf("missing required -endian flag (\"big\" or \"little\"): the no-arg MarshalBinary/UnmarshalBinary/AppendBinary methods need an explicit byte order")
 	default:
 		return "", fmt.Errorf("invalid -endian value %q: must be \"big\" or \"little\"", endian)
 	}

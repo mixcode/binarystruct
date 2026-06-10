@@ -202,10 +202,13 @@ To achieve peak performance in production, compile your struct layouts into stat
 	go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
 	binarystruct-codegen -type Packet,Header -endian big
 
-The -endian flag (big or little) is required: the generated no-arg MarshalBinary,
-UnmarshalBinary, and AppendBinary methods implement the standard library's
-order-less encoding interfaces, so the byte order must be chosen explicitly. For
-more information, see the README.md file in the binarystruct-codegen package directory.
+The -endian flag (big or little) sets the fallback byte order baked into the
+generated no-arg MarshalBinary, UnmarshalBinary, and AppendBinary methods, which
+implement the standard library's order-less encoding interfaces. It is optional
+when the struct declares its own order (a blank "_ struct{}" field tagged
+binary:"endian=big|little", which wins); generation errors only if neither the
+struct nor the flag supplies an order. For more information, see the README.md
+file in the binarystruct-codegen package directory.
 
 # For AI Agents and Code Assistants
 

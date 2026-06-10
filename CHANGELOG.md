@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Codegen: the "no byte order" error now names an ordered parent.** When a type
+  with no declared order is generated in isolation but is referenced as a field by
+  another struct that declares one (the order it would inherit at runtime), the
+  error names that parent and the exact fix — e.g. *"… it is used by Container,
+  which is big-endian; pass `-endian big`, or declare the order on Record itself."*
+  A truly orphan type still gets the plain error. (Surfaced by the 0.3.3 clean-agent eval.)
+
 ### Documentation
 - **Fixed a stale godoc claim that codegen *requires* `-endian`.** The package doc
   (`doc.go`) and the codegen command doc (`binarystruct-codegen` package comment)

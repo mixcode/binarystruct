@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -921,6 +922,63 @@ func emitLocalScratch(buf *bytes.Buffer, body string) {
 	}
 }
 
+// baseTypeName strips pointer/slice/array wrappers from a Go type expression,
+// returning the underlying identifier (e.g. "[]*Record" -> "Record", "[4]T" -> "T").
+func baseTypeName(goType string) string {
+	s := goType
+	for {
+		switch {
+		case strings.HasPrefix(s, "*"):
+			s = s[1:]
+		case strings.HasPrefix(s, "[]"):
+			s = s[2:]
+		case strings.HasPrefix(s, "["):
+			i := strings.IndexByte(s, ']')
+			if i < 0 {
+				return s
+			}
+			s = s[i+1:]
+		default:
+			return s
+		}
+	}
+}
+
+// orderedParentHint makes the "no byte order" error actionable for a nested type
+// processed in isolation: it looks for another parsed struct that has a field of
+// type typeName AND declares its own byte order (the order typeName would inherit
+// at runtime), and returns a clause naming it. Returns "" if none is found.
+// Struct names are scanned in sorted order so the message is deterministic.
+func (g *Generator) orderedParentHint(typeName string) string {
+	names := make([]string, 0, len(g.structs))
+	for name := range g.structs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if name == typeName {
+			continue
+		}
+		lit, err := structSentinelEndian(g.structs[name])
+		if err != nil || lit == "" {
+			continue // this struct declares no order of its own
+		}
+		for _, field := range g.structs[name].Fields.List {
+			if len(field.Names) == 0 || field.Names[0].Name == "_" {
+				continue
+			}
+			if baseTypeName(getGoTypeName(field.Type)) == typeName {
+				word := "big"
+				if lit == "binarystruct.LittleEndian" {
+					word = "little"
+				}
+				return fmt.Sprintf(" (it is used by %s, which is %s-endian; pass `-endian %s`, or declare the order on %s itself)", name, word, word, typeName)
+			}
+		}
+	}
+	return ""
+}
+
 func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.StructType) error {
 	// Resolve the type's byte order. A struct-level `_` sentinel declaration wins;
 	// otherwise the -endian flag supplies the order baked into the no-arg stdlib
@@ -935,7 +993,7 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 		bakedLit = g.Endian
 	}
 	if bakedLit == "" {
-		return fmt.Errorf("type %s: no byte order — declare it on the struct (a blank `_ struct{}` field tagged `binary:\"endian=big|little\"`) or pass -endian", typeName)
+		return fmt.Errorf("type %s: no byte order — declare it on the struct (a blank `_ struct{}` field tagged `binary:\"endian=big|little\"`) or pass -endian%s", typeName, g.orderedParentHint(typeName))
 	}
 	// The struct's resolved order as a tag word ("big"/"little"), baked into the
 	// ms.MarshalAs tag for any hard custom-valueof argument (see cgMarshalAsTag).

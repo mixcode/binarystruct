@@ -216,6 +216,51 @@ func TestCodegen_Multidim_Errors(t *testing.T) {
 	}
 }
 
+// TestCodegen_NoOrder_NamesParent_Errors checks that when a type with no declared
+// byte order is generated in isolation, the "no byte order" error names an ordered
+// parent that references it (the order it would inherit at runtime), making the
+// fix obvious — while a truly orphan type gets the plain error with no parent clause.
+func TestCodegen_NoOrder_NamesParent_Errors(t *testing.T) {
+	t.Parallel()
+	tmpDir, err := os.MkdirTemp(".", "tmp-bs-noorder-")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Record declares no order; Container (endian=big) references it.
+	src := "package p\n\n" +
+		"type Record struct {\n\tA uint32 `binary:\"uint32\"`\n}\n\n" +
+		"type Container struct {\n\t_ struct{} `binary:\"endian=big\"`\n\tRecs []*Record `binary:\"[2]\"`\n}\n\n" +
+		"type Orphan struct {\n\tB uint32 `binary:\"uint32\"`\n}\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "t.go"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write t.go: %v", err)
+	}
+
+	// Record alone, no -endian: error must name the ordered parent Container.
+	out, err := exec.Command(sharedCodegenBin, "-type", "Record", tmpDir).CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected a no-byte-order error for Record; output:\n%s", out)
+	}
+	for _, want := range []string{"no byte order", "Container", "big-endian", "-endian big"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("error should mention %q; got:\n%s", want, out)
+		}
+	}
+
+	// Orphan (no parent references it): plain error, no parent clause.
+	out, err = exec.Command(sharedCodegenBin, "-type", "Orphan", tmpDir).CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected a no-byte-order error for Orphan; output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "no byte order") {
+		t.Errorf("orphan error should still state 'no byte order'; got:\n%s", out)
+	}
+	if strings.Contains(string(out), "it is used by") {
+		t.Errorf("orphan error should NOT name a parent; got:\n%s", out)
+	}
+}
+
 // TestCodegen_StructEndian_NoFlag generates code for a struct that declares its
 // byte order via the `_` sentinel WITHOUT passing -endian, and verifies the
 // generated methods bake that order — including that binarystruct.Marshal(v),

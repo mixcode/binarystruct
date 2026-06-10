@@ -979,6 +979,129 @@ func (g *Generator) orderedParentHint(typeName string) string {
 	return ""
 }
 
+// emittableFields returns the struct's fields that produce code (named, non-`_`).
+func emittableFields(st *ast.StructType) []*ast.Field {
+	var out []*ast.Field
+	for _, f := range st.Fields.List {
+		if len(f.Names) == 0 || f.Names[0].Name == "_" {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// cgFieldBatchable reports a field's wire width if it can join a contiguous
+// scalar-field batch (a run of ≥2 is coalesced into one shared buffer + a single
+// Write/ReadFull, replacing per-field Write/ReadFull — byte-identical, fewer
+// io calls). Batchable = a plain fixed-width scalar with no option that needs
+// per-field handling (valueof/const/codec/omittable/ignore/array/pointer or a
+// per-field endian/encoding override). Conservative by design.
+func cgFieldBatchable(f *ast.Field, structEnc string) (int, bool) {
+	pt := parseFieldTag(f.Tag)
+	applyStructEncoding(pt, structEnc)
+	if pt.binaryType == "-" || pt.isArray {
+		return 0, false
+	}
+	// Exclude anything needing per-field handling: emit-only computed values
+	// (valueof/const), decode-time validation (const/range/match — the batch read
+	// skips it), custom codecs, omission, ignored fields, and per-field
+	// endian/encoding overrides.
+	for _, opt := range []string{"ignore", "omittable", "valueof", "const", "range", "match", "codec", "encoding", "endian"} {
+		if _, has := pt.options[opt]; has {
+			return 0, false
+		}
+	}
+	goType := getGoTypeName(f.Type)
+	if strings.HasPrefix(goType, "*") {
+		return 0, false
+	}
+	return scalarWidth(getEffectiveBinaryType(pt.binaryType, goType))
+}
+
+// scalarRunEnd returns the index just past the maximal run of batchable scalar
+// fields starting at i.
+func scalarRunEnd(flds []*ast.Field, i int, structEnc string) int {
+	j := i
+	for j < len(flds) {
+		if _, ok := cgFieldBatchable(flds[j], structEnc); !ok {
+			break
+		}
+		j++
+	}
+	return j
+}
+
+// batchTotalWidth sums the wire widths of a batchable run.
+func batchTotalWidth(flds []*ast.Field, structEnc string) int {
+	total := 0
+	for _, f := range flds {
+		w, _ := cgFieldBatchable(f, structEnc)
+		total += w
+	}
+	return total
+}
+
+// generateScalarFieldBatchWrite emits one shared buffer filled by per-field
+// order.PutUintN at fixed offsets, then a single w.Write — replacing N per-field
+// PutUintN+Write pairs. Byte-identical to the per-field path.
+func (g *Generator) generateScalarFieldBatchWrite(buf *bytes.Buffer, flds []*ast.Field, structEnc string) {
+	fmt.Fprintf(buf, "\t{\n\t\tsbuf := make([]byte, %d)\n", batchTotalWidth(flds, structEnc))
+	off := 0
+	for _, f := range flds {
+		w, _ := cgFieldBatchable(f, structEnc)
+		goType := getGoTypeName(f.Type)
+		binType := getEffectiveBinaryType(parseFieldTag(f.Tag).binaryType, goType)
+		acc := "s." + f.Names[0].Name
+		switch {
+		case w == 1:
+			fmt.Fprintf(buf, "\t\tsbuf[%d] = byte(%s)\n", off, acc)
+		case binType == "float32":
+			fmt.Fprintf(buf, "\t\torder.PutUint32(sbuf[%d:%d], math.Float32bits(float32(%s)))\n", off, off+4, acc)
+		case binType == "float64":
+			fmt.Fprintf(buf, "\t\torder.PutUint64(sbuf[%d:%d], math.Float64bits(float64(%s)))\n", off, off+8, acc)
+		case w == 2:
+			fmt.Fprintf(buf, "\t\torder.PutUint16(sbuf[%d:%d], uint16(%s))\n", off, off+2, acc)
+		case w == 4:
+			fmt.Fprintf(buf, "\t\torder.PutUint32(sbuf[%d:%d], uint32(%s))\n", off, off+4, acc)
+		case w == 8:
+			fmt.Fprintf(buf, "\t\torder.PutUint64(sbuf[%d:%d], uint64(%s))\n", off, off+8, acc)
+		}
+		off += w
+	}
+	buf.WriteString("\t\tm, err = w.Write(sbuf)\n\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n\t}\n")
+}
+
+// generateScalarFieldBatchRead emits a single io.ReadFull into a shared buffer,
+// then per-field order.UintN decode at fixed offsets — replacing N per-field reads.
+func (g *Generator) generateScalarFieldBatchRead(buf *bytes.Buffer, flds []*ast.Field, structEnc string) {
+	fmt.Fprintf(buf, "\t{\n\t\tsbuf := make([]byte, %d)\n", batchTotalWidth(flds, structEnc))
+	buf.WriteString("\t\tm, err = io.ReadFull(r, sbuf)\n\t\tn += m\n\t\tif err != nil {\n\t\t\treturn n, err\n\t\t}\n")
+	off := 0
+	for _, f := range flds {
+		w, _ := cgFieldBatchable(f, structEnc)
+		goType := getGoTypeName(f.Type)
+		binType := getEffectiveBinaryType(parseFieldTag(f.Tag).binaryType, goType)
+		dst := "s." + f.Names[0].Name
+		switch {
+		case w == 1:
+			fmt.Fprintf(buf, "\t\t%s = %s(sbuf[%d])\n", dst, goType, off)
+		case binType == "float32":
+			fmt.Fprintf(buf, "\t\t%s = %s(math.Float32frombits(order.Uint32(sbuf[%d:%d])))\n", dst, goType, off, off+4)
+		case binType == "float64":
+			fmt.Fprintf(buf, "\t\t%s = %s(math.Float64frombits(order.Uint64(sbuf[%d:%d])))\n", dst, goType, off, off+8)
+		case w == 2:
+			fmt.Fprintf(buf, "\t\t%s = %s(order.Uint16(sbuf[%d:%d]))\n", dst, goType, off, off+2)
+		case w == 4:
+			fmt.Fprintf(buf, "\t\t%s = %s(order.Uint32(sbuf[%d:%d]))\n", dst, goType, off, off+4)
+		case w == 8:
+			fmt.Fprintf(buf, "\t\t%s = %s(order.Uint64(sbuf[%d:%d]))\n", dst, goType, off, off+8)
+		}
+		off += w
+	}
+	buf.WriteString("\t}\n")
+}
+
 func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.StructType) error {
 	// Resolve the type's byte order. A struct-level `_` sentinel declaration wins;
 	// otherwise the -endian flag supplies the order baked into the no-arg stdlib
@@ -1087,10 +1210,14 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	var writeBody bytes.Buffer
 	if err := func() error {
 		buf := &writeBody
-		for _, field := range st.Fields.List {
-			if len(field.Names) == 0 || field.Names[0].Name == "_" {
+		flds := emittableFields(st)
+		for fi := 0; fi < len(flds); fi++ {
+			if rj := scalarRunEnd(flds, fi, structEnc); rj-fi >= 2 {
+				g.generateScalarFieldBatchWrite(buf, flds[fi:rj], structEnc)
+				fi = rj - 1
 				continue
 			}
+			field := flds[fi]
 			fieldName := field.Names[0].Name
 			goType := getGoTypeName(field.Type)
 			parsedTag := parseFieldTag(field.Tag)
@@ -1177,10 +1304,14 @@ func (g *Generator) generateMethods(buf *bytes.Buffer, typeName string, st *ast.
 	var readBody bytes.Buffer
 	if err := func() error {
 		buf := &readBody
-		for _, field := range st.Fields.List {
-			if len(field.Names) == 0 || field.Names[0].Name == "_" {
+		flds := emittableFields(st)
+		for fi := 0; fi < len(flds); fi++ {
+			if rj := scalarRunEnd(flds, fi, structEnc); rj-fi >= 2 {
+				g.generateScalarFieldBatchRead(buf, flds[fi:rj], structEnc)
+				fi = rj - 1
 				continue
 			}
+			field := flds[fi]
 			fieldName := field.Names[0].Name
 			goType := getGoTypeName(field.Type)
 			parsedTag := parseFieldTag(field.Tag)

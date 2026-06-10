@@ -271,6 +271,14 @@ vs `simd_fallback.go`).
   wire width (e.g. `[]int` tagged `int32` is excluded); the result is byte-identical
   to the default path, so this is a performance knob, never a wire-format change.
 
+A related codegen optimization applies to **scalar struct fields** (not slices): a
+run of ≥2 contiguous plain fixed-width scalar fields is coalesced into one shared
+buffer + a single `Write` (decode: one `ReadFull` + per-field parse), instead of one
+io call per field. A run is broken by any field needing per-field handling
+(`valueof`/`const`/`range`/`match`/`codec`/`omittable`, an array, or a per-field
+endian/encoding override — these must stay individually emitted, e.g. so decode
+validation still fires). Always on, no `unsafe`, byte-identical to the per-field path.
+
 ---
 
 ## 3. Extension Protocol (Sync Checklist)

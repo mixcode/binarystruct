@@ -205,19 +205,16 @@ func (s *Item) WriteBinary(w io.Writer, order binarystruct.ByteOrder) (int, erro
 // WriteBinaryWithMarshaler implements binarystruct.MarshalerContextWriter.
 func (s *Item) WriteBinaryWithMarshaler(ms *binarystruct.Marshaler, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {
 	order = binarystruct.LittleEndian
-	var tmp [8]byte
 	var m int
-	order.PutUint32(tmp[:4], uint32(s.A))
-	m, err = w.Write(tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint16(tmp[:2], uint16(s.B))
-	m, err = w.Write(tmp[:2])
-	n += m
-	if err != nil {
-		return n, err
+	{
+		sbuf := make([]byte, 6)
+		order.PutUint32(sbuf[0:4], uint32(s.A))
+		order.PutUint16(sbuf[4:6], uint16(s.B))
+		m, err = w.Write(sbuf)
+		n += m
+		if err != nil {
+			return n, err
+		}
 	}
 	return n, nil
 }
@@ -230,19 +227,16 @@ func (s *Item) ReadBinary(r io.Reader, order binarystruct.ByteOrder) (int, error
 // ReadBinaryWithMarshaler implements binarystruct.MarshalerContextReader.
 func (s *Item) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {
 	order = binarystruct.LittleEndian
-	var tmp [8]byte
 	var m int
-	m, err = io.ReadFull(r, tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
+	{
+		sbuf := make([]byte, 6)
+		m, err = io.ReadFull(r, sbuf)
+		n += m
+		if err != nil {
+			return n, err
+		}
+		s.A = uint32(order.Uint32(sbuf[0:4]))
+		s.B = uint16(order.Uint16(sbuf[4:6]))
 	}
-	s.A = uint32(order.Uint32(tmp[:4]))
-	m, err = io.ReadFull(r, tmp[:2])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.B = uint16(order.Uint16(tmp[:2]))
 	return n, nil
 }

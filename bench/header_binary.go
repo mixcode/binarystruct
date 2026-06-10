@@ -39,67 +39,24 @@ func (s *Header) WriteBinary(w io.Writer, order binarystruct.ByteOrder) (int, er
 // WriteBinaryWithMarshaler implements binarystruct.MarshalerContextWriter.
 func (s *Header) WriteBinaryWithMarshaler(ms *binarystruct.Marshaler, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {
 	order = binarystruct.LittleEndian
-	var tmp [8]byte
 	var m int
-	tmp[0] = byte(s.A)
-	m, err = w.Write(tmp[:1])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	tmp[0] = byte(s.B)
-	m, err = w.Write(tmp[:1])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint16(tmp[:2], uint16(s.C))
-	m, err = w.Write(tmp[:2])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint16(tmp[:2], uint16(s.D))
-	m, err = w.Write(tmp[:2])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint32(tmp[:4], uint32(s.E))
-	m, err = w.Write(tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint32(tmp[:4], uint32(s.F))
-	m, err = w.Write(tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint64(tmp[:8], uint64(s.G))
-	m, err = w.Write(tmp[:8])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint64(tmp[:8], uint64(s.H))
-	m, err = w.Write(tmp[:8])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint32(tmp[:4], math.Float32bits(float32(s.I)))
-	m, err = w.Write(tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint64(tmp[:8], math.Float64bits(float64(s.J)))
-	m, err = w.Write(tmp[:8])
-	n += m
-	if err != nil {
-		return n, err
+	{
+		sbuf := make([]byte, 42)
+		sbuf[0] = byte(s.A)
+		sbuf[1] = byte(s.B)
+		order.PutUint16(sbuf[2:4], uint16(s.C))
+		order.PutUint16(sbuf[4:6], uint16(s.D))
+		order.PutUint32(sbuf[6:10], uint32(s.E))
+		order.PutUint32(sbuf[10:14], uint32(s.F))
+		order.PutUint64(sbuf[14:22], uint64(s.G))
+		order.PutUint64(sbuf[22:30], uint64(s.H))
+		order.PutUint32(sbuf[30:34], math.Float32bits(float32(s.I)))
+		order.PutUint64(sbuf[34:42], math.Float64bits(float64(s.J)))
+		m, err = w.Write(sbuf)
+		n += m
+		if err != nil {
+			return n, err
+		}
 	}
 	return n, nil
 }
@@ -112,68 +69,25 @@ func (s *Header) ReadBinary(r io.Reader, order binarystruct.ByteOrder) (int, err
 // ReadBinaryWithMarshaler implements binarystruct.MarshalerContextReader.
 func (s *Header) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {
 	order = binarystruct.LittleEndian
-	var tmp [8]byte
 	var m int
-	m, err = io.ReadFull(r, tmp[:1])
-	n += m
-	if err != nil {
-		return n, err
+	{
+		sbuf := make([]byte, 42)
+		m, err = io.ReadFull(r, sbuf)
+		n += m
+		if err != nil {
+			return n, err
+		}
+		s.A = uint8(sbuf[0])
+		s.B = int8(sbuf[1])
+		s.C = uint16(order.Uint16(sbuf[2:4]))
+		s.D = int16(order.Uint16(sbuf[4:6]))
+		s.E = uint32(order.Uint32(sbuf[6:10]))
+		s.F = int32(order.Uint32(sbuf[10:14]))
+		s.G = uint64(order.Uint64(sbuf[14:22]))
+		s.H = int64(order.Uint64(sbuf[22:30]))
+		s.I = float32(math.Float32frombits(order.Uint32(sbuf[30:34])))
+		s.J = float64(math.Float64frombits(order.Uint64(sbuf[34:42])))
 	}
-	s.A = uint8(tmp[0])
-	m, err = io.ReadFull(r, tmp[:1])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.B = int8(tmp[0])
-	m, err = io.ReadFull(r, tmp[:2])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.C = uint16(order.Uint16(tmp[:2]))
-	m, err = io.ReadFull(r, tmp[:2])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.D = int16(order.Uint16(tmp[:2]))
-	m, err = io.ReadFull(r, tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.E = uint32(order.Uint32(tmp[:4]))
-	m, err = io.ReadFull(r, tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.F = int32(order.Uint32(tmp[:4]))
-	m, err = io.ReadFull(r, tmp[:8])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.G = uint64(order.Uint64(tmp[:8]))
-	m, err = io.ReadFull(r, tmp[:8])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.H = int64(order.Uint64(tmp[:8]))
-	m, err = io.ReadFull(r, tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.I = float32(math.Float32frombits(order.Uint32(tmp[:4])))
-	m, err = io.ReadFull(r, tmp[:8])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.J = float64(math.Float64frombits(order.Uint64(tmp[:8])))
 	return n, nil
 }
 
@@ -311,17 +225,15 @@ func (s *Record) WriteBinaryWithMarshaler(ms *binarystruct.Marshaler, w io.Write
 			return n, err
 		}
 	}
-	order.PutUint32(tmp[:4], uint32(s.Seq))
-	m, err = w.Write(tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint16(tmp[:2], uint16(s.Flags))
-	m, err = w.Write(tmp[:2])
-	n += m
-	if err != nil {
-		return n, err
+	{
+		sbuf := make([]byte, 6)
+		order.PutUint32(sbuf[0:4], uint32(s.Seq))
+		order.PutUint16(sbuf[4:6], uint16(s.Flags))
+		m, err = w.Write(sbuf)
+		n += m
+		if err != nil {
+			return n, err
+		}
 	}
 	order.PutUint32(tmp[:4], uint32((len(s.Payload))))
 	m, err = w.Write(tmp[:4])
@@ -374,18 +286,16 @@ func (s *Record) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader
 			return n, err
 		}
 	}
-	m, err = io.ReadFull(r, tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
+	{
+		sbuf := make([]byte, 6)
+		m, err = io.ReadFull(r, sbuf)
+		n += m
+		if err != nil {
+			return n, err
+		}
+		s.Seq = uint32(order.Uint32(sbuf[0:4]))
+		s.Flags = uint16(order.Uint16(sbuf[4:6]))
 	}
-	s.Seq = uint32(order.Uint32(tmp[:4]))
-	m, err = io.ReadFull(r, tmp[:2])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.Flags = uint16(order.Uint16(tmp[:2]))
 	m, err = io.ReadFull(r, tmp[:4])
 	n += m
 	if err != nil {
@@ -433,25 +343,17 @@ func (s *Inner) WriteBinary(w io.Writer, order binarystruct.ByteOrder) (int, err
 // WriteBinaryWithMarshaler implements binarystruct.MarshalerContextWriter.
 func (s *Inner) WriteBinaryWithMarshaler(ms *binarystruct.Marshaler, w io.Writer, order binarystruct.ByteOrder) (n int, err error) {
 	order = binarystruct.LittleEndian
-	var tmp [8]byte
 	var m int
-	order.PutUint32(tmp[:4], uint32(s.X))
-	m, err = w.Write(tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	order.PutUint16(tmp[:2], uint16(s.Y))
-	m, err = w.Write(tmp[:2])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	tmp[0] = byte(s.Z)
-	m, err = w.Write(tmp[:1])
-	n += m
-	if err != nil {
-		return n, err
+	{
+		sbuf := make([]byte, 7)
+		order.PutUint32(sbuf[0:4], uint32(s.X))
+		order.PutUint16(sbuf[4:6], uint16(s.Y))
+		sbuf[6] = byte(s.Z)
+		m, err = w.Write(sbuf)
+		n += m
+		if err != nil {
+			return n, err
+		}
 	}
 	return n, nil
 }
@@ -464,26 +366,18 @@ func (s *Inner) ReadBinary(r io.Reader, order binarystruct.ByteOrder) (int, erro
 // ReadBinaryWithMarshaler implements binarystruct.MarshalerContextReader.
 func (s *Inner) ReadBinaryWithMarshaler(ms *binarystruct.Marshaler, r io.Reader, order binarystruct.ByteOrder) (n int, err error) {
 	order = binarystruct.LittleEndian
-	var tmp [8]byte
 	var m int
-	m, err = io.ReadFull(r, tmp[:4])
-	n += m
-	if err != nil {
-		return n, err
+	{
+		sbuf := make([]byte, 7)
+		m, err = io.ReadFull(r, sbuf)
+		n += m
+		if err != nil {
+			return n, err
+		}
+		s.X = uint32(order.Uint32(sbuf[0:4]))
+		s.Y = uint16(order.Uint16(sbuf[4:6]))
+		s.Z = uint8(sbuf[6])
 	}
-	s.X = uint32(order.Uint32(tmp[:4]))
-	m, err = io.ReadFull(r, tmp[:2])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.Y = uint16(order.Uint16(tmp[:2]))
-	m, err = io.ReadFull(r, tmp[:1])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	s.Z = uint8(tmp[0])
 	return n, nil
 }
 

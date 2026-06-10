@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- **Codegen: contiguous fixed-width scalar fields are batched** into one shared
+  buffer + a single `Write` (decode: one `ReadFull` + per-field parse), instead of
+  one `Write`/`ReadFull` per field. A run of ≥2 plain scalar fields (no
+  `valueof`/`const`/`range`/`match`/`codec`/`omittable`/array/per-field endian) is
+  coalesced; runs are broken by any such field. **Byte-identical** to the
+  per-field path (no `unsafe`, fully portable) — the win is fewer io calls, not
+  fewer allocations. Measured ~1.5× Marshal and Unmarshal on a 10-scalar header.
+  Always on; no flag. (TODO #2 from the 0.3.2 codegen profiling pass.)
+
 ### Changed
 - **Codegen: the "no byte order" error now names an ordered parent.** When a type
   with no declared order is generated in isolation but is referenced as a field by

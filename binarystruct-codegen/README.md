@@ -2,6 +2,8 @@
 
 Static code generator for [binarystruct](https://github.com/mixcode/binarystruct). Generates optimized `MarshalBinary` / `UnmarshalBinary` methods from struct `binary:"..."` tags, eliminating runtime reflection overhead.
 
+> **AI agents:** read [llms-full.txt](llms-full.txt) for the selection surface, invocation contract, traps, and the `go:generate` recipe ([llms.txt](llms.txt) indexes it).
+
 ## Install
 
 ```bash

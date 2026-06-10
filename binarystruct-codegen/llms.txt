@@ -1,0 +1,10 @@
+# binarystruct-codegen
+
+Static code generator (CLI) for [binarystruct](https://github.com/mixcode/binarystruct): compiles `binary:"..."` struct tags into static `MarshalBinary`/`UnmarshalBinary` (+ `AppendBinary`/`WriteBinary`/`ReadBinary`) methods, eliminating runtime reflection. Usually wired via `//go:generate`. A separate nested Go module.
+
+## Start here
+- [llms-full.txt](llms-full.txt) — the agent manual: selection surface (use when / not for), invocation contract + flags, output/exit codes, traps, and the `go:generate` recipe.
+- [README.md](README.md) — human guide: install, usage, full flag table, examples, supported tag features, and codegen limitations.
+
+## Parent library
+- [Struct tag reference](../STRUCT_TAGS.md) · [Specification (ground truth)](../SPECIFICATION.md) · [Library manual](../llms-full.txt) · [Repo root map](../llms.txt)

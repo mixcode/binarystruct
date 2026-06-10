@@ -106,6 +106,7 @@ custom valueof evaluators such as valueof=CRC32(...)), context-aware methods
 Marshaler to pass through encodings, codecs, and registered valueof evaluators.
 
 See https://github.com/mixcode/binarystruct for the full library documentation.
+AI agents: see llms-full.txt in this module for the selection surface and traps.
 `)
 }
 

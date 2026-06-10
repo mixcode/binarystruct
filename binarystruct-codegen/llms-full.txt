@@ -1,0 +1,127 @@
+# AI and LLM Agent Instructions for binarystruct-codegen
+
+This file gives an LLM agent the selection surface, invocation contract, expected
+behavior, and known traps needed to drive binarystruct-codegen correctly on the
+first try.
+
+> **Source of truth:** the flag definitions in `main.go` and the generation
+> behavior in `generator.go`, plus the parent library's ground-truth
+> [SPECIFICATION.md](../SPECIFICATION.md). This manual is *derived* — if they
+> disagree, the code wins, and `binarystruct-codegen -h` is authoritative for flags.
+
+## 1. Selection surface — use when / not for
+
+- **Use when:** you have Go structs annotated with binarystruct `binary:"..."` tags
+  and want **static, (near-)reflection-free** marshal/unmarshal methods generated at
+  build time — typically wired with a `//go:generate` directive for production hot
+  paths. The generated methods implement `encoding.BinaryMarshaler`/`Unmarshaler`
+  (+ `AppendBinary`, and binarystruct's `WriteBinary`/`ReadBinary`), and the
+  binarystruct runtime auto-detects and fast-paths to them.
+- **Also does:** export a struct's binary layout as JSON (`-json`), for schemas or
+  non-Go clients; emits context-aware `...WithMarshaler` methods automatically when
+  a struct uses text encodings / custom codecs / custom `valueof`.
+- **Not for:** defining the tag syntax or doing runtime (un)marshalling — that's the
+  [binarystruct library](https://github.com/mixcode/binarystruct) itself (this tool
+  *compiles* its tags; the generated code calls into it). Not a general Go codegen
+  tool. Not for structs using the runtime-only shapes codegen excludes (below) —
+  those fail loud; use the runtime interpreter for them.
+
+## 2. Invocation contract
+
+Installed as a **separate nested Go module** (its own `go.mod`; Model A — files ship
+with the module):
+
+```
+go install github.com/mixcode/binarystruct/binarystruct-codegen@latest
+# pin a release with the PATH-PREFIXED nested-module tag (not a bare @vX.Y.Z):
+go install github.com/mixcode/binarystruct/binarystruct-codegen@binarystruct-codegen/v0.3.5
+```
+
+The binary lands in `$GOBIN` (or `$(go env GOPATH)/bin`); ensure it's on `PATH`.
+
+```
+binarystruct-codegen -type TypeName[,TypeName2,...] [flags] [directory]
+binarystruct-codegen -h          # usage banner (flag.Usage)
+```
+
+`[directory]` is the Go package dir containing the structs (default `.`).
+
+| Flag | Meaning (default) | Effect |
+| :-- | :-- | :-- |
+| `-type` | comma-separated struct names (**required**) | — |
+| `-endian big\|little` | **fallback** byte order baked into the no-arg methods; **optional** when the struct declares its own via a blank `_ struct{}` `binary:"endian=…"` field (which wins). Not needed with `-json`. | — |
+| `-output` | output filename (default `<first_type>_binary.go`, or `<first_type>.json` with `-json`) | **writes** |
+| `-json` | emit JSON layout metadata instead of Go code | **writes** |
+| `-tests` | include `*_test.go` when parsing the package | — |
+| `-no-validate` | strip ALL decode-time validation from generated readers (`const`/`range`/`match` + custom-`valueof` recompute); default off (validates everything, matching the runtime) | — |
+| `-unsafe-bulk` | raw-memory bulk path (via `unsafe`) for fixed-width scalar arrays/slices whose Go element width matches the wire width; byte-identical, SIMD-accelerated under `-tags experiment_simd`; default off | — |
+
+## 3. Auth / environment prerequisites (headless use)
+
+**None.** No network, no tokens, no config. It reads local Go source and writes one
+file. Non-interactive — it never prompts, so it is safe under `go generate` / CI.
+
+## 4. Output, errors, and side effects
+
+- **Output:** on success prints `Generated binarystruct methods for <types> -> <file>`
+  (or the JSON variant) to **stdout**. There is no `--json`-status / quiet mode — the
+  signal is the exit code + the written file.
+- **Exit codes:** `0` on success; `1` on any failure (missing `-type` prints the usage
+  banner then exits 1; generation/IO errors print `binarystruct-codegen: <error>` to
+  **stderr** then exit 1). Errors are descriptive — they name the type/field and the
+  fix (e.g. a no-byte-order error names an ordered parent that references the type).
+- **Side effects (every run mutates the filesystem):** it **creates or overwrites**
+  `<first_type>_binary.go` (or `.json`) in the target directory — a
+  `// Code generated … DO NOT EDIT.` file. There is **no dry-run**; output is
+  deterministic, so re-running is safe but will overwrite hand edits. Commit the
+  generated file.
+
+## 5. Traps (where an agent will otherwise guess wrong)
+
+- **Pin with the path-prefixed tag.** `@binarystruct-codegen/vX.Y.Z`, *not* a bare
+  `@vX.Y.Z` — the parent `binarystruct` module's tag does not select this tool.
+- **Generated code may need a `*Marshaler`.** A struct using `encoding=`, `codec=`, or
+  a custom `valueof=NAME(...)` evaluator **must** be driven via
+  `WriteBinaryWithMarshaler` / `ReadBinaryWithMarshaler` with a configured Marshaler
+  (register codecs/encodings/evaluators on it). The no-arg `MarshalBinary` /
+  `UnmarshalBinary` pass a `nil` Marshaler and return a clear error for those fields.
+- **`-endian` is the fallback, not required.** If the struct declares its order via
+  the `_ struct{}` sentinel, omit `-endian`. Generation fails loud only when *neither*
+  the struct nor the flag gives an order. Because each `-type` is processed in
+  isolation, a nested type that inherits its order from a parent at runtime needs
+  `-endian` (or its own declaration) when generated on its own — the error names the
+  ordered parent.
+- **Some shapes are intentionally runtime-only (fail loud → use the interpreter):**
+  multidimensional arrays over a non-scalar leaf, a custom `valueof` over a
+  nested-struct arg, struct-level `endian=inverse` or order/encoding inheritance via
+  embedding, and a self-referential `valueof=bytelen(F)` cycle. This is by design; the
+  binarystruct runtime handles all of them.
+
+## 6. Recipe (the common real-world invocation)
+
+Wire generation into the package with a directive, then `go generate`:
+
+```go
+//go:generate binarystruct-codegen -type Packet,Header -endian big
+type Packet struct {
+	_     struct{} `binary:"endian=big"` // declares order; -endian then optional
+	Magic uint32   `binary:"uint32,const=0x504B0304"`
+	Body  []byte   `binary:"[16]byte"`
+}
+```
+
+```
+go generate ./...   # produces packet_binary.go; commit it
+```
+
+Use `-endian big|little` only as a fallback for structs that don't declare their own
+order; prefer declaring it on the struct.
+
+## 7. Contributor note
+
+Modifying this generator? See the repo-root [AGENTS.txt](../AGENTS.txt). The single
+most important invariant: a tag feature is implemented in **three parallel execution
+paths that must stay byte-identical** — the safe reflection path
+(`marshal.go`/`unmarshal.go`), the unsafe path (`unsafe_io.go`), and this generator
+(`generator.go`). A change to one is a silent bug unless mirrored in all three; add
+tests in every mode.

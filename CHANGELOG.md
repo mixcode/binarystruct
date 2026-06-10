@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build/test/install notes, so an agent landing at the repo root sees both
   independently-published modules and how to work with each. The library index is
   unchanged. (From an `agent-friendly-guide` monorepo survey.)
+- **`binarystruct-codegen`: dedicated agent manual.** The CLI module now ships its
+  own `llms.txt` + CLI-flavored `llms-full.txt` (selection surface, flag table with
+  side-effect markers, exit codes, traps, the `go:generate` recipe); its README and
+  `--help` banner point to it. Previously the module shipped only a README with no
+  agent entry point.
 
 ## [0.3.5] - 2026-06-10
 

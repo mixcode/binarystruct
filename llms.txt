@@ -21,7 +21,7 @@ This repo is a Go workspace of **two independently-published modules** — consu
 | Module | Path | Type | Manual | Agent-ready |
 | :-- | :-- | :-- | :-- | :-- |
 | `github.com/mixcode/binarystruct` | [`.`](.) | library (primary) | this file + [llms-full.txt](llms-full.txt) | ✅ ready |
-| `github.com/mixcode/binarystruct/binarystruct-codegen` | [`binarystruct-codegen/`](binarystruct-codegen/) | CLI (code generator) | [README.md](binarystruct-codegen/README.md) | ⚠️ partial — solid README, but no own `llms.txt` and the README has no agent-manual pointer |
+| `github.com/mixcode/binarystruct/binarystruct-codegen` | [`binarystruct-codegen/`](binarystruct-codegen/) | CLI (code generator) | [llms.txt](binarystruct-codegen/llms.txt) + [llms-full.txt](binarystruct-codegen/llms-full.txt) | ✅ ready |
 
 **Working in this workspace**
 - Workspace manager: `go.work` (root module `.` + `./binarystruct-codegen`).

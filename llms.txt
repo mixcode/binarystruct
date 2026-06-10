@@ -13,3 +13,19 @@ An automatic type-converting binary data marshaller/unmarshaller for Go structs 
 - [Technical Specification](SPECIFICATION.md) — Ground-truth specification for runtime interpreter mechanics and compiler behavior.
 - [Static Code Generator (binarystruct-codegen)](binarystruct-codegen/README.md) — Standalone CLI tool details to compile tags into static, zero-allocation Go methods.
 - [Migration Guide (→ v0.3.0)](MIGRATION.md) — Upgrade path from 0.2.x: the Marshaler/Codec renames, struct-declared byte order, and the order-free API.
+
+## Workspace (modules)
+
+This repo is a Go workspace of **two independently-published modules** — consumers `go get`/`go install` the one they need (each resolves on its own `go.mod`). This module (`.`) is the primary one; the entry above is its manual. The map:
+
+| Module | Path | Type | Manual | Agent-ready |
+| :-- | :-- | :-- | :-- | :-- |
+| `github.com/mixcode/binarystruct` | [`.`](.) | library (primary) | this file + [llms-full.txt](llms-full.txt) | ✅ ready |
+| `github.com/mixcode/binarystruct/binarystruct-codegen` | [`binarystruct-codegen/`](binarystruct-codegen/) | CLI (code generator) | [README.md](binarystruct-codegen/README.md) | ⚠️ partial — solid README, but no own `llms.txt` and the README has no agent-manual pointer |
+
+**Working in this workspace**
+- Workspace manager: `go.work` (root module `.` + `./binarystruct-codegen`).
+- Test one module: `go test ./...` (root) / `cd binarystruct-codegen && go test ./...`. Full matrix incl. the safe path + codegen module: `make test`.
+- Install the codegen CLI: `go install github.com/mixcode/binarystruct/binarystruct-codegen@latest` (pin a release with the path-prefixed tag `@binarystruct-codegen/vX.Y.Z`).
+- Ground truth / repo-wide rules: [SPECIFICATION.md](SPECIFICATION.md) and [AGENTS.txt](AGENTS.txt) (the "three parallel paths must stay byte-identical" invariant + extension checklist).
+- Build-from-root trap: none — each module builds standalone; `binarystruct-codegen` is a separate `go.mod` (not covered by the root module, no `replace`), so pin **its own** tag when installing a release.

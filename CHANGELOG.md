@@ -5,6 +5,15 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+- **`llms.txt`: added a `## Workspace (modules)` map** — a two-row table (the root
+  `binarystruct` library and the `binarystruct-codegen` CLI module) plus
+  build/test/install notes, so an agent landing at the repo root sees both
+  independently-published modules and how to work with each. The library index is
+  unchanged. (From an `agent-friendly-guide` monorepo survey.)
+
 ## [0.3.5] - 2026-06-10
 
 ### Performance
